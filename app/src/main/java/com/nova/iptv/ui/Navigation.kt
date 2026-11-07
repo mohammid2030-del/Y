@@ -87,10 +87,10 @@ fun NovaNavHost(startDestination: String) {
             )
         }
         composable(Routes.MOVIE, arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-            MovieDetailScreen(onBack = { nav.popBackStack() })
+            MovieDetailScreen(onBack = { nav.popBackStack() }, onOpenMovie = { nav.navigate(Routes.movie(it)) })
         }
         composable(Routes.SERIES, arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-            SeriesDetailScreen(onBack = { nav.popBackStack() })
+            SeriesDetailScreen(onBack = { nav.popBackStack() }, onOpenSeries = { nav.navigate(Routes.series(it)) })
         }
         composable(Routes.EPG) {
             EpgScreen(onBack = { nav.popBackStack() })

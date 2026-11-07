@@ -92,6 +92,13 @@ class LiveViewModel @Inject constructor(
         }
         .cachedIn(viewModelScope)
 
+    val lastWatched: StateFlow<ContentEntity?> = subId
+        .flatMapLatest { content.recent(it, ContentType.LIVE, 1) }
+        .map { l -> l.firstOrNull()?.asContent() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val gridMode = MutableStateFlow(false)
+
     private val _now = MutableStateFlow<Map<String, EpgProgramEntity>>(emptyMap())
     val nowPlaying: StateFlow<Map<String, EpgProgramEntity>> = _now
 
@@ -155,6 +162,23 @@ abstract class VodViewModel(
         .flatMapLatest { content.continueWatching(it) }
         .map { l -> l.filter { it.type == type } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Hero carousel: newest titles that have artwork. */
+    val featured: StateFlow<List<ContentEntity>> = subId
+        .flatMapLatest { content.recentlyAdded(it, type, 40) }
+        .map { l -> l.filter { it.logo.isNotBlank() }.take(8) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentRow: StateFlow<List<ContentEntity>> = subId
+        .flatMapLatest { content.recentlyAdded(it, type, 20) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Items of one category row (collected only while the row is on screen). */
+    fun row(categoryId: String): Flow<List<ContentEntity>> =
+        subId.flatMapLatest { content.row(it, type, categoryId, 20) }
+
+    fun count(categoryId: String): Flow<Int> =
+        subId.flatMapLatest { content.categoryCount(it, type, categoryId) }
 
     fun select(category: String) {
         selected.value = category

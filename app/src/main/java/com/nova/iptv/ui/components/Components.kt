@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -113,44 +116,112 @@ fun PosterCard(
     subtitle: String = "",
     progress: Float? = null,
     favorite: Boolean = false,
+    rating: String = "",
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    Column(
-        modifier
-            .novaFocus(shape)
-            .clip(shape)
-            .clickable(onClick = onClick)
-            .padding(4.dp)
-    ) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier.padding(4.dp)) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(12.dp))
+                .novaFocus(shape)
+                .shadow(10.dp, shape, clip = false)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable(onClick = onClick)
         ) {
             NetImage(image, Modifier.fillMaxSize())
+            // soft vignette so badges stay readable on any artwork
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.35f), 0.25f to Color.Transparent,
+                        0.7f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f),
+                    )
+                )
+            )
+            if (rating.isNotBlank()) {
+                GlassChip(
+                    "★ " + rating.take(3),
+                    Modifier.align(Alignment.TopStart).padding(6.dp),
+                )
+            }
             if (favorite) {
                 Icon(
-                    Icons.Filled.Star, null, tint = Color(0xFFFFC857),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(18.dp)
+                    Icons.Filled.Favorite, null, tint = Color(0xFFFF4D6D),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(18.dp)
                 )
             }
             if (progress != null) {
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
-                )
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(8.dp)
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.25f))
+                ) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(NovaGradient))
+                }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
         if (subtitle.isNotBlank()) {
             Text(
                 subtitle, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                modifier = Modifier.padding(horizontal = 2.dp),
             )
         }
+    }
+}
+
+/** Small translucent label used on top of artwork. */
+@Composable
+fun GlassChip(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = Color.White,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+    )
+}
+
+/** Pill-shaped category selector with a gradient when selected. */
+@Composable
+fun NovaChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(50)
+    Box(
+        modifier
+            .novaFocus(shape)
+            .clip(shape)
+            .then(
+                if (selected) Modifier.background(NovaGradient)
+                else Modifier
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+    ) {
+        Text(
+            text,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+        )
     }
 }
 

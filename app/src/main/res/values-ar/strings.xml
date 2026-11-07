@@ -33,7 +33,9 @@
     <string name="data_privacy">البيانات والخصوصية</string>
     <string name="delete">حذف</string>
     <string name="delete_subscription_q">حذف هذا الاشتراك؟</string>
+    <string name="details">التفاصيل</string>
     <string name="director">المخرج</string>
+    <string name="discover">اكتشف</string>
     <string name="edit_subscription">تعديل الاشتراك</string>
     <string name="empty_channels">لا توجد قنوات في هذا التصنيف</string>
     <string name="empty_content">لا يوجد محتوى هنا</string>
@@ -55,6 +57,7 @@
     <string name="export_desc">يحفظ الاشتراكات والمفضلة والإعدادات في ملف مشفر بعبارة مرور</string>
     <string name="export_settings">تصدير الإعدادات</string>
     <string name="favorite">مفضلة</string>
+    <string name="featured_new">جديد</string>
     <string name="field_epg_hint">اختياري. يتم اكتشاف دليل Xtream تلقائياً.</string>
     <string name="field_epg_url">رابط دليل البرامج (XMLTV)</string>
     <string name="field_m3u_url">رابط M3U / M3U8</string>
@@ -80,7 +83,9 @@
     <string name="low_end_desc">حركات أقل وتخزين مؤقت أصغر ودقة حتى 720p للأجهزة الضعيفة</string>
     <string name="low_end_mode">وضع الأجهزة الضعيفة</string>
     <string name="max_connections">الحد الأقصى للاتصالات: %1$d</string>
+    <string name="minutes_left">باقي %1$d د</string>
     <string name="minutes_n">%1$d دقيقة</string>
+    <string name="more_like_this">قد يعجبك أيضاً</string>
     <string name="move_down">تحريك لأسفل</string>
     <string name="move_up">تحريك لأعلى</string>
     <string name="msg_bad_passphrase">عبارة مرور خاطئة أو ملف غير صالح</string>
@@ -131,6 +136,8 @@
     <string name="search_prompt">اكتب حرفين على الأقل للبحث</string>
     <string name="season_n">الموسم %1$d</string>
     <string name="seconds_n">%1$d ثانية</string>
+    <string name="see_all">عرض الكل</string>
+    <string name="see_all_n">عرض الكل (%1$d)</string>
     <string name="set_pin">تعيين رمز PIN</string>
     <string name="settings">الإعدادات</string>
     <string name="show_advanced">خيارات متقدمة</string>
@@ -169,8 +176,11 @@
     <string name="type_xtream">Xtream Codes</string>
     <string name="uncategorized">أخرى</string>
     <string name="video_quality">جودة الفيديو</string>
+    <string name="view_grid">عرض كشبكة</string>
+    <string name="view_list">عرض كقائمة</string>
     <string name="watch_catchup">مشاهدة من الأرشيف</string>
     <string name="watch_live">مشاهدة مباشرة</string>
+    <string name="watch_now">شاهد الآن</string>
     <string name="welcome_tagline">اشتراكك بتنظيم أنيق. بث مباشر وأفلام ومسلسلات في مشغل واحد فاخر.</string>
     <string name="wrong_pin">رمز PIN غير صحيح</string>
 </resources>

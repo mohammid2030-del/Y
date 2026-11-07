@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -46,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nova.iptv.R
+import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.ContentType
 import com.nova.iptv.data.network.XEpisode
 import com.nova.iptv.data.repo.PlaybackRequest
@@ -67,7 +70,9 @@ import com.nova.iptv.ui.components.ErrorView
 import com.nova.iptv.ui.components.GradientBadge
 import com.nova.iptv.ui.components.LoadingView
 import com.nova.iptv.ui.components.NetImage
+import com.nova.iptv.ui.components.PosterCard
 import com.nova.iptv.ui.components.novaFocus
+import com.nova.iptv.ui.theme.NovaGradient
 
 @Composable
 private fun DetailHeader(
@@ -85,7 +90,8 @@ private fun DetailHeader(
     Box(Modifier.fillMaxWidth()) {
         NetImage(
             backdrop.ifBlank { poster },
-            Modifier.fillMaxWidth().aspectRatio(if (wide) 2.6f else 1.5f),
+            Modifier.fillMaxWidth().aspectRatio(if (wide) 2.6f else 1.5f)
+                .then(if (backdrop.isBlank()) Modifier.blur(26.dp) else Modifier),
         )
         Box(
             Modifier
@@ -131,7 +137,8 @@ private fun DetailHeader(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MovieDetailScreen(onBack: () -> Unit, vm: MovieDetailViewModel = hiltViewModel()) {
+fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: MovieDetailViewModel = hiltViewModel()) {
+    val similar by vm.similar.collectAsStateWithLifecycle()
     val item by vm.item.collectAsStateWithLifecycle()
     val history by vm.history.collectAsStateWithLifecycle()
     val fav by vm.isFavorite.collectAsStateWithLifecycle()
@@ -203,13 +210,36 @@ fun MovieDetailScreen(onBack: () -> Unit, vm: MovieDetailViewModel = hiltViewMod
                 modifier = Modifier.padding(16.dp),
             )
         }
+        if (similar.isNotEmpty()) {
+            SimilarRow(similar) { onOpenMovie(it.id) }
+        }
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun SimilarRow(list: List<ContentEntity>, onClick: (ContentEntity) -> Unit) {
+    Column(Modifier.padding(top = 20.dp)) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(4.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(NovaGradient))
+            Spacer(Modifier.width(10.dp))
+            Text(stringResource(R.string.more_like_this), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(list, key = { it.id }) { c ->
+                PosterCard(
+                    title = c.name, image = c.logo, subtitle = c.year, rating = c.rating,
+                    modifier = Modifier.width(118.dp), onClick = { onClick(c) },
+                )
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SeriesDetailScreen(onBack: () -> Unit, vm: SeriesDetailViewModel = hiltViewModel()) {
+fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm: SeriesDetailViewModel = hiltViewModel()) {
+    val similar by vm.similar.collectAsStateWithLifecycle()
     val item by vm.item.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val last by vm.lastWatched.collectAsStateWithLifecycle()
@@ -313,6 +343,9 @@ fun SeriesDetailScreen(onBack: () -> Unit, vm: SeriesDetailViewModel = hiltViewM
                     }
                 }
             }
+        }
+        if (similar.isNotEmpty()) {
+            item(key = "similar") { SimilarRow(similar) { onOpenSeries(it.id) } }
         }
     }
 }

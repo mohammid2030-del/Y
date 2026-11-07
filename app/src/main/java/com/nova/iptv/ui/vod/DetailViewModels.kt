@@ -57,6 +57,13 @@ class MovieDetailViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    val similar: StateFlow<List<ContentEntity>> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(emptyList<ContentEntity>())
+            else content.row(c.subscriptionId, ContentType.MOVIE, c.categoryId, 21).map { l -> l.filter { it.id != c.id }.take(20) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         viewModelScope.launch {
             val c = content.byId(id)
@@ -114,6 +121,13 @@ class SeriesDetailViewModel @Inject constructor(
             else content.favoriteKeys(c.subscriptionId).map { "${ContentType.SERIES}|${c.remoteId}" in it }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val similar: StateFlow<List<ContentEntity>> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(emptyList<ContentEntity>())
+            else content.row(c.subscriptionId, ContentType.SERIES, c.categoryId, 21).map { l -> l.filter { it.id != c.id }.take(20) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         load(false)

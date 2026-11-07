@@ -84,6 +84,9 @@ class ContentRepository @Inject constructor(
             }
         }.flow
 
+    fun row(subId: Long, type: String, categoryId: String, limit: Int = 20) = contentDao.observeRow(subId, type, categoryId, limit)
+    fun categoryCount(subId: Long, type: String, categoryId: String) = contentDao.observeCategoryCount(subId, type, categoryId)
+
     suspend fun byId(id: Long) = contentDao.byId(id)
     suspend fun byRemote(subId: Long, type: String, remoteId: String) = contentDao.byRemote(subId, type, remoteId)
     suspend fun search(subId: Long, query: String, type: String, categoryId: String) =

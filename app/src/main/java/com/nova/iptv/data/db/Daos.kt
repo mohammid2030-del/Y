@@ -93,6 +93,13 @@ interface ContentDao {
     )
     suspend fun search(subId: Long, type: String, categoryId: String, query: String): List<ContentEntity>
 
+    // ---- Catalog rows (small, limited queries composed lazily per visible row) ----
+    @Query("SELECT * FROM content WHERE subscriptionId = :subId AND type = :type AND categoryId = :categoryId ORDER BY sortOrder LIMIT :limit")
+    fun observeRow(subId: Long, type: String, categoryId: String, limit: Int): Flow<List<ContentEntity>>
+
+    @Query("SELECT COUNT(*) FROM content WHERE subscriptionId = :subId AND type = :type AND categoryId = :categoryId")
+    fun observeCategoryCount(subId: Long, type: String, categoryId: String): Flow<Int>
+
     // ---- Paged queries: only the visible rows are loaded, so 50k-item lists open instantly ----
     @Query("SELECT * FROM content WHERE subscriptionId = :subId AND type = :type AND categoryId = :categoryId ORDER BY sortOrder")
     fun pageByCategory(subId: Long, type: String, categoryId: String): PagingSource<Int, ContentEntity>
