@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Many IPTV providers only serve plain HTTP. Cleartext is allowed for media/playlists;
+     certificates are always validated against the system trust store for HTTPS
+     (user-installed CAs are NOT trusted). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

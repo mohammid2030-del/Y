@@ -1,0 +1,146 @@
+@file:OptIn(ExperimentalCoroutinesApi::class)
+
+package com.nova.iptv.ui.vod
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.nova.iptv.data.NovaException
+import com.nova.iptv.data.db.ContentEntity
+import com.nova.iptv.data.db.ContentType
+import com.nova.iptv.data.db.HistoryEntity
+import com.nova.iptv.data.db.SourceType
+import com.nova.iptv.data.network.XSeriesInfo
+import com.nova.iptv.data.network.XVodInfo
+import com.nova.iptv.data.repo.ContentRepository
+import com.nova.iptv.data.repo.SubscriptionRepository
+import com.nova.iptv.data.toNovaException
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class MovieDetailViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    private val content: ContentRepository,
+    private val subs: SubscriptionRepository,
+) : ViewModel() {
+    private val id: Long = savedState.get<Long>("id") ?: 0L
+    private val itemFlow = MutableStateFlow<ContentEntity?>(null)
+    val item: StateFlow<ContentEntity?> = itemFlow
+
+    var info by mutableStateOf<XVodInfo?>(null)
+        private set
+    var notFound by mutableStateOf(false)
+        private set
+
+    val history: StateFlow<HistoryEntity?> = itemFlow
+        .flatMapLatest { c -> if (c == null) flowOf<HistoryEntity?>(null) else content.movieHistory(c.subscriptionId, c.remoteId) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val isFavorite: StateFlow<Boolean> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(false)
+            else content.favoriteKeys(c.subscriptionId).map { "${ContentType.MOVIE}|${c.remoteId}" in it }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    init {
+        viewModelScope.launch {
+            val c = content.byId(id)
+            if (c == null) {
+                notFound = true; return@launch
+            }
+            itemFlow.value = c
+            val sub = subs.get(c.subscriptionId) ?: return@launch
+            info = content.vodInfo(sub, c.remoteId)
+        }
+    }
+
+    fun toggleFavorite() {
+        val c = itemFlow.value ?: return
+        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.MOVIE, c.remoteId, c.name, c.logo) }
+    }
+}
+
+@HiltViewModel
+class SeriesDetailViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    private val content: ContentRepository,
+    private val subs: SubscriptionRepository,
+) : ViewModel() {
+    private val id: Long = savedState.get<Long>("id") ?: 0L
+    private val itemFlow = MutableStateFlow<ContentEntity?>(null)
+    val item: StateFlow<ContentEntity?> = itemFlow
+
+    var info by mutableStateOf<XSeriesInfo?>(null)
+        private set
+    var loading by mutableStateOf(true)
+        private set
+    var error by mutableStateOf<NovaException?>(null)
+        private set
+    var selectedSeason by mutableIntStateOf(-1)
+
+    /** episodeId -> history entry */
+    val progress: StateFlow<Map<String, HistoryEntity>> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(emptyList<HistoryEntity>()) else content.seriesHistory(c.subscriptionId, c.remoteId)
+        }
+        .map { list -> list.associateBy { it.episodeId } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val lastWatched: StateFlow<HistoryEntity?> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(emptyList<HistoryEntity>()) else content.seriesHistory(c.subscriptionId, c.remoteId)
+        }
+        .map { it.firstOrNull() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val isFavorite: StateFlow<Boolean> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(false)
+            else content.favoriteKeys(c.subscriptionId).map { "${ContentType.SERIES}|${c.remoteId}" in it }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    init {
+        load(false)
+    }
+
+    fun load(force: Boolean) {
+        viewModelScope.launch {
+            loading = true
+            error = null
+            try {
+                val c = itemFlow.value ?: content.byId(id) ?: throw NovaException(com.nova.iptv.data.ErrorKind.UNKNOWN)
+                itemFlow.value = c
+                val sub = subs.get(c.subscriptionId) ?: throw NovaException(com.nova.iptv.data.ErrorKind.UNKNOWN)
+                if (sub.type != SourceType.XTREAM) throw NovaException(com.nova.iptv.data.ErrorKind.UNKNOWN)
+                val i = content.seriesInfo(sub, c.remoteId, force)
+                info = i
+                if (selectedSeason !in i.seasons.keys) selectedSeason = i.seasons.keys.firstOrNull() ?: -1
+            } catch (e: Exception) {
+                error = e.toNovaException()
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    fun toggleFavorite() {
+        val c = itemFlow.value ?: return
+        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.SERIES, c.remoteId, c.name, c.logo) }
+    }
+}
