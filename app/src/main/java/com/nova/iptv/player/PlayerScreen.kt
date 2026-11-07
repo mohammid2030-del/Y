@@ -80,6 +80,7 @@ class PlayerActions(
     val onSkipIntro: () -> Unit = {},
     val onPlayNext: () -> Unit = {},
     val onDismissNext: () -> Unit = {},
+    val onAdjustIntro: (Long) -> Unit = {},
 )
 
 @Composable
@@ -170,6 +171,15 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = if (state.controlsVisible) 120.dp else 48.dp),
         ) {
             SkipIntroButton(actions.onSkipIntro)
+        }
+
+        AnimatedVisibility(
+            visible = state.introAdjustVisible && state.upNext == null && state.error == null,
+            enter = fadeIn() + slideInHorizontally { it / 2 },
+            exit = fadeOut() + slideOutHorizontally { it / 2 },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = if (state.controlsVisible) 120.dp else 48.dp),
+        ) {
+            IntroAdjustBar(actions.onAdjustIntro)
         }
 
         AnimatedVisibility(
@@ -340,6 +350,37 @@ private fun SkipIntroButton(onClick: () -> Unit) {
         )
         Spacer(Modifier.width(10.dp))
         Icon(Icons.Filled.SkipNext, null, tint = Color.White, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun IntroAdjustBar(onAdjust: (Long) -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier
+            .clip(shape)
+            .background(Color.Black.copy(alpha = 0.65f))
+            .border(1.dp, Color.White.copy(alpha = 0.2f), shape)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(R.string.intro_adjust_title), color = Color.White, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.intro_adjust_hint), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf(-10_000L to "−10", -5_000L to "−5", 5_000L to "+5", 10_000L to "+10").forEach { (d, label) ->
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.16f))
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(50))
+                        .clickable { onAdjust(d) }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(stringResource(R.string.seconds_short, label), color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
 

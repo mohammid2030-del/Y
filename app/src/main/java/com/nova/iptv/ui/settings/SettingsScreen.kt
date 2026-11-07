@@ -192,6 +192,7 @@ fun SettingsScreen(
     }
 
     val messageText = when (vm.message) {
+        SettingsMessage.INTRO_RESET -> stringResource(R.string.msg_intro_reset)
         SettingsMessage.EXPORTED -> stringResource(R.string.msg_exported)
         SettingsMessage.IMPORTED -> stringResource(R.string.msg_imported)
         SettingsMessage.BAD_PASSPHRASE -> stringResource(R.string.msg_bad_passphrase)
@@ -331,6 +332,7 @@ fun SettingsScreen(
                     onClick = { introDialog = true },
                 )
             }
+            item { SettingRow(stringResource(R.string.reset_intro), stringResource(R.string.reset_intro_desc), onClick = { vm.resetIntroTimings() }) }
             item {
                 SettingRow(
                     stringResource(R.string.autoplay_next), stringResource(R.string.autoplay_next_desc),

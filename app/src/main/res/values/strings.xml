@@ -74,8 +74,11 @@
     <string name="hidden_categories_desc">Hidden categories disappear from lists, search and the guide. Protected by your PIN if set.</string>
     <string name="hide_advanced">Hide advanced options</string>
     <string name="import_settings">Import settings</string>
-    <string name="intro_length">Skip intro length</string>
+    <string name="intro_adjust_hint">Not exact? Adjust once — it\'s remembered for this series</string>
+    <string name="intro_adjust_title">Intro skipped</string>
+    <string name="intro_length">Default intro length</string>
     <string name="intro_off">Off</string>
+    <string name="intro_saved">Intro timing saved for this series</string>
     <string name="items_loaded">%1$s items</string>
     <string name="lang_arabic">العربية</string>
     <string name="lang_english">English</string>
@@ -98,6 +101,7 @@
     <string name="msg_exported">Settings exported</string>
     <string name="msg_history_cleared">Watch history cleared</string>
     <string name="msg_imported">Settings imported. Refreshing subscriptions…</string>
+    <string name="msg_intro_reset">Intro timings cleared</string>
     <string name="msg_pin_removed">PIN removed</string>
     <string name="msg_pin_saved">PIN saved</string>
     <string name="new_pin">New PIN (4–8 digits)</string>
@@ -135,6 +139,8 @@
     <string name="refresh_guide">Refresh guide</string>
     <string name="remove">Remove</string>
     <string name="remove_pin">Remove PIN</string>
+    <string name="reset_intro">Reset learned intro timings</string>
+    <string name="reset_intro_desc">Each series learns its intro when you skip or adjust it</string>
     <string name="resume">Resume</string>
     <string name="retry">Retry</string>
     <string name="save">Save</string>
@@ -143,6 +149,7 @@
     <string name="search_prompt">Type at least 2 characters to search</string>
     <string name="season_n">Season %1$d</string>
     <string name="seconds_n">%1$d seconds</string>
+    <string name="seconds_short">%1$s s</string>
     <string name="see_all">See all</string>
     <string name="see_all_n">See all (%1$d)</string>
     <string name="set_pin">Set PIN</string>

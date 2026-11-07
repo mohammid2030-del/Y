@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-enum class SettingsMessage { EXPORTED, IMPORTED, BAD_PASSPHRASE, FILE_ERROR, HISTORY_CLEARED, CACHE_CLEARED, PIN_SAVED, PIN_REMOVED, WRONG_PIN }
+enum class SettingsMessage { INTRO_RESET, EXPORTED, IMPORTED, BAD_PASSPHRASE, FILE_ERROR, HISTORY_CLEARED, CACHE_CLEARED, PIN_SAVED, PIN_REMOVED, WRONG_PIN }
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -40,6 +40,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val content: ContentRepository,
     private val backup: BackupRepository,
+    private val introStore: com.nova.iptv.data.repo.IntroStore,
 ) : ViewModel() {
     val subscriptions: StateFlow<List<SubscriptionEntity>> =
         subs.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -78,6 +79,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun refreshAllInBackground() = SyncWorker.syncNow(appContext)
+
+    fun resetIntroTimings() {
+        introStore.clear()
+        message = SettingsMessage.INTRO_RESET
+    }
 
     fun clearHistory() = viewModelScope.launch {
         content.clearAllHistory()

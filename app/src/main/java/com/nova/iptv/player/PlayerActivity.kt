@@ -91,6 +91,8 @@ class PlayerUiState {
     var upNext by mutableStateOf<UpNextUi?>(null)
     var upNextSeconds by mutableStateOf(0)
     var autoNext by mutableStateOf(true)
+    var introAdjustVisible by mutableStateOf(false)
+    var introLearned by mutableStateOf(false)
 }
 
 data class UpNextUi(val title: String, val subtitle: String, val image: String)
@@ -104,6 +106,7 @@ class PlayerActivity : AppCompatActivity() {
     @Inject lateinit var content: ContentRepository
     @Inject lateinit var settings: SettingsRepository
     @Inject lateinit var okHttp: OkHttpClient
+    @Inject lateinit var introStore: com.nova.iptv.data.repo.IntroStore
 
     private val ui = PlayerUiState()
     private var player: ExoPlayer? = null
@@ -124,6 +127,14 @@ class PlayerActivity : AppCompatActivity() {
     private var nextEpisode: com.nova.iptv.data.network.XEpisode? = null
     private var introSeconds = 85
     private var introSkipped = false
+    private var introStartMs = 0L
+    private var introEndMs = 0L
+    private var programmaticSeek = false
+    private var seekCandidate: Pair<Long, Long>? = null
+    private var chainFrom = 0L
+    private var chainTo = -1L
+    private var chainAt = 0L
+    private var adjustJob: Job? = null
     private var upNextDismissed = false
     private var swallowBackUp = false
 
@@ -170,6 +181,25 @@ class PlayerActivity : AppCompatActivity() {
                 ui.reconnecting = false
                 ui.error = PlayerErrors.classify(error)
             }
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            if (reason != Player.DISCONTINUITY_REASON_SEEK) return
+            if (programmaticSeek) { programmaticSeek = false; return }
+            if (!::request.isInitialized || request.type != ContentType.SERIES || ui.introAdjustVisible) return
+            // A manual jump of 20 s – 4 min near the start is almost always "skipping the intro":
+            // remember it once the user keeps watching from there.
+            val to = newPosition.positionMs
+            val now = android.os.SystemClock.elapsedRealtime()
+            // several quick +10 s taps count as one jump
+            val from = if (now - chainAt < 4_000L && kotlin.math.abs(oldPosition.positionMs - chainTo) < 3_000L) chainFrom
+            else oldPosition.positionMs
+            chainFrom = from; chainTo = to; chainAt = now
+            seekCandidate = if (from < 6 * 60_000L && to - from in 20_000L..240_000L) from to to else null
         }
 
         override fun onTracksChanged(tracks: Tracks) {
@@ -224,6 +254,7 @@ class PlayerActivity : AppCompatActivity() {
                         onSkipIntro = { skipIntro() },
                         onPlayNext = { playNext() },
                         onDismissNext = { dismissUpNext() },
+                        onAdjustIntro = { adjustIntro(it) },
                     ),
                 )
             }
@@ -426,17 +457,37 @@ class PlayerActivity : AppCompatActivity() {
         ui.autoNext = s.autoNext
         introSkipped = false
         upNextDismissed = false
+        seekCandidate = null
         ui.upNext = null
         ui.skipIntroVisible = false
+        ui.introAdjustVisible = false
+        val mark = introStore.get(req.subscriptionId, req.remoteId)
+        if (mark != null) {
+            introStartMs = mark.startMs; introEndMs = mark.endMs; ui.introLearned = true
+        } else {
+            introStartMs = 0L; introEndMs = introSeconds * 1000L; ui.introLearned = false
+        }
         nextEpisode = content.nextEpisode(req.subscriptionId, req.remoteId, req.episodeId)
         while (true) {
             val p = player
             if (p != null && p.playbackState == Player.STATE_READY) {
                 val pos = p.currentPosition
                 val dur = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
-                val introEnd = introSeconds * 1000L
-                ui.skipIntroVisible = introSeconds > 0 && !introSkipped && ui.error == null &&
-                    pos in 3_000L until (introEnd - 2_000L) && (dur == 0L || pos < dur / 3)
+
+                // learn from a manual skip once playback continues 12 s past the landing point
+                val cand = seekCandidate
+                if (cand != null && pos >= cand.second + 12_000L) {
+                    seekCandidate = null
+                    val start = if (cand.first < 15_000L) 0L else cand.first
+                    saveIntro(start, cand.second)
+                    introSkipped = true
+                    android.widget.Toast.makeText(this, R.string.intro_saved, android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                val showFrom = if (introStartMs > 0) (introStartMs - 1_000L).coerceAtLeast(0L) else 3_000L
+                ui.skipIntroVisible = introEndMs > 0 && !introSkipped && ui.error == null &&
+                    pos in showFrom until (introEndMs - 2_000L) && (dur == 0L || pos < dur / 3)
+
                 val next = nextEpisode
                 val remaining = dur - pos
                 if (next != null && dur > 120_000L && remaining in 0L..UP_NEXT_WINDOW_MS && !upNextDismissed) {
@@ -456,11 +507,39 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    private fun saveIntro(start: Long, end: Long) {
+        introStartMs = start
+        introEndMs = end
+        ui.introLearned = true
+        introStore.save(request.subscriptionId, request.remoteId, start, end)
+    }
+
     private fun skipIntro() {
         val p = player ?: return
-        p.seekTo(introSeconds * 1000L)
+        programmaticSeek = true
+        p.seekTo(introEndMs)
         introSkipped = true
         ui.skipIntroVisible = false
+        showIntroAdjust()
+    }
+
+    /** Fine-tune where the intro ends; the new point is remembered for this series. */
+    private fun adjustIntro(deltaMs: Long) {
+        val p = player ?: return
+        val end = (introEndMs + deltaMs).coerceIn(5_000L, 6 * 60_000L)
+        programmaticSeek = true
+        p.seekTo(end)
+        saveIntro(introStartMs, end)
+        showIntroAdjust()
+    }
+
+    private fun showIntroAdjust() {
+        ui.introAdjustVisible = true
+        adjustJob?.cancel()
+        adjustJob = lifecycleScope.launch {
+            delay(8_000)
+            ui.introAdjustVisible = false
+        }
     }
 
     private fun dismissUpNext() {
@@ -624,6 +703,12 @@ class PlayerActivity : AppCompatActivity() {
             }
             if (event.action == KeyEvent.ACTION_UP && swallowBackUp) {
                 swallowBackUp = false; return true
+            }
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && ui.introAdjustVisible && !playerView.isControllerFullyVisible) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> { adjustIntro(-5_000L); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { adjustIntro(5_000L); return true }
             }
         }
         if (event.action == KeyEvent.ACTION_DOWN && ok && !playerView.isControllerFullyVisible) {

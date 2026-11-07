@@ -73,8 +73,11 @@
     <string name="hidden_categories_desc">تختفي التصنيفات المخفية من القوائم والبحث والدليل، ومحمية برمز PIN إن وُجد.</string>
     <string name="hide_advanced">إخفاء الخيارات المتقدمة</string>
     <string name="import_settings">استيراد الإعدادات</string>
-    <string name="intro_length">مدة تخطي المقدمة</string>
+    <string name="intro_adjust_hint">غير دقيق؟ اضبطه مرة وسيُحفظ لهذا المسلسل</string>
+    <string name="intro_adjust_title">تم تخطي المقدمة</string>
+    <string name="intro_length">مدة المقدمة الافتراضية</string>
     <string name="intro_off">إيقاف</string>
+    <string name="intro_saved">تم حفظ توقيت المقدمة لهذا المسلسل</string>
     <string name="items_loaded">%1$s عنصر</string>
     <string name="lang_arabic">العربية</string>
     <string name="lang_english">English</string>
@@ -97,6 +100,7 @@
     <string name="msg_exported">تم تصدير الإعدادات</string>
     <string name="msg_history_cleared">تم مسح سجل المشاهدة</string>
     <string name="msg_imported">تم استيراد الإعدادات. جارٍ تحديث الاشتراكات…</string>
+    <string name="msg_intro_reset">تم مسح توقيتات المقدمة</string>
     <string name="msg_pin_removed">تمت إزالة رمز PIN</string>
     <string name="msg_pin_saved">تم حفظ رمز PIN</string>
     <string name="new_pin">رمز PIN جديد (4–8 أرقام)</string>
@@ -134,6 +138,8 @@
     <string name="refresh_guide">تحديث الدليل</string>
     <string name="remove">إزالة</string>
     <string name="remove_pin">إزالة رمز PIN</string>
+    <string name="reset_intro">مسح توقيتات المقدمة المحفوظة</string>
+    <string name="reset_intro_desc">كل مسلسل يتعلّم توقيت مقدمته عند تخطيها أو ضبطها</string>
     <string name="resume">استئناف</string>
     <string name="retry">إعادة المحاولة</string>
     <string name="save">حفظ</string>
@@ -142,6 +148,7 @@
     <string name="search_prompt">اكتب حرفين على الأقل للبحث</string>
     <string name="season_n">الموسم %1$d</string>
     <string name="seconds_n">%1$d ثانية</string>
+    <string name="seconds_short">%1$s ث</string>
     <string name="see_all">عرض الكل</string>
     <string name="see_all_n">عرض الكل (%1$d)</string>
     <string name="set_pin">تعيين رمز PIN</string>
