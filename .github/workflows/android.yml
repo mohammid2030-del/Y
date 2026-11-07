@@ -72,6 +72,7 @@ jobs:
           else
             cp app/build/outputs/apk/debug/app-debug.apk dist/NOVA-IPTV.apk
           fi
+          (cd tizen && zip -qr ../dist/NOVA-IPTV-Tizen.zip . -x '*.wgt')
           ls -la dist
 
       - name: Upload build artifact
@@ -88,8 +89,12 @@ jobs:
           name: NOVA IPTV 1.0.${{ github.run_number }}
           make_latest: true
           body: |
-            Direct download (always the latest build):
+            Android (always the latest build):
             https://github.com/${{ github.repository }}/releases/latest/download/NOVA-IPTV.apk
+
+            Samsung TV (Tizen project, open in Tizen Studio — see tizen/README.md):
+            https://github.com/${{ github.repository }}/releases/latest/download/NOVA-IPTV-Tizen.zip
           files: |
             dist/NOVA-IPTV.apk
             dist/NOVA-IPTV-debug.apk
+            dist/NOVA-IPTV-Tizen.zip

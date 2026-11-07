@@ -15,6 +15,11 @@ After the GitHub Actions workflow has run successfully on `main`:
 https://github.com/<OWNER>/<REPO>/releases/latest/download/NOVA-IPTV.apk
 ```
 
+## Samsung Smart TV
+
+A Tizen version for Samsung TVs (2020+) lives in [`tizen/`](tizen/README.md) and is attached to every release as
+`NOVA-IPTV-Tizen.zip`.
+
 ## Build locally
 
 Requirements: Android Studio (Ladybug or newer) or JDK 17 + Android SDK 35.
