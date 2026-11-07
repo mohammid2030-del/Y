@@ -87,7 +87,13 @@ class PlayerUiState {
     var qualities by mutableStateOf<List<QualityOption>>(emptyList())
     var canZap by mutableStateOf(false)
     var pipSupported by mutableStateOf(false)
+    var skipIntroVisible by mutableStateOf(false)
+    var upNext by mutableStateOf<UpNextUi?>(null)
+    var upNextSeconds by mutableStateOf(0)
+    var autoNext by mutableStateOf(true)
 }
+
+data class UpNextUi(val title: String, val subtitle: String, val image: String)
 
 data class QualityOption(val label: String, val groupIndex: Int, val trackIndex: Int, val selected: Boolean)
 
@@ -114,6 +120,13 @@ class PlayerActivity : AppCompatActivity() {
     private var resumeOnStart = false
     private var isTv = false
 
+    // Series: skip intro + up next
+    private var nextEpisode: com.nova.iptv.data.network.XEpisode? = null
+    private var introSeconds = 85
+    private var introSkipped = false
+    private var upNextDismissed = false
+    private var swallowBackUp = false
+
     private val extractors by lazy {
         DefaultExtractorsFactory()
             .setTsExtractorFlags(
@@ -133,7 +146,12 @@ class PlayerActivity : AppCompatActivity() {
                     updateVideoInfo()
                 }
                 Player.STATE_ENDED -> {
-                    if (ui.isLive) scheduleRetry() else saveProgress(finished = true)
+                    if (ui.isLive) {
+                        scheduleRetry()
+                    } else {
+                        saveProgress(finished = true)
+                        if (nextEpisode != null && ui.autoNext && !upNextDismissed) playNext()
+                    }
                 }
                 else -> Unit
             }
@@ -203,6 +221,9 @@ class PlayerActivity : AppCompatActivity() {
                         onQuality = { ui.qualityDialog = true },
                         onSelectQuality = { selectQuality(it) },
                         onZap = { zap(it) },
+                        onSkipIntro = { skipIntro() },
+                        onPlayNext = { playNext() },
+                        onDismissNext = { dismissUpNext() },
                     ),
                 )
             }
@@ -310,6 +331,8 @@ class PlayerActivity : AppCompatActivity() {
             } else {
                 ui.canZap = false
                 launch { progressLoop() }
+                if (req.type == ContentType.SERIES && req.catchupStartMs == 0L) launch { seriesLoop(req) }
+                else { ui.skipIntroVisible = false; ui.upNext = null }
             }
         }
     }
@@ -394,6 +417,74 @@ class PlayerActivity : AppCompatActivity() {
                 )
             )
         }
+    }
+
+    // ---- Series: skip intro & up next ----
+    private suspend fun seriesLoop(req: PlaybackRequest) {
+        val s = settings.current()
+        introSeconds = s.introSeconds
+        ui.autoNext = s.autoNext
+        introSkipped = false
+        upNextDismissed = false
+        ui.upNext = null
+        ui.skipIntroVisible = false
+        nextEpisode = content.nextEpisode(req.subscriptionId, req.remoteId, req.episodeId)
+        while (true) {
+            val p = player
+            if (p != null && p.playbackState == Player.STATE_READY) {
+                val pos = p.currentPosition
+                val dur = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
+                val introEnd = introSeconds * 1000L
+                ui.skipIntroVisible = introSeconds > 0 && !introSkipped && ui.error == null &&
+                    pos in 3_000L until (introEnd - 2_000L) && (dur == 0L || pos < dur / 3)
+                val next = nextEpisode
+                val remaining = dur - pos
+                if (next != null && dur > 120_000L && remaining in 0L..UP_NEXT_WINDOW_MS && !upNextDismissed) {
+                    ui.upNextSeconds = (remaining / 1000L).toInt()
+                    if (ui.upNext == null) {
+                        ui.upNext = UpNextUi(
+                            title = next.title.ifBlank { getString(R.string.episode_n, next.episodeNum) },
+                            subtitle = "S${next.season} E${next.episodeNum}",
+                            image = next.image.ifBlank { req.logo },
+                        )
+                    }
+                } else if (ui.upNext != null && (remaining > UP_NEXT_WINDOW_MS || upNextDismissed)) {
+                    ui.upNext = null
+                }
+            }
+            delay(500)
+        }
+    }
+
+    private fun skipIntro() {
+        val p = player ?: return
+        p.seekTo(introSeconds * 1000L)
+        introSkipped = true
+        ui.skipIntroVisible = false
+    }
+
+    private fun dismissUpNext() {
+        upNextDismissed = true
+        ui.upNext = null
+    }
+
+    private fun playNext() {
+        val next = nextEpisode ?: return
+        val cur = request
+        ui.upNext = null
+        saveProgress(finished = true)
+        startPlayback(
+            PlaybackRequest(
+                subscriptionId = cur.subscriptionId,
+                type = ContentType.SERIES,
+                remoteId = cur.remoteId,
+                title = cur.title,
+                logo = cur.logo,
+                episodeId = next.id,
+                episodeExt = next.ext,
+                subtitle = "S${next.season} E${next.episodeNum}" + if (next.title.isNotBlank()) " — ${next.title}" else "",
+            )
+        )
     }
 
     // ---- Live: channel list, zapping, EPG ----
@@ -526,6 +617,19 @@ class PlayerActivity : AppCompatActivity() {
 
     // ---- Remote control keys ----
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val ok = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_DOWN && ui.upNext != null) {
+                dismissUpNext(); swallowBackUp = true; return true
+            }
+            if (event.action == KeyEvent.ACTION_UP && swallowBackUp) {
+                swallowBackUp = false; return true
+            }
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && ok && !playerView.isControllerFullyVisible) {
+            if (ui.upNext != null) { playNext(); return true }
+            if (ui.skipIntroVisible) { skipIntro(); return true }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> if (ui.isLive) { zap(1); return true }
@@ -573,5 +677,6 @@ class PlayerActivity : AppCompatActivity() {
 
     companion object {
         private const val MAX_RETRIES = 8
+        private const val UP_NEXT_WINDOW_MS = 25_000L
     }
 }

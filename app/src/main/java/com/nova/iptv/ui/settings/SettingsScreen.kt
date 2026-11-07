@@ -177,6 +177,7 @@ fun SettingsScreen(
     var langDialog by remember { mutableStateOf(false) }
     var bufferDialog by remember { mutableStateOf(false) }
     var offsetDialog by remember { mutableStateOf(false) }
+    var introDialog by remember { mutableStateOf(false) }
     var pinDialog by remember { mutableStateOf(false) }
     var removePinDialog by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SubscriptionEntity?>(null) }
@@ -323,6 +324,21 @@ fun SettingsScreen(
                 )
             }
 
+            item {
+                SettingRow(
+                    stringResource(R.string.intro_length),
+                    if (s.introSeconds == 0) stringResource(R.string.intro_off) else stringResource(R.string.seconds_n, s.introSeconds),
+                    onClick = { introDialog = true },
+                )
+            }
+            item {
+                SettingRow(
+                    stringResource(R.string.autoplay_next), stringResource(R.string.autoplay_next_desc),
+                    onClick = { vm.setAutoNext(!s.autoNext) },
+                    trailing = { Switch(checked = s.autoNext, onCheckedChange = { vm.setAutoNext(it) }) },
+                )
+            }
+
             item { SectionHeader(stringResource(R.string.tv_guide)) }
             item {
                 SettingRow(
@@ -408,6 +424,17 @@ fun SettingsScreen(
             s.bufferSeconds,
             onPick = { vm.setBuffer(it) },
             onDismiss = { bufferDialog = false },
+        )
+    }
+    if (introDialog) {
+        ChoiceDialog(
+            stringResource(R.string.intro_length),
+            listOf(0, 45, 60, 75, 85, 90, 120).map {
+                Choice(it, if (it == 0) stringResource(R.string.intro_off) else stringResource(R.string.seconds_n, it))
+            },
+            s.introSeconds,
+            onPick = { vm.setIntroSeconds(it) },
+            onDismiss = { introDialog = false },
         )
     }
     if (offsetDialog) {

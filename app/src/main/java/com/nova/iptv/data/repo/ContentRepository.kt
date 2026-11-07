@@ -157,6 +157,16 @@ class ContentRepository @Inject constructor(
         return info
     }
 
+    /** The episode after [episodeId] across seasons, or null at the end of the series. */
+    suspend fun nextEpisode(subId: Long, seriesId: String, episodeId: String): com.nova.iptv.data.network.XEpisode? {
+        val sub = subs.get(subId) ?: return null
+        if (sub.type != SourceType.XTREAM || episodeId.isEmpty()) return null
+        val info = runCatching { seriesInfo(sub, seriesId) }.getOrNull() ?: return null
+        val all = info.seasons.toSortedMap().values.flatten()
+        val i = all.indexOfFirst { it.id == episodeId }
+        return if (i >= 0) all.getOrNull(i + 1) else null
+    }
+
     suspend fun vodInfo(sub: SubscriptionEntity, streamId: String): XVodInfo? {
         if (sub.type != SourceType.XTREAM) return null
         val cacheKey = "${sub.id}|$streamId"

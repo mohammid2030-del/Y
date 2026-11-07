@@ -9,6 +9,8 @@
     <string name="auto">تلقائي</string>
     <string name="auto_refresh">التحديث التلقائي</string>
     <string name="auto_refresh_desc">تحديث القنوات والدليل كل 12 ساعة عند توفر الإنترنت</string>
+    <string name="autoplay_next">تشغيل الحلقة التالية تلقائياً</string>
+    <string name="autoplay_next_desc">يبدأ الحلقة التالية عند انتهاء الحالية</string>
     <string name="back">رجوع</string>
     <string name="buffer_size">حجم التخزين المؤقت</string>
     <string name="cancel">إلغاء</string>
@@ -71,6 +73,8 @@
     <string name="hidden_categories_desc">تختفي التصنيفات المخفية من القوائم والبحث والدليل، ومحمية برمز PIN إن وُجد.</string>
     <string name="hide_advanced">إخفاء الخيارات المتقدمة</string>
     <string name="import_settings">استيراد الإعدادات</string>
+    <string name="intro_length">مدة تخطي المقدمة</string>
+    <string name="intro_off">إيقاف</string>
     <string name="items_loaded">%1$s عنصر</string>
     <string name="lang_arabic">العربية</string>
     <string name="lang_english">English</string>
@@ -97,6 +101,7 @@
     <string name="msg_pin_saved">تم حفظ رمز PIN</string>
     <string name="new_pin">رمز PIN جديد (4–8 أرقام)</string>
     <string name="next_channel">القناة التالية</string>
+    <string name="next_episode">الحلقة التالية</string>
     <string name="next_program">التالي: %1$s %2$s</string>
     <string name="no_episodes">لا توجد حلقات متاحة</string>
     <string name="no_guide_data">لا توجد بيانات دليل لهذه القنوات. حدّث الدليل أو أضف رابط EPG.</string>
@@ -119,6 +124,7 @@
     <string name="pin_desc">مطلوب لإدارة التصنيفات المخفية</string>
     <string name="pip">صورة داخل صورة</string>
     <string name="play">تشغيل</string>
+    <string name="play_now">شغّل الآن</string>
     <string name="playback">التشغيل</string>
     <string name="previous_channel">القناة السابقة</string>
     <string name="quality_track">مسار %1$d</string>
@@ -143,6 +149,7 @@
     <string name="show_advanced">خيارات متقدمة</string>
     <string name="show_epg_list">إظهار البرنامج الحالي في قائمة القنوات</string>
     <string name="single_quality">هذا البث يوفر جودة واحدة فقط.</string>
+    <string name="skip_intro">تخطي المقدمة</string>
     <string name="stage_categories">جارٍ تحميل التصنيفات…</string>
     <string name="stage_connecting">جارٍ التحقق من الاشتراك…</string>
     <string name="stage_content">جارٍ تحميل القنوات والأفلام والمسلسلات…</string>
@@ -154,6 +161,7 @@
     <string name="stage_saving">جارٍ حفظ المحتوى…</string>
     <string name="stage_series">جارٍ تحميل المسلسلات…</string>
     <string name="start_over">من البداية</string>
+    <string name="starts_in">تبدأ خلال %1$d ث</string>
     <string name="stream_info">معلومات البث</string>
     <string name="subscriptions">الاشتراكات</string>
     <string name="sync_failed">تعذر تحميل الاشتراك</string>

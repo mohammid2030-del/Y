@@ -10,6 +10,8 @@
     <string name="auto">Auto</string>
     <string name="auto_refresh">Automatic refresh</string>
     <string name="auto_refresh_desc">Refresh channels and guide every 12 hours on Wi‑Fi or mobile data</string>
+    <string name="autoplay_next">Autoplay next episode</string>
+    <string name="autoplay_next_desc">Starts the next episode when the current one ends</string>
     <string name="back">Back</string>
     <string name="buffer_size">Buffer size</string>
     <string name="cancel">Cancel</string>
@@ -72,6 +74,8 @@
     <string name="hidden_categories_desc">Hidden categories disappear from lists, search and the guide. Protected by your PIN if set.</string>
     <string name="hide_advanced">Hide advanced options</string>
     <string name="import_settings">Import settings</string>
+    <string name="intro_length">Skip intro length</string>
+    <string name="intro_off">Off</string>
     <string name="items_loaded">%1$s items</string>
     <string name="lang_arabic">العربية</string>
     <string name="lang_english">English</string>
@@ -98,6 +102,7 @@
     <string name="msg_pin_saved">PIN saved</string>
     <string name="new_pin">New PIN (4–8 digits)</string>
     <string name="next_channel">Next channel</string>
+    <string name="next_episode">Next episode</string>
     <string name="next_program">Next: %1$s %2$s</string>
     <string name="no_episodes">No episodes available</string>
     <string name="no_guide_data">No guide data for these channels. Refresh the guide or add an EPG URL.</string>
@@ -120,6 +125,7 @@
     <string name="pin_desc">Required to manage hidden categories</string>
     <string name="pip">Picture in picture</string>
     <string name="play">Play</string>
+    <string name="play_now">Play now</string>
     <string name="playback">Playback</string>
     <string name="previous_channel">Previous channel</string>
     <string name="quality_track">Track %1$d</string>
@@ -144,6 +150,7 @@
     <string name="show_advanced">Advanced options</string>
     <string name="show_epg_list">Show current programme in channel list</string>
     <string name="single_quality">This stream offers a single quality.</string>
+    <string name="skip_intro">Skip intro</string>
     <string name="stage_categories">Loading categories…</string>
     <string name="stage_connecting">Verifying subscription…</string>
     <string name="stage_content">Loading channels, movies and series…</string>
@@ -155,6 +162,7 @@
     <string name="stage_saving">Saving content…</string>
     <string name="stage_series">Loading series…</string>
     <string name="start_over">Start over</string>
+    <string name="starts_in">Starts in %1$d s</string>
     <string name="stream_info">Stream info</string>
     <string name="subscriptions">Subscriptions</string>
     <string name="sync_failed">Could not load the subscription</string>

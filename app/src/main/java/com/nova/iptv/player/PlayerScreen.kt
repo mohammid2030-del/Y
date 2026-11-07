@@ -3,6 +3,13 @@ package com.nova.iptv.player
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import com.nova.iptv.ui.components.NetImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +77,9 @@ class PlayerActions(
     val onQuality: () -> Unit,
     val onSelectQuality: (QualityOption?) -> Unit,
     val onZap: (Int) -> Unit,
+    val onSkipIntro: () -> Unit = {},
+    val onPlayNext: () -> Unit = {},
+    val onDismissNext: () -> Unit = {},
 )
 
 @Composable
@@ -151,6 +161,25 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             ChannelBanner(state)
+        }
+
+        AnimatedVisibility(
+            visible = state.skipIntroVisible && state.upNext == null && state.error == null,
+            enter = fadeIn() + slideInHorizontally { it / 2 },
+            exit = fadeOut() + slideOutHorizontally { it / 2 },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = if (state.controlsVisible) 120.dp else 48.dp),
+        ) {
+            SkipIntroButton(actions.onSkipIntro)
+        }
+
+        AnimatedVisibility(
+            visible = state.upNext != null && state.error == null,
+            enter = fadeIn() + slideInHorizontally { it },
+            exit = fadeOut() + slideOutHorizontally { it },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (state.controlsVisible) 120.dp else 40.dp),
+        ) {
+            val next = state.upNext
+            if (next != null) UpNextCard(next, state.upNextSeconds, state.autoNext, actions)
         }
 
         if (state.qualityDialog) {
@@ -285,6 +314,109 @@ private fun ChannelBanner(state: PlayerUiState) {
                     color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall, maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun SkipIntroButton(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier
+            .clip(shape)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.5.dp, Color.White.copy(alpha = 0.85f), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.skip_intro),
+            color = Color.White,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.width(10.dp))
+        Icon(Icons.Filled.SkipNext, null, tint = Color.White, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun UpNextCard(next: UpNextUi, seconds: Int, autoNext: Boolean, actions: PlayerActions) {
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        Modifier
+            .width(380.dp)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(Color(0xF21B1E46), Color(0xF22A1748), Color(0xF2111118))))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), shape)
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.width(150.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(Color(0xFF23232F))
+                    .clickable(onClick = actions.onPlayNext),
+                contentAlignment = Alignment.Center,
+            ) {
+                NetImage(next.image, Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+                Box(contentAlignment = Alignment.Center) {
+                    if (autoNext) {
+                        CircularProgressIndicator(
+                            progress = { (seconds / 25f).coerceIn(0f, 1f) },
+                            modifier = Modifier.size(46.dp),
+                            color = Color.White,
+                            trackColor = Color.White.copy(alpha = 0.25f),
+                            strokeWidth = 3.dp,
+                        )
+                    }
+                    Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.next_episode).uppercase(),
+                    color = Color(0xFF9EA8FF),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(next.subtitle, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                Text(
+                    next.title, color = Color.White, style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                if (autoNext) {
+                    Text(
+                        stringResource(R.string.starts_in, seconds),
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val pill = RoundedCornerShape(50)
+            Row(
+                Modifier.weight(1f).clip(pill).background(Color.White).clickable(onClick = actions.onPlayNext)
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.play_now), color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+            Box(
+                Modifier.weight(1f).clip(pill).background(Color.White.copy(alpha = 0.14f))
+                    .border(1.dp, Color.White.copy(alpha = 0.25f), pill)
+                    .clickable(onClick = actions.onDismissNext).padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(stringResource(R.string.cancel), color = Color.White, fontWeight = FontWeight.SemiBold)
             }
         }
     }

@@ -70,6 +70,8 @@ class SettingsViewModel @Inject constructor(
     fun setLowEnd(v: Boolean) = viewModelScope.launch { settingsRepo.setLowEnd(v) }
     fun setBuffer(sec: Int) = viewModelScope.launch { settingsRepo.setBuffer(sec) }
     fun setShowEpg(v: Boolean) = viewModelScope.launch { settingsRepo.setShowEpg(v) }
+    fun setIntroSeconds(v: Int) = viewModelScope.launch { settingsRepo.setIntroSeconds(v) }
+    fun setAutoNext(v: Boolean) = viewModelScope.launch { settingsRepo.setAutoNext(v) }
     fun setAutoRefresh(v: Boolean) = viewModelScope.launch {
         settingsRepo.setAutoRefresh(v)
         SyncWorker.schedulePeriodic(appContext, v)
