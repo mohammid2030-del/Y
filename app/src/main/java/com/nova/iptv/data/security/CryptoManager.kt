@@ -81,6 +81,23 @@ class CryptoManager @Inject constructor(@ApplicationContext context: Context) {
         return Base64.encodeToString(iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
     }
 
+    /**
+     * Fast encryptor for bulk work on a single thread (e.g. 50k playlist URLs):
+     * reuses one Cipher instance instead of looking one up per value.
+     */
+    fun bulkEncryptor(): (String) -> String {
+        val key = dataKey()
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        val iv = ByteArray(IV_SIZE)
+        return { plain ->
+            if (plain.isEmpty()) "" else {
+                random.nextBytes(iv)
+                cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+                Base64.encodeToString(iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+            }
+        }
+    }
+
     fun decrypt(encoded: String): String {
         if (encoded.isEmpty()) return ""
         return try {

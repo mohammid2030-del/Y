@@ -58,6 +58,8 @@ data class CategoryEntity(
         Index(value = ["subscriptionId", "type", "categoryId"]),
         Index(value = ["subscriptionId", "type", "remoteId"]),
         Index(value = ["subscriptionId", "name"]),
+        Index(value = ["subscriptionId", "type", "sortOrder"]),
+        Index(value = ["subscriptionId", "type", "added"]),
     ],
 )
 data class ContentEntity(

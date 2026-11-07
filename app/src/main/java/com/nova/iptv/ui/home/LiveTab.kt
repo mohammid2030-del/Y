@@ -44,6 +44,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import com.nova.iptv.R
 import com.nova.iptv.data.db.CategoryEntity
 import com.nova.iptv.data.db.ContentEntity
@@ -137,24 +140,28 @@ private fun CategoryItem(label: String, selected: Boolean, onClick: () -> Unit) 
 fun LiveTab(wide: Boolean, vm: LiveViewModel = hiltViewModel()) {
     val categories by vm.categories.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
-    val channels by vm.channels.collectAsStateWithLifecycle()
+    val channels = vm.channels.collectAsLazyPagingItems()
     val favorites by vm.favoriteKeys.collectAsStateWithLifecycle()
     val now by vm.nowPlaying.collectAsStateWithLifecycle()
     val showEpg by vm.showEpg.collectAsStateWithLifecycle()
     val offset by vm.epgOffsetMs.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    val smallList = selected == SpecialCat.FAV || selected == SpecialCat.RECENT
     val list: @Composable (Modifier) -> Unit = { modifier ->
-        val items = channels
         when {
-            items == null -> LoadingView(modifier)
-            items.isEmpty() -> EmptyView(
+            channels.itemCount == 0 && channels.loadState.refresh is LoadState.Loading -> LoadingView(modifier)
+            channels.itemCount == 0 -> EmptyView(
                 stringResource(if (selected == SpecialCat.FAV) R.string.empty_favorites else R.string.empty_channels),
                 modifier,
                 if (selected == SpecialCat.RECENT) Icons.Filled.History else Icons.Filled.Star,
             )
             else -> LazyColumn(modifier, contentPadding = PaddingValues(vertical = 4.dp)) {
-                itemsIndexed(items, key = { i, c -> if (c.id != 0L) c.id else "k$i" }) { _, c ->
+                items(
+                    count = channels.itemCount,
+                    key = channels.itemKey { c -> if (c.id != 0L) c.id else "${c.type}|${c.remoteId}" },
+                ) { index ->
+                    val c = channels[index] ?: return@items
                     ChannelRow(
                         channel = c,
                         program = if (showEpg && c.epgId.isNotEmpty()) now[c.epgId] else null,
@@ -171,9 +178,14 @@ fun LiveTab(wide: Boolean, vm: LiveViewModel = hiltViewModel()) {
                                     remoteId = c.remoteId,
                                     title = c.name,
                                     logo = c.logo,
-                                    categoryId = c.categoryId,
+                                    // zapping follows the list the user is looking at
+                                    categoryId = when {
+                                        selected == SpecialCat.ALL -> ""
+                                        smallList -> c.categoryId
+                                        else -> selected
+                                    },
                                 ),
-                                channelList = items,
+                                channelList = if (smallList) channels.itemSnapshotList.items else null,
                             )
                         },
                     )

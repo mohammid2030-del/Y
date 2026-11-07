@@ -138,6 +138,7 @@
     <string name="single_quality">هذا البث يوفر جودة واحدة فقط.</string>
     <string name="stage_categories">جارٍ تحميل التصنيفات…</string>
     <string name="stage_connecting">جارٍ التحقق من الاشتراك…</string>
+    <string name="stage_content">جارٍ تحميل القنوات والأفلام والمسلسلات…</string>
     <string name="stage_done">جاهز!</string>
     <string name="stage_epg">جارٍ تحميل دليل البرامج…</string>
     <string name="stage_live">جارٍ تحميل القنوات المباشرة…</string>

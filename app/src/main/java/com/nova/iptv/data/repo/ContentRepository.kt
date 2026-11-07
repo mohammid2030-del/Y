@@ -1,6 +1,9 @@
 package com.nova.iptv.data.repo
 
 import android.util.LruCache
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
 import com.nova.iptv.data.ErrorKind
 import com.nova.iptv.data.NovaException
 import com.nova.iptv.data.db.CategoryEntity
@@ -45,6 +48,8 @@ data class PlaybackRequest(
 
 data class ResolvedStream(val url: String, val userAgent: String, val isLive: Boolean)
 
+const val RECENT_ADDED = "\u0001recent_added"
+
 @Singleton
 class ContentRepository @Inject constructor(
     private val contentDao: ContentDao,
@@ -67,6 +72,18 @@ class ContentRepository @Inject constructor(
     fun byCategory(subId: Long, type: String, categoryId: String) = contentDao.observeByCategory(subId, type, categoryId)
     fun all(subId: Long, type: String, limit: Int = 5000) = contentDao.observeAll(subId, type, limit)
     fun recentlyAdded(subId: Long, type: String, limit: Int = 30) = contentDao.observeRecentlyAdded(subId, type, limit)
+    private val pagingConfig = PagingConfig(pageSize = 60, prefetchDistance = 90, initialLoadSize = 120, enablePlaceholders = false)
+
+    /** categoryId: real category id, "" for all (minus hidden), or RECENT_ADDED. */
+    fun paged(subId: Long, type: String, categoryId: String): Flow<PagingData<ContentEntity>> =
+        Pager(pagingConfig) {
+            when (categoryId) {
+                "" -> contentDao.pageAll(subId, type)
+                RECENT_ADDED -> contentDao.pageRecentlyAdded(subId, type)
+                else -> contentDao.pageByCategory(subId, type, categoryId)
+            }
+        }.flow
+
     suspend fun byId(id: Long) = contentDao.byId(id)
     suspend fun byRemote(subId: Long, type: String, remoteId: String) = contentDao.byRemote(subId, type, remoteId)
     suspend fun search(subId: Long, query: String, type: String, categoryId: String) =

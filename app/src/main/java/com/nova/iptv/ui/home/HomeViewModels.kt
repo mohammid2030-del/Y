@@ -4,6 +4,9 @@ package com.nova.iptv.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
+import com.nova.iptv.data.repo.RECENT_ADDED
 import com.nova.iptv.data.db.CategoryEntity
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.ContentType
@@ -77,16 +80,17 @@ class LiveViewModel @Inject constructor(
         .flatMapLatest { content.favoriteKeys(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    val channels: StateFlow<List<ContentEntity>?> = combine(subId, selected) { s, c -> s to c }
+    /** Paged: only visible rows are read from the database. */
+    val channels: Flow<PagingData<ContentEntity>> = combine(subId, selected) { s, c -> s to c }
         .flatMapLatest { (s, c) ->
             when (c) {
-                SpecialCat.ALL -> content.all(s, ContentType.LIVE, 50_000)
-                SpecialCat.FAV -> content.favorites(s).map { l -> l.filter { it.type == ContentType.LIVE }.map { it.asContent() } }
-                SpecialCat.RECENT -> content.recent(s, ContentType.LIVE, 50).map { l -> l.map { it.asContent() } }
-                else -> content.byCategory(s, ContentType.LIVE, c)
+                SpecialCat.ALL -> content.paged(s, ContentType.LIVE, "")
+                SpecialCat.FAV -> content.favorites(s).map { l -> PagingData.from(l.filter { it.type == ContentType.LIVE }.map { it.asContent() }) }
+                SpecialCat.RECENT -> content.recent(s, ContentType.LIVE, 50).map { l -> PagingData.from(l.map { it.asContent() }) }
+                else -> content.paged(s, ContentType.LIVE, c)
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .cachedIn(viewModelScope)
 
     private val _now = MutableStateFlow<Map<String, EpgProgramEntity>>(emptyMap())
     val nowPlaying: StateFlow<Map<String, EpgProgramEntity>> = _now
@@ -136,16 +140,16 @@ abstract class VodViewModel(
         .flatMapLatest { content.favoriteKeys(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    val items: StateFlow<List<ContentEntity>?> = combine(subId, selected) { s, c -> s to c }
+    val items: Flow<PagingData<ContentEntity>> = combine(subId, selected) { s, c -> s to c }
         .flatMapLatest { (s, c) ->
             when (c) {
-                SpecialCat.ALL -> content.all(s, type, 50_000)
-                SpecialCat.FAV -> content.favorites(s).map { l -> l.filter { it.type == type }.map { it.asContent() } }
-                SpecialCat.RECENT -> content.recentlyAdded(s, type, 200)
-                else -> content.byCategory(s, type, c)
+                SpecialCat.ALL -> content.paged(s, type, "")
+                SpecialCat.FAV -> content.favorites(s).map { l -> PagingData.from(l.filter { it.type == type }.map { it.asContent() }) }
+                SpecialCat.RECENT -> content.paged(s, type, RECENT_ADDED)
+                else -> content.paged(s, type, c)
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .cachedIn(viewModelScope)
 
     val continueWatching: StateFlow<List<HistoryEntity>> = subId
         .flatMapLatest { content.continueWatching(it) }

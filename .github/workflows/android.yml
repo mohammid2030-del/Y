@@ -55,8 +55,7 @@ jobs:
             echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build signed release APK (only if signing secrets exist)
-        if: steps.signing.outputs.path != ''
+      - name: Build optimised release APK
         env:
           NOVA_KEYSTORE_PATH: ${{ steps.signing.outputs.path }}
           NOVA_KEYSTORE_PASSWORD: ${{ secrets.NOVA_KEYSTORE_PASSWORD }}

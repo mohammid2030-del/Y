@@ -24,6 +24,14 @@ android {
     }
 
     signingConfigs {
+        // Stable key committed to the repo so every CI build can be installed as an update
+        // over the previous one. For public/Play distribution, provide your own key via secrets.
+        create("nova") {
+            storeFile = file("nova-dev.keystore")
+            storePassword = "novadev2026"
+            keyAlias = "nova"
+            keyPassword = "novadev2026"
+        }
         if (releaseKeystore != null) {
             create("release") {
                 storeFile = file(releaseKeystore)
@@ -37,14 +45,15 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("nova")
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Non-debuggable, fully optimised by ART. R8 stays off until it is verified on devices.
+            isMinifyEnabled = false
+            isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (releaseKeystore != null) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfig = if (releaseKeystore != null) signingConfigs.getByName("release")
+            else signingConfigs.getByName("nova")
         }
     }
 
@@ -104,6 +113,9 @@ dependencies {
     // Storage
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    implementation("androidx.room:room-paging:2.6.1")
+    implementation("androidx.paging:paging-runtime-ktx:3.3.5")
+    implementation("androidx.paging:paging-compose:3.3.5")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 

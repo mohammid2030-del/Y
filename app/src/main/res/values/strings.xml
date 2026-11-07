@@ -139,6 +139,7 @@
     <string name="single_quality">This stream offers a single quality.</string>
     <string name="stage_categories">Loading categories…</string>
     <string name="stage_connecting">Verifying subscription…</string>
+    <string name="stage_content">Loading channels, movies and series…</string>
     <string name="stage_done">Ready!</string>
     <string name="stage_epg">Loading TV guide…</string>
     <string name="stage_live">Loading live channels…</string>

@@ -30,7 +30,12 @@ import com.nova.iptv.data.parser.XmltvParser
 import com.nova.iptv.data.security.CryptoManager
 import com.nova.iptv.data.toNovaException
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,10 +44,11 @@ import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class SyncStage { CONNECTING, CATEGORIES, LIVE, MOVIES, SERIES, PLAYLIST, EPG, SAVING, DONE }
+enum class SyncStage { CONNECTING, CATEGORIES, CONTENT, LIVE, MOVIES, SERIES, PLAYLIST, EPG, SAVING, DONE }
 
 data class SyncProgress(val stage: SyncStage, val percent: Int, val count: Int = 0)
 
@@ -85,6 +91,8 @@ class SubscriptionRepository @Inject constructor(
     private val settings: SettingsRepository,
 ) {
     private val syncMutex = Mutex()
+    private val epgMutex = Mutex()
+    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun observeAll(): Flow<List<SubscriptionEntity>> = subDao.observeAll()
     fun observe(id: Long): Flow<SubscriptionEntity?> = subDao.observe(id)
@@ -249,15 +257,10 @@ class SubscriptionRepository @Inject constructor(
                     bundle.content.chunked(1000).forEach { contentDao.insertContent(it) }
                 }
 
-                // EPG is best-effort: a broken guide must not fail the subscription.
                 val epgUrl = crypto.decrypt(sub.epgUrlCipher).ifBlank {
                     if (sub.type == SourceType.XTREAM) {
                         val c = creds(sub); XtreamUrls.xmltv(c.server, c.user, c.pass)
                     } else advertisedEpg
-                }
-                if (epgUrl.isNotBlank()) {
-                    onProgress(SyncProgress(SyncStage.EPG, 85))
-                    runCatching { syncEpg(sub, epgUrl, onProgress) }
                 }
 
                 subDao.update(
@@ -269,6 +272,14 @@ class SubscriptionRepository @Inject constructor(
                     )
                 )
                 onProgress(SyncProgress(SyncStage.DONE, 100, bundle.content.size))
+
+                // The TV guide can be huge; load it in the background so the user gets
+                // into the app immediately. A broken guide never fails the subscription.
+                if (epgUrl.isNotBlank()) {
+                    backgroundScope.launch {
+                        epgMutex.withLock { runCatching { syncEpg(sub, epgUrl) {} } }
+                    }
+                }
             } catch (e: Exception) {
                 val ne = e.toNovaException()
                 subDao.update(sub.copy(lastStatus = ne.kind.name))
@@ -285,7 +296,7 @@ class SubscriptionRepository @Inject constructor(
                 val c = creds(sub); XtreamUrls.xmltv(c.server, c.user, c.pass)
             } else ""
         }
-        if (url.isNotBlank()) syncEpg(sub, url) {}
+        if (url.isNotBlank()) epgMutex.withLock { syncEpg(sub, url) {} }
     }
 
     private class Bundle(val categories: List<CategoryEntity>, val content: List<ContentEntity>)
@@ -330,77 +341,104 @@ class SubscriptionRepository @Inject constructor(
         if (!auth.authenticated) throw NovaException(ErrorKind.AUTH_FAILED)
         if (auth.status.isNotEmpty() && !auth.status.equals("Active", true)) throw NovaException(ErrorKind.EXPIRED)
 
+        // Fetch everything in parallel (3 small category calls, then 3 big lists) to cut wall-clock time.
         onProgress(SyncProgress(SyncStage.CATEGORIES, 8))
-        val liveCats = fetcher.text(XtreamUrls.api(c.server, c.user, c.pass, "get_live_categories"), ua) { XtreamParser.readCategories(it) }
-        val vodCats = fetcher.text(XtreamUrls.api(c.server, c.user, c.pass, "get_vod_categories"), ua) { XtreamParser.readCategories(it) }
-        val seriesCats = fetcher.text(XtreamUrls.api(c.server, c.user, c.pass, "get_series_categories"), ua) { XtreamParser.readCategories(it) }
-
-        val live = ArrayList<ContentEntity>()
-        onProgress(SyncProgress(SyncStage.LIVE, 15))
-        fetcher.text(XtreamUrls.api(c.server, c.user, c.pass, "get_live_streams"), ua) { reader ->
-            XtreamParser.readObjects(reader) { m ->
-                val id = m["stream_id"] ?: return@readObjects
-                live += ContentEntity(
-                    subscriptionId = sub.id,
-                    type = ContentType.LIVE,
-                    remoteId = id,
-                    name = m["name"].orEmpty().trim(),
-                    categoryId = m["category_id"].orEmpty(),
-                    logo = m["stream_icon"].orEmpty(),
-                    epgId = m["epg_channel_id"].orEmpty().trim().lowercase(),
-                    tvArchive = m["tv_archive"] == "1",
-                    archiveDays = m["tv_archive_duration"]?.toIntOrNull() ?: 0,
-                    num = m["num"]?.toIntOrNull() ?: 0,
-                    added = m["added"]?.toLongOrNull() ?: 0L,
-                    sortOrder = live.size,
-                )
-                if (live.size % 1000 == 0) onProgress(SyncProgress(SyncStage.LIVE, 25, live.size))
-            }
+        fun api(action: String) = XtreamUrls.api(c.server, c.user, c.pass, action)
+        val (liveCats, vodCats, seriesCats) = coroutineScope {
+            val l = async { fetcher.text(api("get_live_categories"), ua) { XtreamParser.readCategories(it) } }
+            val v = async { fetcher.text(api("get_vod_categories"), ua) { XtreamParser.readCategories(it) } }
+            val s = async { fetcher.text(api("get_series_categories"), ua) { XtreamParser.readCategories(it) } }
+            Triple(l.await(), v.await(), s.await())
         }
 
-        val movies = ArrayList<ContentEntity>()
-        onProgress(SyncProgress(SyncStage.MOVIES, 35, 0))
-        fetcher.text(XtreamUrls.api(c.server, c.user, c.pass, "get_vod_streams"), ua) { reader ->
-            XtreamParser.readObjects(reader) { m ->
-                val id = m["stream_id"] ?: return@readObjects
-                movies += ContentEntity(
-                    subscriptionId = sub.id,
-                    type = ContentType.MOVIE,
-                    remoteId = id,
-                    name = m["name"].orEmpty().trim(),
-                    categoryId = m["category_id"].orEmpty(),
-                    logo = m["stream_icon"].orEmpty(),
-                    containerExt = m["container_extension"].orEmpty(),
-                    rating = m["rating"].orEmpty().takeIf { it != "0" }.orEmpty(),
-                    year = m["year"].orEmpty().ifBlank { m["releaseDate"].orEmpty().take(4) },
-                    plot = m["plot"].orEmpty(),
-                    added = m["added"]?.toLongOrNull() ?: 0L,
-                    sortOrder = movies.size,
-                )
-                if (movies.size % 1000 == 0) onProgress(SyncProgress(SyncStage.MOVIES, 50, movies.size))
-            }
+        val total = AtomicInteger(0)
+        val finishedLists = AtomicInteger(0)
+        onProgress(SyncProgress(SyncStage.CONTENT, 10))
+        fun tick() {
+            val n = total.incrementAndGet()
+            if (n % 2000 == 0) onProgress(SyncProgress(SyncStage.CONTENT, 10 + finishedLists.get() * 20, n))
+        }
+        fun listDone() {
+            val d = finishedLists.incrementAndGet()
+            onProgress(SyncProgress(SyncStage.CONTENT, 10 + d * 20, total.get()))
         }
 
-        val series = ArrayList<ContentEntity>()
-        onProgress(SyncProgress(SyncStage.SERIES, 60, 0))
-        fetcher.text(XtreamUrls.api(c.server, c.user, c.pass, "get_series"), ua) { reader ->
-            XtreamParser.readObjects(reader) { m ->
-                val id = m["series_id"] ?: return@readObjects
-                series += ContentEntity(
-                    subscriptionId = sub.id,
-                    type = ContentType.SERIES,
-                    remoteId = id,
-                    name = m["name"].orEmpty().trim(),
-                    categoryId = m["category_id"].orEmpty(),
-                    logo = m["cover"].orEmpty(),
-                    rating = m["rating"].orEmpty().takeIf { it != "0" }.orEmpty(),
-                    year = m["year"].orEmpty().ifBlank { m["releaseDate"].orEmpty().ifBlank { m["release_date"].orEmpty() }.take(4) },
-                    plot = m["plot"].orEmpty(),
-                    added = m["last_modified"]?.toLongOrNull() ?: 0L,
-                    sortOrder = series.size,
-                )
-                if (series.size % 1000 == 0) onProgress(SyncProgress(SyncStage.SERIES, 70, series.size))
+        val (live, movies, series) = coroutineScope {
+            val liveD = async {
+                val live = ArrayList<ContentEntity>()
+                fetcher.text(api("get_live_streams"), ua) { reader ->
+                    XtreamParser.readObjects(reader) { m ->
+                        val id = m["stream_id"] ?: return@readObjects
+                        live += ContentEntity(
+                            subscriptionId = sub.id,
+                            type = ContentType.LIVE,
+                            remoteId = id,
+                            name = m["name"].orEmpty().trim(),
+                            categoryId = m["category_id"].orEmpty(),
+                            logo = m["stream_icon"].orEmpty(),
+                            epgId = m["epg_channel_id"].orEmpty().trim().lowercase(),
+                            tvArchive = m["tv_archive"] == "1",
+                            archiveDays = m["tv_archive_duration"]?.toIntOrNull() ?: 0,
+                            num = m["num"]?.toIntOrNull() ?: 0,
+                            added = m["added"]?.toLongOrNull() ?: 0L,
+                            sortOrder = live.size,
+                        )
+                        tick()
+                    }
+                }
+                listDone()
+                live
             }
+            val moviesD = async {
+                val movies = ArrayList<ContentEntity>()
+                fetcher.text(api("get_vod_streams"), ua) { reader ->
+                    XtreamParser.readObjects(reader) { m ->
+                        val id = m["stream_id"] ?: return@readObjects
+                        movies += ContentEntity(
+                            subscriptionId = sub.id,
+                            type = ContentType.MOVIE,
+                            remoteId = id,
+                            name = m["name"].orEmpty().trim(),
+                            categoryId = m["category_id"].orEmpty(),
+                            logo = m["stream_icon"].orEmpty(),
+                            containerExt = m["container_extension"].orEmpty(),
+                            rating = m["rating"].orEmpty().takeIf { it != "0" }.orEmpty(),
+                            year = m["year"].orEmpty().ifBlank { m["releaseDate"].orEmpty().take(4) },
+                            plot = m["plot"].orEmpty(),
+                            added = m["added"]?.toLongOrNull() ?: 0L,
+                            sortOrder = movies.size,
+                        )
+                        tick()
+                    }
+                }
+                listDone()
+                movies
+            }
+            val seriesD = async {
+                val series = ArrayList<ContentEntity>()
+                fetcher.text(api("get_series"), ua) { reader ->
+                    XtreamParser.readObjects(reader) { m ->
+                        val id = m["series_id"] ?: return@readObjects
+                        series += ContentEntity(
+                            subscriptionId = sub.id,
+                            type = ContentType.SERIES,
+                            remoteId = id,
+                            name = m["name"].orEmpty().trim(),
+                            categoryId = m["category_id"].orEmpty(),
+                            logo = m["cover"].orEmpty(),
+                            rating = m["rating"].orEmpty().takeIf { it != "0" }.orEmpty(),
+                            year = m["year"].orEmpty().ifBlank { m["releaseDate"].orEmpty().ifBlank { m["release_date"].orEmpty() }.take(4) },
+                            plot = m["plot"].orEmpty(),
+                            added = m["last_modified"]?.toLongOrNull() ?: 0L,
+                            sortOrder = series.size,
+                        )
+                        tick()
+                    }
+                }
+                listDone()
+                series
+            }
+            Triple(liveD.await(), moviesD.await(), seriesD.await())
         }
 
         val categories = buildCategories(sub.id, ContentType.LIVE, liveCats, live, hidden[ContentType.LIVE].orEmpty()) +
@@ -423,6 +461,7 @@ class SubscriptionRepository @Inject constructor(
         val liveGroups = LinkedHashMap<String, Int>()
         val vodGroups = LinkedHashMap<String, Int>()
         val sha = MessageDigest.getInstance("SHA-1")
+        val encrypt = crypto.bulkEncryptor()
 
         val handle: (InputStream) -> String = { stream ->
             onProgress(SyncProgress(SyncStage.PLAYLIST, 15))
@@ -439,7 +478,7 @@ class SubscriptionRepository @Inject constructor(
                         name = e.name,
                         categoryId = e.group,
                         logo = e.logo,
-                        streamUrlCipher = crypto.encrypt(e.url),
+                        streamUrlCipher = encrypt(e.url),
                         containerExt = e.url.substringBefore('?').substringAfterLast('.', "").take(5),
                         epgId = e.tvgId.trim().lowercase(),
                         sortOrder = live.size + vod.size,

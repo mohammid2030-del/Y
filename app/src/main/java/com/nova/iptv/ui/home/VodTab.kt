@@ -56,6 +56,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import com.nova.iptv.R
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.db.ContentType
@@ -85,7 +88,7 @@ fun resumeRequest(h: HistoryEntity) = PlaybackRequest(
 fun VodTab(vm: VodViewModel, onOpen: (Long) -> Unit) {
     val categories by vm.categories.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
-    val items by vm.items.collectAsStateWithLifecycle()
+    val paged = vm.items.collectAsLazyPagingItems()
     val favorites by vm.favoriteKeys.collectAsStateWithLifecycle()
     val continueList by vm.continueWatching.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -93,10 +96,9 @@ fun VodTab(vm: VodViewModel, onOpen: (Long) -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         CategoryChips(categories, selected, vm.type, vm::select)
-        val list = items
         when {
-            list == null -> LoadingView()
-            list.isEmpty() && continueList.isEmpty() -> EmptyView(
+            paged.itemCount == 0 && continueList.isEmpty() && paged.loadState.refresh is LoadState.Loading -> LoadingView()
+            paged.itemCount == 0 && continueList.isEmpty() -> EmptyView(
                 stringResource(if (selected == SpecialCat.FAV) R.string.empty_favorites else R.string.empty_content)
             )
             else -> LazyVerticalGrid(
@@ -128,7 +130,11 @@ fun VodTab(vm: VodViewModel, onOpen: (Long) -> Unit) {
                         SectionTitle(stringResource(if (vm.type == ContentType.MOVIE) R.string.tab_movies else R.string.tab_series))
                     }
                 }
-                itemsIndexed(list, key = { i, c -> if (c.id != 0L) c.id else "k$i" }) { _, c ->
+                items(
+                    count = paged.itemCount,
+                    key = paged.itemKey { c -> if (c.id != 0L) c.id else "${c.type}|${c.remoteId}" },
+                ) { index ->
+                    val c = paged[index] ?: return@items
                     PosterCard(
                         title = c.name,
                         image = c.logo,

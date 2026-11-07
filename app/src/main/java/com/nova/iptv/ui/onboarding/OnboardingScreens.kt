@@ -474,6 +474,7 @@ fun SyncScreen(onDone: () -> Unit, onEdit: (Long) -> Unit, vm: SyncViewModel = h
                 stringResource(
                     when (p?.stage) {
                         SyncStage.CATEGORIES -> R.string.stage_categories
+                        SyncStage.CONTENT -> R.string.stage_content
                         SyncStage.LIVE -> R.string.stage_live
                         SyncStage.MOVIES -> R.string.stage_movies
                         SyncStage.SERIES -> R.string.stage_series

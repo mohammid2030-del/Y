@@ -36,7 +36,7 @@ object PlayerLauncher {
         channelList: List<ContentEntity>? = null,
         fromStart: Boolean = false,
     ) {
-        if (channelList != null) ChannelQueue.set(channelList)
+        ChannelQueue.set(channelList ?: emptyList())
         context.startActivity(intent(context, req, fromStart))
     }
 

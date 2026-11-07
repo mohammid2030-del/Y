@@ -1,5 +1,6 @@
 package com.nova.iptv.data.db
 
+import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
@@ -91,6 +92,24 @@ interface ContentDao {
             "ORDER BY CASE WHEN name LIKE :query || '%' THEN 0 ELSE 1 END, name LIMIT 300"
     )
     suspend fun search(subId: Long, type: String, categoryId: String, query: String): List<ContentEntity>
+
+    // ---- Paged queries: only the visible rows are loaded, so 50k-item lists open instantly ----
+    @Query("SELECT * FROM content WHERE subscriptionId = :subId AND type = :type AND categoryId = :categoryId ORDER BY sortOrder")
+    fun pageByCategory(subId: Long, type: String, categoryId: String): PagingSource<Int, ContentEntity>
+
+    @Query(
+        "SELECT * FROM content WHERE subscriptionId = :subId AND type = :type AND categoryId NOT IN " +
+            "(SELECT remoteId FROM categories WHERE subscriptionId = :subId AND type = :type AND hidden = 1) " +
+            "ORDER BY sortOrder"
+    )
+    fun pageAll(subId: Long, type: String): PagingSource<Int, ContentEntity>
+
+    @Query(
+        "SELECT * FROM content WHERE subscriptionId = :subId AND type = :type AND categoryId NOT IN " +
+            "(SELECT remoteId FROM categories WHERE subscriptionId = :subId AND type = :type AND hidden = 1) " +
+            "ORDER BY added DESC LIMIT 300"
+    )
+    fun pageRecentlyAdded(subId: Long, type: String): PagingSource<Int, ContentEntity>
 
     @Query("SELECT * FROM content WHERE id = :id")
     suspend fun byId(id: Long): ContentEntity?
