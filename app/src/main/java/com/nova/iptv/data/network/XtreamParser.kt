@@ -51,6 +51,7 @@ data class XVodInfo(
     val director: String,
     val image: String,
     val backdrop: String,
+    val tmdbId: String = "",
 )
 
 /**
@@ -203,6 +204,7 @@ object XtreamParser {
             director = info.str("director"),
             image = info.str("movie_image").ifBlank { info.str("cover_big") },
             backdrop = backdrop,
+            tmdbId = info.str("tmdb_id").ifBlank { info.str("tmdb") }.filter { it.isDigit() },
         )
     }
 

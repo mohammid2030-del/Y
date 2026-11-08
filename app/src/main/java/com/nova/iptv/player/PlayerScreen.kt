@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Subtitles
 import com.nova.iptv.ui.components.NetImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,6 +79,7 @@ class PlayerActions(
     val onSelectQuality: (QualityOption?) -> Unit,
     val onZap: (Int) -> Unit,
     val onSkipIntro: () -> Unit = {},
+    val onArabicSubs: () -> Unit = {},
     val onPlayNext: () -> Unit = {},
     val onDismissNext: () -> Unit = {},
     val onAdjustIntro: (Long) -> Unit = {},
@@ -192,6 +194,26 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             if (next != null) UpNextCard(next, state.upNextSeconds, state.upNextTotal, state.autoNext, actions)
         }
 
+        AnimatedVisibility(
+            visible = state.subtitleNote != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 90.dp),
+        ) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Subtitles, null, tint = Color(0xFF9EA8FF), modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(state.subtitleNote.orEmpty(), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
         if (state.qualityDialog) {
             AlertDialog(
                 onDismissRequest = { state.qualityDialog = false },
@@ -269,6 +291,12 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions) {
         }
         if (state.infoVisible && state.videoInfo.isNotBlank()) {
             Text(state.videoInfo, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelMedium)
+        }
+        if (!state.isLive) {
+            IconButton(onClick = actions.onArabicSubs) {
+                if (state.subtitleBusy) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                else Icon(Icons.Filled.Subtitles, stringResource(R.string.arabic_subtitles), tint = Color.White)
+            }
         }
         IconButton(onClick = actions.onInfo) { Icon(Icons.Filled.Info, stringResource(R.string.stream_info), tint = Color.White) }
         IconButton(onClick = actions.onQuality) { Icon(Icons.Filled.HighQuality, stringResource(R.string.video_quality), tint = Color.White) }

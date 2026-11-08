@@ -212,3 +212,17 @@ class SegmentsParserTest {
         assertEquals("1396", info.tmdbId)
     }
 }
+
+class SrtTest {
+    @Test
+    fun parsesAndWritesSrt() {
+        val raw = "﻿1\r\n00:00:01,000 --> 00:00:03,500\r\n<i>Merhaba</i>\r\ndünya\r\n\r\n2\r\n00:00:04.000 --> 00:00:06,000\r\nNasılsın?\r\n\r\n"
+        val cues = com.nova.iptv.data.subs.Srt.parse(raw)
+        assertEquals(2, cues.size)
+        assertEquals("00:00:04,000 --> 00:00:06,000", cues[1].time)
+        assertEquals("Merhaba dünya", com.nova.iptv.data.subs.Srt.plain(cues[0].text))
+        val out = com.nova.iptv.data.subs.Srt.write(cues)
+        assertTrue(out.startsWith("1\n00:00:01,000 --> 00:00:03,500\n"))
+        assertEquals(2, com.nova.iptv.data.subs.Srt.parse(out).size)
+    }
+}

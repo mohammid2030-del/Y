@@ -174,6 +174,11 @@ class ContentRepository @Inject constructor(
         return EpisodeContext(info.tmdbId, all[i], all.getOrNull(i + 1))
     }
 
+    suspend fun movieTmdbId(subId: Long, movieId: String): String {
+        val sub = subs.get(subId) ?: return ""
+        return vodInfo(sub, movieId)?.tmdbId.orEmpty()
+    }
+
     suspend fun vodInfo(sub: SubscriptionEntity, streamId: String): XVodInfo? {
         if (sub.type != SourceType.XTREAM) return null
         val cacheKey = "${sub.id}|$streamId"

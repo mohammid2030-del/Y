@@ -134,6 +134,9 @@ dependencies {
     // Images
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // On-device subtitle translation (Turkish/English -> Arabic)
+    implementation("com.google.mlkit:translate:17.0.3")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     testImplementation("junit:junit:4.13.2")
