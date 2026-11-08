@@ -1,0 +1,100 @@
+name: Apple (iPad, iPhone & Apple TV)
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Generate project & install VLC engine
+        working-directory: ios
+        run: |
+          brew install xcodegen >/dev/null
+          xcodegen generate
+          pod install --repo-update
+
+      - name: Compile iPad / iPhone
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -workspace NovaIPTV.xcworkspace -scheme NovaIOS -configuration Release \
+            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ../build-ios.log | grep -E "error:|warning: unre|BUILD" || true
+          grep -q "BUILD SUCCEEDED" ../build-ios.log
+
+      - name: Compile Apple TV
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -workspace NovaIPTV.xcworkspace -scheme NovaTV -configuration Release \
+            -destination 'generic/platform=tvOS' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ../build-tv.log | grep -E "error:|BUILD" || true
+          grep -q "BUILD SUCCEEDED" ../build-tv.log
+
+      - name: Upload to TestFlight
+        if: env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_P8 != '' && env.APPLE_TEAM_ID != ''
+        working-directory: ios
+        run: |
+          set -e
+          mkdir -p ~/.appstoreconnect/private_keys
+          KEY=~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          AUTH="-allowProvisioningUpdates -authenticationKeyPath $KEY -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          for T in NovaIOS:iOS NovaTV:tvOS; do
+            SCHEME=${T%%:*}; PLAT=${T##*:}
+            echo "::group::Archive $SCHEME"
+            xcodebuild -workspace NovaIPTV.xcworkspace -scheme $SCHEME -configuration Release \
+              -destination "generic/platform=$PLAT" -archivePath build/$SCHEME.xcarchive \
+              DEVELOPMENT_TEAM=$APPLE_TEAM_ID CURRENT_PROJECT_VERSION=$((BUILD_NUMBER + 100)) \
+              $AUTH archive 2>&1 | tee ../archive-$SCHEME.log | grep -E "error:|ARCHIVE" || true
+            grep -q "ARCHIVE SUCCEEDED" ../archive-$SCHEME.log
+            echo "::endgroup::"
+            echo "::group::Upload $SCHEME"
+            xcodebuild -exportArchive -archivePath build/$SCHEME.xcarchive -exportOptionsPlist ExportOptions.plist \
+              -exportPath build/export-$SCHEME $AUTH 2>&1 | tee ../export-$SCHEME.log | tail -20
+            grep -q -E "EXPORT SUCCEEDED|Upload succeeded|Uploaded" ../export-$SCHEME.log
+            echo "::endgroup::"
+          done
+          rm -f "$KEY"
+
+      - name: Report errors on the commit
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ERR=$(cat build-ios.log build-tv.log archive-*.log export-*.log 2>/dev/null | grep -E "error:|error -|Error Domain|ERROR ITMS|failed" | sort -u | head -40)
+          [ -z "$ERR" ] && ERR="(no compiler errors captured — see the Actions log)"
+          BODY=$(printf 'Apple build failed:\n```\n%s\n```' "$ERR")
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$BODY" >/dev/null || true

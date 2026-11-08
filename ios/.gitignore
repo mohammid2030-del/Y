@@ -1,0 +1,6 @@
+NovaIPTV.xcodeproj/
+NovaIPTV.xcworkspace/
+Pods/
+Podfile.lock
+Generated/
+build/

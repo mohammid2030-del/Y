@@ -1,0 +1,71 @@
+name: NovaIPTV
+options:
+  deploymentTarget:
+    iOS: "16.0"
+    tvOS: "16.0"
+  developmentLanguage: ar
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    PRODUCT_BUNDLE_IDENTIFIER: com.mohammid2030.novaiptv
+    PRODUCT_NAME: NOVA
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ENABLE_BITCODE: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+targets:
+  NovaIOS:
+    type: application
+    platform: iOS
+    sources:
+      - Shared
+      - Resources/iOS
+      - Resources/Common
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Generated/Info-iOS.plist
+      properties:
+        CFBundleDisplayName: NOVA IPTV
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: ar
+        CFBundleLocalizations: [ar, en]
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIUserInterfaceStyle: Dark
+  NovaTV:
+    type: application
+    platform: tvOS
+    sources:
+      - Shared
+      - Resources/TV
+      - Resources/Common
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "3"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIconTV
+    info:
+      path: Generated/Info-TV.plist
+      properties:
+        CFBundleDisplayName: NOVA IPTV
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: ar
+        CFBundleLocalizations: [ar, en]
+        ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UIRequiredDeviceCapabilities: [arm64]
+        UIUserInterfaceStyle: Dark
