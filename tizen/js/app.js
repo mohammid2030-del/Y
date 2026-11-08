@@ -438,6 +438,7 @@
 
   function showHome(section) {
     if (section) S.ui.section = section;
+    if (S.data) Library.ensure(S.data);
     setScreen('home', function () {
       app.innerHTML = `<div class="home">
         <main id="content" class="content"></main>
@@ -591,48 +592,168 @@
   }
 
   // ---- movies / series
+  function libState(type) {
+    S.ui.lib = S.ui.lib || {};
+    if (!S.ui.lib[type]) S.ui.lib[type] = { sel: '__recent', cat: null, genre: null };
+    return S.ui.lib[type];
+  }
+  let genreJob = 0;
+
+  /** Movies / Series organised like the big streaming apps: sections on the left (Netflix, Shahid, Turkish …),
+      the provider's categories and genre filters on top, one card per title (best copy). */
   function renderVod(c, type) {
-    const cont = S.ui.cat[type] === '*all' ? continueList(type) : [];
-    c.innerHTML = `<div class="vod-layout">
-      <div class="cat-row" data-group>${catColumn(type)}</div>
-      <div class="vod-scroll" id="vod-scroll">
-        ${cont.length ? `<h3 class="row-title">${esc(t('continueWatching'))}</h3><div class="cont-row" data-group>` + cont.map(function (h, i) {
-          const pct = h.dur ? Math.round(h.pos / h.dur * 100) : 0;
-          return contCard(h, i);
-        }).join('') + '</div>' : ''}
-        <div class="grid" id="vod-grid" data-group></div>
-      </div>
-    </div>`;
-    actions.cat = function (el) {
-      S.ui.cat[type] = el.getAttribute('data-cat');
-      renderSection(false);
-      const sel = $('.cat-row .cat.active');
-      if (sel) Nav.focus(sel);
-    };
-    actions.resume = function (el) {
-      const h = S.history[el.getAttribute('data-h')];
-      if (h) resumeHistory(h);
-    };
-    const list = itemsFor(type, S.ui.cat[type]);
-    const grid = $('#vod-grid');
-    if (!list.length && !cont.length) {
-      grid.outerHTML = `<div class="empty">${esc(t(S.ui.cat[type] === '*fav' ? 'emptyFavorites' : 'emptyContent'))}</div>`;
+    const all = (S.data && S.data[type]) || [];
+    if (!Library.ready()) {
+      c.innerHTML = `<div class="empty"><div class="spinner"></div><p>${esc(t('organizing'))}</p></div>`;
+      Library.ensure(S.data).then(function () { if (screen && screen.name === 'home' && S.ui.section === type) renderSection(false); });
       return;
     }
+    const st = libState(type);
+    const shelves = Library.shelves(type);
+    if (st.sel.indexOf('__') !== 0 && !shelves.some(function (x) { return x.id === st.sel; })) { st.sel = '__recent'; st.cat = null; }
+    const shelf = shelves.filter(function (x) { return x.id === st.sel; })[0];
+    const hasCont = continueList(type).length > 0;
+    function base() {
+      if (st.sel === '__recent') return Library.collapse(type, latest(type, 300)).slice(0, 120);
+      if (st.sel === '__cont') return continueList(type).map(function (h) { return h.item; });
+      if (st.sel === '__fav') return S.fav.filter(function (f) { return f.sub === owner() && f.type === type; }).map(function (f) { return f.item; });
+      return Library.browse(type, all.filter(function (m) { return !S.hidden[type + '|' + m.cat]; }), st.sel, st.cat);
+    }
+    const title = st.sel === '__recent' ? t('recentAdded') : st.sel === '__cont' ? t('continueWatching') : st.sel === '__fav' ? t('favorites')
+      : (shelf ? shelf.title : '') + (st.cat ? ' · ' + Library.catName(type, st.cat) : '');
+    function side(id, label, icon, count) {
+      return `<button data-f data-action="libSel" data-id="${esc(id)}" class="cat${st.sel === id ? ' active' : ''}"><span class="ic">${esc(icon || '')}</span>${esc(label)}${count != null ? `<span class="cnt">${count}</span>` : ''}</button>`;
+    }
+    c.innerHTML = `<div class="lib">
+      <div class="lib-side" data-group>
+        ${side('__recent', t('recentAdded'), '✦')}${hasCont ? side('__cont', t('continueWatching'), '▶') : ''}${side('__fav', t('favorites'), '♥')}
+        <div class="sec-title">${esc(t('sections'))}</div>
+        ${shelves.map(function (x) { return side(x.id, x.title, x.icon, x.count); }).join('')}
+      </div>
+      <div class="lib-main">
+        <div class="lib-head"><h2>${esc(title)}</h2><span class="cnt" id="lib-count"></span><span class="lprog" id="lib-prog"></span>
+          ${st.cat || st.genre ? `<button data-f data-action="libReset" class="btn small">↺ ${esc(t('resetFilters'))}</button>` : ''}</div>
+        ${shelf && shelf.cats.length > 1 ? `<div class="chip-row" data-group>
+          <button data-f data-action="libCat" data-id="" class="chip${!st.cat ? ' on' : ''}">${esc(t('all'))}</button>
+          ${shelf.cats.map(function (k) { return `<button data-f data-action="libCat" data-id="${esc(k.id)}" class="chip${st.cat === k.id ? ' on' : ''}">${esc(k.name)}</button>`; }).join('')}
+        </div>` : ''}
+        ${Tmdb.enabled() ? `<div class="chip-row" data-group>
+          <button data-f data-action="libGenre" data-id="" class="chip${!st.genre ? ' on' : ''}">☰ ${esc(t('allGenres'))}</button>
+          ${Library.genres(type).map(function (g) { return `<button data-f data-action="libGenre" data-id="${g}" class="chip${st.genre === g ? ' on' : ''}">${esc(t('g_' + g))}</button>`; }).join('')}
+        </div>` : `<div class="lib-hint">${esc(t('genresNeedTMDB'))}</div>`}
+        <div class="vod-scroll" id="vod-scroll"><div class="grid" id="vod-grid" data-group></div></div>
+      </div>
+    </div>`;
+    function refocus(sel) { const el = $(sel); if (el) Nav.focus(el); }
+    actions.libSel = function (el) { st.sel = el.getAttribute('data-id'); st.cat = null; renderSection(false); refocus('.lib-side .cat.active'); };
+    actions.libCat = function (el) { st.cat = el.getAttribute('data-id') || null; renderSection(false); refocus('.chip-row .chip.on'); };
+    actions.libGenre = function (el) { st.genre = el.getAttribute('data-id') || null; renderSection(false); refocus('[data-action="libGenre"].on'); };
+    actions.libReset = function () { st.cat = null; st.genre = null; renderSection(false); refocus('.lib-side .cat.active'); };
     actions.open = function (el) {
-      const item = list[parseInt(el.getAttribute('data-i'), 10)];
+      const item = shown[parseInt(el.getAttribute('data-i'), 10)];
+      if (!item) return;
       S.ui.focusKey = type + ':' + item.id;
-      if (type === 'movie') showMovie(item); else showSeries(item);
+      openTitle(type, item);
     };
-    windowed(grid, list, function (it, i) {
-      return `<button data-f data-i="${i}" data-key="${type}:${esc(it.id)}" data-action="open" class="poster">
-        <span class="pimg">${img(it.logo)}${isFav(type, it.id) ? '<span class="star">★</span>' : ''}</span>
-        <span class="ptitle">${esc(Clean.title(it.name))}</span>
-        <span class="psub">${esc([it.year, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join('  '))}</span>
-      </button>`;
-    }, function (el, it) { S.ui.focusKey = type + ':' + it.id; }, 48, function (nodes) {
-      nodes.forEach(function (n) { localize(n, type, list[parseInt(n.getAttribute('data-i'), 10)]); });
+    let shown = [];
+    function draw(list) {
+      shown = list;
+      $('#lib-count').textContent = String(list.length);
+      const grid = $('#vod-grid');
+      if (!grid) return;
+      const keep = Nav.current && grid.contains(Nav.current) ? Nav.current.getAttribute('data-key') : null;
+      grid.innerHTML = '';
+      if (!list.length) { grid.innerHTML = `<div class="empty">${esc(t(st.sel === '__fav' ? 'emptyFavorites' : 'emptyContent'))}</div>`; return; }
+      windowed(grid, list, function (it, i) {
+        return `<button data-f data-i="${i}" data-key="${type}:${esc(it.id)}" data-action="open" class="poster">
+          <span class="pimg">${img(it.logo)}${isFav(type, it.id) ? '<span class="star">★</span>' : ''}</span>
+          <span class="ptitle">${esc(Clean.title(it.name))}</span>
+          <span class="psub">${esc([it.year, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join('  '))}</span>
+        </button>`;
+      }, function (el, it) { S.ui.focusKey = type + ':' + it.id; }, 48, function (nodes) {
+        nodes.forEach(function (n) { localize(n, type, list[parseInt(n.getAttribute('data-i'), 10)]); });
+      });
+      if (keep) { const again = grid.querySelector('[data-key="' + cssEsc(keep) + '"]'); if (again) Nav.focus(again, { noScroll: true }); }
+    }
+    const list = base();
+    const job = ++genreJob;
+    if (!st.genre) {
+      draw(list);
+      // let TMDB identify titles in the background so copies with different names merge next time
+      if (Tmdb.enabled() && st.sel.indexOf('__') !== 0) list.slice(0, 400).forEach(function (m) { Tmdb.card(type, m.name, m.year); });
+      return;
+    }
+    // genre: categories named after the genre count at once; the rest are checked with TMDB (cached afterwards)
+    const wanted = Library.genreIds(st.genre, type);
+    const out = [];
+    let done = 0;
+    draw([]);
+    $('#lib-prog').textContent = t('classifying', 0, list.length);
+    (async function () {
+      for (let i = 0; i < list.length; i += 12) {
+        if (job !== genreJob || !$('#vod-grid')) return;
+        const chunk = list.slice(i, i + 12);
+        const res = await Promise.all(chunk.map(function (m) {
+          if (Library.genreInCategory(st.genre, Library.catName(type, m.cat))) return Promise.resolve(true);
+          return Tmdb.card(type, m.name, m.year).then(function (r) {
+            return !!(r && r.g && r.g.some(function (g) { return wanted.indexOf(g) >= 0; }));
+          }, function () { return false; });
+        }));
+        if (job !== genreJob || !$('#vod-grid')) return;
+        res.forEach(function (ok, j) { if (ok) out.push(chunk[j]); });
+        done = Math.min(list.length, i + 12);
+        $('#lib-prog').textContent = done < list.length ? t('classifying', done, list.length) : '';
+        // refresh the grid unless the user is moving inside it (it updates once they leave)
+        if (!(Nav.current && $('#vod-grid').contains(Nav.current)) || done >= list.length) draw(out.slice());
+      }
+    })();
+  }
+
+  /** Opens a title; when the library has several copies, asks which one every time (Arabic copies first, preselected). */
+  async function openTitle(type, item) {
+    const all = (S.data && S.data[type]) || [];
+    const copies = Library.ordered(type, Library.variants(type, all, item));
+    let pick = item;
+    if (copies.length > 1) {
+      const v = await chooseBox(t('chooseVersion'), copies.map(function (m, i) { return { value: i, label: Library.label(type, m) || m.name }; }), 0);
+      if (v === undefined) return;
+      pick = copies[v];
+    }
+    if (type === 'movie') showMovie(pick); else showSeries(pick);
+  }
+
+  /** Cast member: photo, role, biography and best-known titles (those in the subscription open directly). */
+  async function showPerson(p) {
+    const md = modal(`<div class="person-sheet"><div class="pp">${p.photo ? `<img src="${esc(p.photo)}">` : ''}</div>
+      <div><h2>${esc(p.name)}</h2><p class="muted">${esc(p.role || '')}</p><div id="pbio"><div class="spinner"></div></div></div></div>
+      <div id="pknown"></div>`, function () {}, {});
+    const info = await Tmdb.person(p.id);
+    if (!document.body.contains(md.el)) return;
+    const bio = $('#pbio', md.el), known = $('#pknown', md.el);
+    bio.innerHTML = info && info.bio ? `<button data-f data-m="bio" class="set-row plot" style="white-space:normal;text-align:start">${esc(info.bio.slice(0, 700))}${info.bio.length > 700 ? '…' : ''}</button>` : '';
+    const works = (info && info.known) || [];
+    function find(w) {
+      const type = w.tv ? 'series' : 'movie', list = (S.data && S.data[type]) || [];
+      const names = [w.title, w.original].filter(Boolean).map(function (n) { return Clean.title(n).toLowerCase(); });
+      const hits = list.filter(function (m) { return names.indexOf(Clean.title(m.name).toLowerCase()) >= 0; });
+      const same = hits.filter(function (m) { return !w.year || !m.year || String(m.year).slice(0, 4) === w.year; })[0];
+      return same || hits[0] ? { type: type, item: same || hits[0] } : null;
+    }
+    const found = works.map(find);
+    known.innerHTML = works.length ? `<h3>${esc(t('knownFor'))}</h3><div class="known-row" data-group>${works.map(function (w, i) {
+      return `<button data-f data-m="w${i}" class="poster${found[i] ? '' : ' na'}"><span class="pimg"><img src="${esc(w.poster)}">${found[i] ? '<span class="rate">▶</span>' : ''}</span><span class="ptitle">${esc(w.title)}</span></button>`;
+    }).join('')}</div>` : '';
+    md.el.onclick = null;
+    md.el.addEventListener('click', function (e) {
+      const el = e.target.closest('[data-m]'); if (!el) return;
+      const m = el.getAttribute('data-m');
+      if (m === 'bio') { el.textContent = info.bio; return; }
+      const i = parseInt(m.slice(1), 10), f = found[i];
+      if (!f) { toast(t('notInSub', works[i].title)); return; }
+      md.close();
+      if (f.type === 'movie') showMovie(f.item); else showSeries(f.item);
     });
+    Nav.focusFirst(md.el);
   }
 
   function resumeHistory(h) {
@@ -680,6 +801,7 @@
             ${canResume ? `<button data-f data-action="restart" class="btn">↺ ${esc(t('startOver'))}</button>` : ''}
             ${tm && tm.trailer ? `<button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>` : ''}
             <button data-f data-action="fav" class="btn">${isFav('movie', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
+            ${versionCount('movie', item) > 1 ? `<button data-f data-action="versions" class="btn vbtn">⧉ ${esc(Library.label('movie', item))}</button>` : ''}
           </div>
           ${canResume && h.dur ? `<div class="mini-progress wide"><div style="width:${Math.round(h.pos / h.dur * 100)}%"></div></div>` : ''}
           ${tm && tm.tagline ? `<p class="tagline-q">“${esc(tm.tagline)}”</p>` : ''}
@@ -690,6 +812,10 @@
       </div></div>`;
   }
 
+  function versionCount(type, item) {
+    return Library.ready() ? Library.variants(type, (S.data && S.data[type]) || [], item).length : 1;
+  }
+
   function titleBlock(tm, name) {
     const title = (tm && tm.title) || Clean.title(name);
     if (tm && tm.logo) return `<div class="tlogo"><img src="${esc(tm.logo)}" onerror="this.parentNode.outerHTML='<h1>${esc(title).replace(/'/g, '&#39;')}</h1>'"></div><div class="muted">${esc(title)}</div>`;
@@ -697,12 +823,14 @@
   }
 
   function castRow(cast) {
-    return `<div class="cast-row">${cast.slice(0, 8).map(function (p) {
-      return `<div class="person"><div class="pphoto">${p.photo ? `<img src="${esc(p.photo)}">` : '👤'}</div><b>${esc(p.name)}</b><span class="muted">${esc(p.role)}</span></div>`;
+    return `<div class="cast-row" data-group>${cast.slice(0, 12).map(function (p, i) {
+      return `<button data-f data-action="person" data-i="${i}" class="person"><div class="pphoto">${p.photo ? `<img src="${esc(p.photo)}">` : '👤'}</div><b>${esc(p.name)}</b><span class="muted">${esc(p.role)}</span></button>`;
     }).join('')}</div>`;
   }
 
   function bindMovie(item, info) {
+    actions.person = function (el) { const c = info && info.tm && info.tm.cast[parseInt(el.getAttribute('data-i'), 10)]; if (c) showPerson(c); };
+    actions.versions = function () { openTitle('movie', item); };
     actions.play = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: (info && info.image) || item.logo }); };
     actions.restart = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: item.logo, fromStart: true }); };
     actions.trailer = function () { if (info && info.tm && info.tm.trailer) showTrailer(info.tm.trailer); };
@@ -742,8 +870,10 @@
                 ${last ? `<button data-f data-autofocus data-action="cont" class="btn primary">▶ ${esc(t('resume'))} ${esc((last.subtitle || '').split(' —')[0])}</button>` : ''}
                 ${tm && tm.trailer ? `<button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>` : ''}
                 <button data-f data-action="fav" class="btn">${isFav('series', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
+                ${versionCount('series', item) > 1 ? `<button data-f data-action="versions" class="btn vbtn">⧉ ${esc(Library.label('series', item))}</button>` : ''}
               </div>
               <p class="plot short">${esc((tm && tm.overview) || (info && info.plot) || item.plot || '')}</p>
+              ${tm && tm.cast.length ? castRow(tm.cast) : ''}
             </div>
           </div>
           ${!info && !error ? '<div class="spinner"></div>' : ''}
@@ -778,6 +908,8 @@
         };
         actions.reload = load;
         actions.trailer = function () { if (tm && tm.trailer) showTrailer(tm.trailer); };
+        actions.person = function (el) { const c = tm && tm.cast[parseInt(el.getAttribute('data-i'), 10)]; if (c) showPerson(c); };
+        actions.versions = function () { openTitle('series', item); };
         Nav.focusFirst();
       }, { back: function () { showHome(); } });
     }
@@ -907,8 +1039,7 @@
     actions.openResult = function (el) {
       const r = out[parseInt(el.getAttribute('data-i'), 10)];
       if (r.type === 'live') playLive(r.item, [r.item]);
-      else if (r.type === 'movie') showMovie(r.item);
-      else showSeries(r.item);
+      else openTitle(r.type, r.item);
     };
   }
 
@@ -1317,7 +1448,8 @@
     const cont = continueList('movie').concat(continueList('series')).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
     const chans = Object.keys(S.history).map(function (k) { return S.history[k]; })
       .filter(function (h) { return h.sub === owner() && h.type === 'live' && h.item; }).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
-    const mov = latest('movie', 20), ser = latest('series', 20);
+    const mov = Library.ready() ? Library.collapse('movie', latest('movie', 80)).slice(0, 20) : latest('movie', 20);
+    const ser = Library.ready() ? Library.collapse('series', latest('series', 80)).slice(0, 20) : latest('series', 20);
     const favs = S.fav.filter(function (f) { return f.sub === owner() && f.type !== 'live' && f.item; });
     c.innerHTML = `<div class="disc" id="disc">
       ${feat.length ? `<section class="hero" id="hero"></section>` : '<div style="height:120px"></div>'}
@@ -1340,7 +1472,7 @@
     actions.dopen = function (el) {
       S.ui.focusKey = el.getAttribute('data-key');
       const type = el.getAttribute('data-type'), it = lists[type][parseInt(el.getAttribute('data-i'), 10)];
-      if (type === 'movie') showMovie(it); else showSeries(it);
+      openTitle(type, it);
     };
     actions.dfav = function (el) { S.ui.focusKey = el.getAttribute('data-key'); const f = favs[parseInt(el.getAttribute('data-i'), 10)]; if (f.type === 'movie') showMovie(f.item); else showSeries(f.item); };
     actions.mday = function (el) {
@@ -1452,16 +1584,38 @@
     if (!Matches.canOpen(m)) { toast(t('opensIn', countdown(m.start - 30 * 60000 - Date.now()))); return; }
     const ranked = Matches.rankChannels(m, (S.data && S.data.live) || [], S.sub.id);
     if (!ranked.length) { toast(t('noChannel')); return; }
-    let pick = ranked[0];
-    const sure = pick.score >= 500 || (ranked.length === 1) || (pick.score - (ranked[1] ? ranked[1].score : 0) >= 60);
-    if (!sure) {
-      const v = await chooseBox(t('pickChannel') + ' — ' + m.home.short + ' × ' + m.away.short,
-        ranked.map(function (r, i) { return { value: i, label: r.ch.name }; }), 0);
-      if (v === undefined) return;
-      pick = ranked[v];
+    function go(ch, list) { Matches.remember(m, S.sub.id, ch); playLive(ch, list); }
+    if (ranked[0].score >= 500) return go(ranked[0].ch, ranked.slice(0, 10).map(function (r) { return r.ch; }));
+    // Only the competition's rights holder (Arabic first), not every sports channel.
+    const holders = ranked.filter(function (r) { return Matches.isRightsHolder(m, r.ch.name); });
+    const pool = (holders.length ? holders : ranked).slice(0, 40);
+    let showing = [];
+    if (S.sub.type === 'xtream') {
+      // The channels' own programme guide says which one is showing this match.
+      toast(t('findingChannel'));
+      const tokens = Matches.teamTokens(m.home).concat(Matches.teamTokens(m.away));
+      const t0 = m.start;
+      for (let i = 0; i < pool.length; i += 8) {
+        const chunk = pool.slice(i, i + 8);
+        const res = await Promise.all(chunk.map(function (r) {
+          return Promise.race([Api.shortEpg(S.sub, r.ch.id), new Promise(function (ok) { setTimeout(function () { ok([]); }, 5000); })]).then(function (progs) {
+            return (progs || []).some(function (p) {
+              const near = !p.start || (p.start <= t0 + 2 * 3600000 && (!p.end || p.end >= t0 - 30 * 60000));
+              const txt = ((p.title || '') + ' ' + (p.desc || '')).toLowerCase();
+              return near && tokens.some(function (k) { return txt.indexOf(k) >= 0; });
+            });
+          }, function () { return false; });
+        }));
+        res.forEach(function (ok, j) { if (ok) showing.push(chunk[j].ch); });
+      }
     }
-    await Matches.remember(m, S.sub.id, pick.ch);
-    playLive(pick.ch, ranked.map(function (r) { return r.ch; }));
+    if (showing.length === 1) return go(showing[0], showing);
+    const options = showing.length ? showing : pool.slice(0, 8).map(function (r) { return r.ch; });
+    if (options.length === 1) return go(options[0], options);
+    const title = (showing.length ? t('pickChannel') : t('notInGuide')) + ' — ' + m.home.short + ' × ' + m.away.short;
+    const v = await chooseBox(title, options.map(function (ch, i) { return { value: i, label: ch.name }; }), 0);
+    if (v === undefined) return;
+    go(options[v], options);
   }
 
   // ---- teams & competitions

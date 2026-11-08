@@ -366,3 +366,30 @@ label { display: block; margin: 14px 0; color: var(--muted); font-size: 24px; }
 .tcard b { font-size: 21px; display: block; max-height: 54px; overflow: hidden; }
 .tcard.on { background: rgba(108,123,255,.22); box-shadow: inset 0 0 0 2px var(--primary); }
 .tchk { position: absolute; top: 10px; right: 14px; color: var(--primary); font-weight: 900; font-size: 26px; }
+
+/* ---- organised library (sections / categories / genres) */
+.lib { display: flex; height: 100%; }
+.lib-side { width: 400px; flex-shrink: 0; overflow-y: auto; padding: 4px 10px 60px 4px; }
+.lib-side .sec-title { color: var(--muted); font-size: 20px; margin: 18px 12px 6px; }
+.lib-side .cat { display: flex; align-items: center; }
+.lib-side .cat .ic { width: 34px; text-align: center; margin-inline-end: 10px; -webkit-margin-end: 10px; opacity: .85; }
+.lib-side .cat .cnt { margin-inline-start: auto; -webkit-margin-start: auto; color: var(--muted); font-size: 18px; }
+.lib-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-inline-start: 18px; -webkit-padding-start: 18px; }
+.lib-head { display: flex; align-items: center; padding: 6px 8px 4px; }
+.lib-head h2 { margin: 0; font-size: 34px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 900px; }
+.lib-head .cnt { color: var(--muted); margin-inline-start: 14px; -webkit-margin-start: 14px; font-size: 24px; }
+.lib-head .lprog { color: var(--muted); margin-inline-start: 18px; -webkit-margin-start: 18px; font-size: 20px; }
+.lib-head .btn { margin-inline-start: auto; -webkit-margin-start: auto; }
+.chip-row { flex-shrink: 0; white-space: nowrap; overflow: hidden; padding: 4px 2px; }
+.chip-row .chip { font-size: 22px; padding: 10px 22px; }
+.chip-row .chip.on { background: var(--primary); color: #fff; }
+.lib-hint { color: var(--muted); font-size: 20px; padding: 4px 10px; }
+.cast-row .person { border-radius: 18px; padding: 8px 4px; }
+.cast-row .person.focused { background: rgba(255,255,255,.14); outline: 3px solid var(--primary); transform: scale(1.06); }
+.vbtn { max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.person-sheet { display: flex; }
+.person-sheet .pp { margin-inline-end: 40px; -webkit-margin-end: 40px; width: 220px; height: 220px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--s2); }
+.person-sheet .pp img { width: 100%; height: 100%; object-fit: cover; }
+.known-row { white-space: nowrap; overflow: hidden; padding: 10px 2px; }
+.known-row .poster { display: inline-block; vertical-align: top; margin: 0 10px; }
+.known-row .poster.na { opacity: .5; }

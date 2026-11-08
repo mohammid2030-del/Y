@@ -53,6 +53,16 @@
   var posterStore = null, posterDirty = false, posterTimer = null;
   var queue = [], active = 0;
 
+  /** Titles in a script the viewer probably can't read (Cyrillic, CJK, Thai …). */
+  function foreignScript(t) {
+    for (var i = 0; i < (t || '').length; i++) {
+      var c = t.charCodeAt(i);
+      if (c < 0x250 || (c >= 0x1E00 && c <= 0x1EFF) || (c >= 0x600 && c <= 0x6FF) || (c >= 0x750 && c <= 0x77F) || (c >= 0xFB50 && c <= 0xFEFF)) continue;
+      if (/[\s\d\p{P}]/u.test(t[i])) continue;
+      return true;
+    }
+    return false;
+  }
   function lang() { return global.I18n && I18n.lang === 'en' ? 'en' : 'ar'; }
   function img(path, size) { return path ? 'https://image.tmdb.org/t/p/' + size + path : ''; }
 
@@ -78,14 +88,14 @@
   function savePosters() {
     posterDirty = true;
     clearTimeout(posterTimer);
-    posterTimer = setTimeout(function () { if (posterDirty) { posterDirty = false; Store.set('tmdbPosters', posterCache); } }, 4000);
+    posterTimer = setTimeout(function () { if (posterDirty) { posterDirty = false; Store.set('tmdbPosters2', posterCache); } }, 4000);
   }
 
   var Tmdb = {
     init: async function () {
       var enc = await Store.get('tmdbKey', '');
       tmdbKey = enc ? await Store.decrypt(enc) : '';
-      posterCache = await Store.get('tmdbPosters', {}) || {};
+      posterCache = await Store.get('tmdbPosters2', {}) || {};
     },
     enabled: function () { return !!tmdbKey; },
     setKey: async function (k) {
@@ -95,13 +105,13 @@
       tmdbKey = k;
       await Store.set('tmdbKey', await Store.encrypt(k));
       infoCache = {}; posterCache = {}; seasonCache = {};
-      await Store.set('tmdbPosters', {});
+      await Store.set('tmdbPosters2', {});
       return true;
     },
     remove: async function () {
       tmdbKey = '';
       infoCache = {}; posterCache = {};
-      await Store.del('tmdbKey'); await Store.set('tmdbPosters', {});
+      await Store.del('tmdbKey'); await Store.set('tmdbPosters2', {});
     },
 
     /** Localised poster + title for list cards. Resolves {poster, title} or null. */
@@ -124,11 +134,44 @@
           return r;
         }).then(function (r) {
           var f = r.results && r.results[0];
-          var v = f ? { poster: img(f.poster_path, 'w342'), title: f[isTv ? 'name' : 'title'] || '', id: f.id } : { poster: '', title: '', id: 0 };
+          var v = f ? { poster: img(f.poster_path, 'w342'), title: f[isTv ? 'name' : 'title'] || '', id: f.id, g: f.genre_ids || [],
+            bd: img(f.backdrop_path, 'w780') } : { poster: '', title: '', id: 0, g: [] };
+          if (f && foreignScript(v.title)) {
+            // no Arabic title on TMDB → show the English one instead of Cyrillic / CJK
+            return tmdbGet((isTv ? 'tv/' : 'movie/') + f.id, { language: 'en-US' }).then(function (en) {
+              v.title = (en && (en.name || en.title)) || v.title; posterCache[key] = v; savePosters(); return v;
+            }, function () { posterCache[key] = v; savePosters(); return v; });
+          }
           posterCache[key] = v; savePosters();
           return v;
         });
       });
+    },
+
+    /** TMDB id already known for a title (no network). */
+    idFor: function (type, name, year) {
+      var c = cleanFull(name);
+      var y = /^\d{4}/.test(year || '') ? String(year).slice(0, 4) : c.year;
+      var a = posterCache[type + '|ar|' + c.title + '|' + y], b = posterCache[type + '|en|' + c.title + '|' + y];
+      return (a && a.id) || (b && b.id) || 0;
+    },
+
+    /** Biography and best-known titles of a cast member. */
+    person: function (id) {
+      if (!tmdbKey || !id) return Promise.resolve(null);
+      var l = lang();
+      return tmdbGet('person/' + id, { language: l, append_to_response: 'combined_credits' }).then(function (o) {
+        var seen = {};
+        var known = (((o.combined_credits || {}).cast) || []).filter(function (d) { return d.poster_path && !seen[d.id] && (seen[d.id] = 1); })
+          .sort(function (a, b) { return (b.vote_count || 0) - (a.vote_count || 0); }).slice(0, 12).map(function (d) {
+            var tv = d.media_type === 'tv';
+            return { id: d.id, tv: tv, poster: img(d.poster_path, 'w342'), title: d[tv ? 'name' : 'title'] || '',
+              original: d[tv ? 'original_name' : 'original_title'] || '', year: String(d[tv ? 'first_air_date' : 'release_date'] || '').slice(0, 4) };
+          });
+        var out = { bio: o.biography || '', born: o.birthday || '', place: o.place_of_birth || '', known: known };
+        if (!out.bio && l !== 'en') return tmdbGet('person/' + id, { language: 'en-US' }).then(function (en) { out.bio = en.biography || ''; return out; }, function () { return out; });
+        return out;
+      }, function () { return null; });
     },
 
     /** Full details (Arabic first, English fallback). */
@@ -147,7 +190,7 @@
           language: l, append_to_response: 'credits,images,videos,' + (isTv ? 'content_ratings' : 'release_dates'),
           include_image_language: l + ',en,null'
         }).then(function (o) {
-          var needEn = l !== 'en' && (!o.overview || !(o.title || o.name));
+          var needEn = l !== 'en' && (!o.overview || !(o.title || o.name) || foreignScript(o.title || o.name));
           return (needEn ? tmdbGet(t + '/' + id, { language: 'en-US' }).catch(function () { return null; }) : Promise.resolve(null)).then(function (en) {
             function pick(list, langs) {
               var arr = (o.images && o.images[list]) || [];
@@ -163,7 +206,7 @@
             var crew = (o.credits && o.credits.crew) || [];
             var info = {
               id: id,
-              title: o.title || o.name || (en && (en.title || en.name)) || '',
+              title: (function () { var tt = o.title || o.name || (en && (en.title || en.name)) || ''; return foreignScript(tt) && en && (en.title || en.name) ? (en.title || en.name) : tt; })(),
               original: o.original_title || o.original_name || '',
               overview: o.overview || (en && en.overview) || '',
               tagline: o.tagline || '',
@@ -175,7 +218,7 @@
               backdrop: img(pick('backdrops', [null]) || o.backdrop_path, 'w1280'),
               poster: img(pick('posters', [l]) || o.poster_path, 'w500'),
               logo: img(pick('logos', [l, 'en', null]), 'w500'),
-              cast: ((o.credits && o.credits.cast) || []).slice(0, 12).map(function (p) { return { name: p.name, role: p.character || '', photo: img(p.profile_path, 'w185') }; }),
+              cast: ((o.credits && o.credits.cast) || []).slice(0, 12).map(function (p) { return { id: p.id, name: p.name, role: p.character || '', photo: img(p.profile_path, 'w185') }; }),
               creators: isTv ? (o.created_by || []).map(function (p) { return p.name; }) : crew.filter(function (p) { return p.job === 'Director'; }).map(function (p) { return p.name; }),
               seasons: o.number_of_seasons || 0,
               trailer: trailer
@@ -378,7 +421,30 @@
         if (score > 0) out.push({ ch: ch, score: score });
       }
       out.sort(function (a, b) { return b.score - a.score; });
-      return out.slice(0, 10);
+      return out;
+    },
+    /** The channel carries the competition's regional rights holder (beIN for the Premier League …). */
+    isRightsHolder: function (m, name) {
+      var text = String(name || '').toLowerCase();
+      return (HINTS[m.slug] || []).some(function (h) { return text.indexOf(h) >= 0; });
+    },
+    /** Words that identify a team in a programme guide (English + common Arabic spellings). */
+    teamTokens: function (team) {
+      var AR = { 'real madrid': ['ريال مدريد'], barcelona: ['برشلونة'], atletico: ['أتلتيكو', 'اتلتيكو'], 'real sociedad': ['ريال سوسيداد'],
+        rayo: ['رايو'], villarreal: ['فياريال'], betis: ['بيتيس'], sevilla: ['إشبيلية', 'اشبيلية'], valencia: ['فالنسيا'],
+        'manchester united': ['مانشستر يونايتد'], 'man utd': ['مانشستر يونايتد'], 'manchester city': ['مانشستر سيتي'], 'man city': ['مانشستر سيتي'],
+        liverpool: ['ليفربول'], arsenal: ['أرسنال', 'آرسنال', 'ارسنال'], chelsea: ['تشيلسي'], tottenham: ['توتنهام'], 'aston villa': ['أستون فيلا', 'استون فيلا'],
+        newcastle: ['نيوكاسل'], bayern: ['بايرن'], dortmund: ['دورتموند'], leverkusen: ['ليفركوزن'], freiburg: ['فرايبورغ'], juventus: ['يوفنتوس'],
+        inter: ['إنتر', 'انتر'], milan: ['ميلان'], napoli: ['نابولي'], roma: ['روما'], psg: ['باريس'], 'paris saint-germain': ['باريس'],
+        hilal: ['الهلال'], nassr: ['النصر'], ittihad: ['الاتحاد'], ahli: ['الأهلي', 'الاهلي'], shabab: ['الشباب'], qadsiah: ['القادسية'], ettifaq: ['الاتفاق'] };
+      var out = [], generic = ['fc', 'cf', 'club', 'united', 'city', 'real', 'al', 'de', 'sc', 'ac', 'afc', 'sporting'];
+      [team.name, team.short].forEach(function (n) {
+        n = String(n || '').toLowerCase(); if (!n) return;
+        out.push(n);
+        Object.keys(AR).forEach(function (k) { if (n.indexOf(k) >= 0) out = out.concat(AR[k]); });
+        n.split(/[^a-z\u00c0-\u024f]+/).forEach(function (w) { if (w.length >= 5 && generic.indexOf(w) < 0) out.push(w); });
+      });
+      return out.filter(function (x, i) { return out.indexOf(x) === i; });
     },
     remember: function (m, subId, ch) {
       prefs.picks[subId + '|m|' + m.id] = ch.id;

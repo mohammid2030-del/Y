@@ -114,7 +114,8 @@
             return {
               id: str(s.stream_id), name: str(s.name).trim(), cat: str(s.category_id), logo: str(s.stream_icon),
               ext: str(s.container_extension), rating: str(s.rating) === '0' ? '' : str(s.rating),
-              year: str(s.year) || str(s.releaseDate).slice(0, 4), added: num(s.added)
+              year: str(s.year) || str(s.releaseDate).slice(0, 4), added: num(s.added),
+              tmdb: tmdbOf(s)
             };
           });
           step(out.length); return out;
@@ -124,7 +125,8 @@
             return {
               id: str(s.series_id), name: str(s.name).trim(), cat: str(s.category_id), logo: str(s.cover),
               rating: str(s.rating) === '0' ? '' : str(s.rating), plot: str(s.plot),
-              year: str(s.year) || (str(s.releaseDate) || str(s.release_date)).slice(0, 4), added: num(s.last_modified)
+              year: str(s.year) || (str(s.releaseDate) || str(s.release_date)).slice(0, 4), added: num(s.last_modified),
+              tmdb: tmdbOf(s)
             };
           });
           step(out.length); return out;
@@ -139,6 +141,8 @@
       });
     });
   }
+
+  function tmdbOf(s) { var t = (str(s.tmdb) || str(s.tmdb_id)).replace(/\D/g, ''); return t && t !== '0' ? t : ''; }
 
   function withOrphans(categories, items) {
     var known = {};
