@@ -184,11 +184,20 @@ abstract class VodViewModel(
     suspend fun backdropOf(h: HistoryEntity): String? = content.heroInfo(h.asContent())?.backdrop?.takeIf { it.isNotBlank() }
 
     /** Items of one category row (collected only while the row is on screen). */
-    fun row(categoryId: String): Flow<List<ContentEntity>> =
-        subId.flatMapLatest { content.row(it, type, categoryId, 20) }
+    // Rows are cached as StateFlows so that, when you come back from a title, every row already has its
+    // items — otherwise rows start empty, the list becomes shorter than the screen and jumps to the top.
+    private val rowFlows = HashMap<String, StateFlow<List<ContentEntity>>>()
+    private val countFlows = HashMap<String, StateFlow<Int>>()
 
-    fun count(categoryId: String): Flow<Int> =
+    fun row(categoryId: String): StateFlow<List<ContentEntity>> = rowFlows.getOrPut(categoryId) {
+        subId.flatMapLatest { content.row(it, type, categoryId, 20) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+
+    fun count(categoryId: String): StateFlow<Int> = countFlows.getOrPut(categoryId) {
         subId.flatMapLatest { content.categoryCount(it, type, categoryId) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    }
 
     fun toggleFavorite(c: ContentEntity) {
         viewModelScope.launch { content.toggleFavorite(c.subscriptionId, type, c.remoteId, c.name, c.logo) }

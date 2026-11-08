@@ -122,12 +122,15 @@ class MatchesViewModel @Inject constructor(
     var resolvingId by mutableStateOf<String?>(null)
         private set
     val day = MutableStateFlow(0)
+    private var lastKey = ""
 
     val ui: StateFlow<MatchesUi> = combine(settings.settings.map { it.showMatches }, day, prefs.state) { on, d, p -> Triple(on, d, p) }
         .flatMapLatest { (on, d, p) ->
             if (!on) flowOf(MatchesUi(loading = false, enabled = false))
             else flow {
-                emit(MatchesUi(loading = true))
+                val key = "$d|${p.hashCode()}"
+                if (key != lastKey) emit(MatchesUi(loading = true))
+                lastKey = key
                 // Refreshes every 45 s while a match is live, otherwise every 10 minutes (and on each app open).
                 while (true) {
                     val list = runCatching { repo.matchesFor(d, p.competitions, p.teams, p.onlyFavorites) }.getOrDefault(emptyList())

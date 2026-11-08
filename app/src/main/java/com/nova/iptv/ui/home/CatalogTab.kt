@@ -196,8 +196,8 @@ private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, lis
 private fun CategoryRow(vm: VodViewModel, cat: CategoryEntity, favorites: Set<String>, onOpen: (Long) -> Unit) {
     val flow = remember(cat.remoteId) { vm.row(cat.remoteId) }
     val countFlow = remember(cat.remoteId) { vm.count(cat.remoteId) }
-    val items by flow.collectAsStateWithLifecycle(emptyList())
-    val count by countFlow.collectAsStateWithLifecycle(0)
+    val items by flow.collectAsStateWithLifecycle()
+    val count by countFlow.collectAsStateWithLifecycle()
     if (items.isEmpty()) {
         Spacer(Modifier.height(1.dp))
         return
