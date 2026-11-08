@@ -92,9 +92,17 @@ private fun ContentEntity.meta(): String =
 fun VodTab(vm: VodViewModel, onOpen: (Long) -> Unit) {
     val categories by vm.categories.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
-    val gridState = rememberLazyGridState()
-    LaunchedEffect(selected) { if (selected != SpecialCat.ALL) gridState.scrollToItem(0) }
+    // Scroll positions live in the ViewModel so they survive opening a title and coming back.
+    val listState = vm.discoverState
+    val gridState = vm.gridState
+    LaunchedEffect(selected) {
+        if (selected != SpecialCat.ALL && vm.gridCategory != selected) {
+            vm.gridCategory = selected
+            gridState.scrollToItem(0)
+        }
+    }
+    // Back from a category returns to the rows, exactly where you were.
+    androidx.activity.compose.BackHandler(enabled = selected != SpecialCat.ALL) { vm.select(SpecialCat.ALL) }
     OnReselect {
         when {
             selected == SpecialCat.ALL -> listState.smoothScrollToTop()

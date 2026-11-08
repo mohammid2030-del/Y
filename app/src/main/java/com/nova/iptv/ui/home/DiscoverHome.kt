@@ -128,7 +128,7 @@ fun DiscoverHome(
         return
     }
 
-    val listState = rememberLazyListState()
+    val listState = vm.listState
     OnReselect { listState.smoothScrollToTop() }
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 40.dp)) {
         item(key = "hero") {

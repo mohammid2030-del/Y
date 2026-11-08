@@ -72,6 +72,11 @@ class LiveViewModel @Inject constructor(
     val subId: StateFlow<Long> = settings.activeSubscriptionId.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     val selected = MutableStateFlow(SpecialCat.ALL)
 
+    /** Scroll positions kept across navigation (detail screens, category grids). */
+    val discoverState = androidx.compose.foundation.lazy.LazyListState()
+    val gridState = androidx.compose.foundation.lazy.grid.LazyGridState()
+    var gridCategory: String = ""
+
     val categories: StateFlow<List<CategoryEntity>> = subId
         .flatMapLatest { content.visibleCategories(it, ContentType.LIVE) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -336,6 +341,9 @@ class DiscoverViewModel @Inject constructor(
     suspend fun heroInfo(c: ContentEntity) = content.heroInfo(c)
 
     suspend fun backdropOf(h: HistoryEntity): String? = content.heroInfo(h.asContent())?.backdrop?.takeIf { it.isNotBlank() }
+
+    /** Home scroll position kept across navigation. */
+    val listState = androidx.compose.foundation.lazy.LazyListState()
 
     fun open(item: ContentEntity, onId: (Long) -> Unit) {
         if (item.id != 0L) { onId(item.id); return }
