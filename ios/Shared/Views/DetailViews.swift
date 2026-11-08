@@ -70,6 +70,7 @@ private struct DetailHeader<Actions: View>: View {
 }
 
 /// Copies of the same title, Arabic first (dubbed, subtitled, Arabic), then by quality.
+@MainActor
 enum Versions {
     static func ordered(_ kind: MediaKind, _ list: [MediaItem], _ state: AppState) -> [MediaItem] {
         list.map { m -> (MediaItem, Int, Int) in
