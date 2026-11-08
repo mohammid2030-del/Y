@@ -69,6 +69,39 @@ private struct DetailHeader<Actions: View>: View {
     }
 }
 
+/// Other copies of the same title (4K / HD / dubbed / subtitled, other categories); pick one to watch.
+struct VariantsRow: View {
+    let kind: MediaKind
+    let variants: [MediaItem]
+    let current: MediaItem
+    let choose: (MediaItem) -> Void
+    @EnvironmentObject var state: AppState
+
+    private func label(_ m: MediaItem) -> String {
+        let q = ["", "HD", "FHD", "4K"][min(3, CatalogIndex.qualityScore(m.name))]
+        let cat = state.categoryName(kind, m.category)
+        var tags: [String] = []
+        let n = m.name.lowercased() + " " + cat.lowercased()
+        if n.contains("مدبلج") || n.contains("dub") { tags.append(L.isArabic ? "مدبلج" : "Dubbed") }
+        else if n.contains("مترجم") || n.contains("sub") { tags.append(L.isArabic ? "مترجم" : "Subtitled") }
+        return ([q] + tags + [cat]).filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    var body: some View {
+        if variants.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L.t("versions")).font(.headline).padding(.horizontal, Theme.pad)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.isTV ? 16 : 8) {
+                        ForEach(variants) { v in Chip(title: label(v), selected: v.id == current.id) { choose(v) } }
+                    }
+                    .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 14 : 2)
+                }
+            }
+        }
+    }
+}
+
 /// Full-screen backdrop behind a detail page on Apple TV (stays still while the page scrolls).
 struct DetailBackdrop: View {
     let url: String
@@ -241,27 +274,30 @@ struct MovieDetailView: View {
     @State private var info: VodInfo?
     @State private var tmdb: TMDBInfo?
     @State private var trailer: String?
+    @State private var pick: MediaItem?
+    private var shown: MediaItem { pick ?? item }
     #if os(tvOS)
     @FocusState private var playFocused: Bool
     @State private var didFocus = false
     #endif
 
     var body: some View {
-        let h = state.history[HistoryItem.key(state.activeID, .movie, item.id)]
+        let h = state.history[HistoryItem.key(state.activeID, .movie, shown.id)]
         let canResume = h?.resumable ?? false
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                DetailHeader(item: item, backdrop: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? ""),
-                             poster: tmdb?.poster.isEmpty == false ? tmdb!.poster : (info?.image.isEmpty == false ? info!.image : item.logo),
+                DetailHeader(item: shown, backdrop: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? ""),
+                             poster: tmdb?.poster.isEmpty == false ? tmdb!.poster : (info?.image.isEmpty == false ? info!.image : shown.logo),
                              tmdb: tmdb,
-                             meta: [tmdb?.year ?? item.year, (tmdb?.runtime ?? 0) > 0 ? L.t("minutes", tmdb!.runtime) : (info?.duration ?? ""),
+                             meta: [tmdb?.year ?? shown.year, (tmdb?.runtime ?? 0) > 0 ? L.t("minutes", tmdb!.runtime) : (info?.duration ?? ""),
                                     tmdb == nil ? (info?.genre ?? "") : ""]) {
                     actionButtons(canResume: canResume)
                 }
+                VariantsRow(kind: .movie, variants: state.variants(.movie, item), current: shown) { pick = $0 }
                 if canResume, let h {
                     ProgressView(value: h.progress).tint(Theme.blue).padding(.horizontal, Theme.pad)
                 }
-                let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : item.plot)
+                let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : shown.plot)
                 if !plot.isEmpty {
                     PlotBlock(text: plot)
                 }
@@ -282,9 +318,10 @@ struct MovieDetailView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { playFocused = true }
         }
         #endif
-        .task {
-            if let sub = state.active, sub.kind == .xtream { info = await state.xtream(for: sub).vodInfo(item.id) }
-            if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .movie, tmdbID: info?.tmdb ?? "", name: item.name, year: item.year) }
+        .task(id: shown.id) {
+            info = nil
+            if let sub = state.active, sub.kind == .xtream { info = await state.xtream(for: sub).vodInfo(shown.id) }
+            if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .movie, tmdbID: info?.tmdb ?? "", name: shown.name, year: shown.year) }
         }
         #if os(iOS)
         .sheet(item: Binding(get: { trailer.map { TrailerID(key: $0) } }, set: { trailer = $0?.key })) { t in TrailerSheet(key: t.key) }
@@ -293,13 +330,13 @@ struct MovieDetailView: View {
 
     @ViewBuilder private func actionButtons(canResume: Bool) -> some View {
         HStack(spacing: 12) {
-            Button { state.playMovie(item) } label: { Label(L.t(canResume ? "resume" : "play"), systemImage: "play.fill") }
+            Button { state.playMovie(shown) } label: { Label(L.t(canResume ? "resume" : "play"), systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent)
                 #if os(tvOS)
                 .focused($playFocused)
                 #endif
             if canResume {
-                Button { state.playMovie(item, fromStart: true) } label: { Label(L.t("startOver"), systemImage: "arrow.counterclockwise") }
+                Button { state.playMovie(shown, fromStart: true) } label: { Label(L.t("startOver"), systemImage: "arrow.counterclockwise") }
                     .buttonStyle(.bordered)
             }
             #if os(iOS)
@@ -307,9 +344,9 @@ struct MovieDetailView: View {
                 Button { trailer = key } label: { Label(L.t("trailer"), systemImage: "film") }.buttonStyle(.bordered)
             }
             #endif
-            Button { state.toggleFavorite(.movie, item) } label: {
-                Image(systemName: state.isFavorite(.movie, item) ? "heart.fill" : "heart")
-            }.buttonStyle(.bordered).tint(state.isFavorite(.movie, item) ? Theme.live : nil)
+            Button { state.toggleFavorite(.movie, shown) } label: {
+                Image(systemName: state.isFavorite(.movie, shown) ? "heart.fill" : "heart")
+            }.buttonStyle(.bordered).tint(state.isFavorite(.movie, shown) ? Theme.live : nil)
         }
     }
 }
@@ -323,6 +360,8 @@ struct SeriesDetailView: View {
     @State private var tmdb: TMDBInfo?
     @State private var tmEpisodes: [Int: TMDBEpisode] = [:]
     @State private var trailer: String?
+    @State private var pick: MediaItem?
+    private var shown: MediaItem { pick ?? item }
     private enum SField: Hashable { case resume, firstEpisode, season }
     #if os(tvOS)
     @FocusState private var sFocus: SField?
@@ -332,14 +371,14 @@ struct SeriesDetailView: View {
     var body: some View {
         let seasons = info.map { $0.seasons.keys.sorted() } ?? []
         let episodes = info?.seasons[season] ?? []
-        let last = state.history.values.filter { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == item.id }
+        let last = state.history.values.filter { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == shown.id }
             .max { $0.updated < $1.updated }
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                DetailHeader(item: item, backdrop: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? ""),
-                             poster: tmdb?.poster.isEmpty == false ? tmdb!.poster : (info?.cover.isEmpty == false ? info!.cover : item.logo),
+                DetailHeader(item: shown, backdrop: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? ""),
+                             poster: tmdb?.poster.isEmpty == false ? tmdb!.poster : (info?.cover.isEmpty == false ? info!.cover : shown.logo),
                              tmdb: tmdb,
-                             meta: [tmdb?.year ?? item.year, (tmdb?.seasons ?? 0) > 0 ? L.t("seasonsCount", tmdb!.seasons) : "",
+                             meta: [tmdb?.year ?? shown.year, (tmdb?.seasons ?? 0) > 0 ? L.t("seasonsCount", tmdb!.seasons) : "",
                                     tmdb == nil ? (info?.genre ?? "") : ""]) {
                     HStack(spacing: 12) {
                         if let last {
@@ -355,12 +394,13 @@ struct SeriesDetailView: View {
                             Button { trailer = key } label: { Label(L.t("trailer"), systemImage: "film") }.buttonStyle(.bordered)
                         }
                         #endif
-                        Button { state.toggleFavorite(.series, item) } label: {
-                            Image(systemName: state.isFavorite(.series, item) ? "heart.fill" : "heart")
-                        }.buttonStyle(.bordered).tint(state.isFavorite(.series, item) ? Theme.live : nil)
+                        Button { state.toggleFavorite(.series, shown) } label: {
+                            Image(systemName: state.isFavorite(.series, shown) ? "heart.fill" : "heart")
+                        }.buttonStyle(.bordered).tint(state.isFavorite(.series, shown) ? Theme.live : nil)
                     }
                 }
-                let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : item.plot)
+                VariantsRow(kind: .series, variants: state.variants(.series, item), current: shown) { pick = $0 }
+                let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : shown.plot)
                 if !plot.isEmpty { PlotBlock(text: plot) }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
                 if let error {
@@ -390,9 +430,9 @@ struct SeriesDetailView: View {
                     }
                     ForEach(episodes) { e in
                         let isFirst = e.id == episodes.first?.id
-                        Button { state.playEpisode(e, of: item, all: episodes) } label: {
-                            EpisodeRow(episode: e, tm: tmEpisodes[e.num], fallback: item.logo,
-                                       progress: state.history[HistoryItem.key(state.activeID, .series, item.id, e.id)]?.progress)
+                        Button { state.playEpisode(e, of: shown, all: episodes) } label: {
+                            EpisodeRow(episode: e, tm: tmEpisodes[e.num], fallback: shown.logo,
+                                       progress: state.history[HistoryItem.key(state.activeID, .series, shown.id, e.id)]?.progress)
                         }
                         #if os(tvOS)
                         .buttonStyle(.card)
@@ -412,13 +452,14 @@ struct SeriesDetailView: View {
         .onChange(of: info?.seasons.count ?? -1) { _ in focusStart() }
         .onAppear { focusStart() }
         #endif
-        .task {
+        .task(id: shown.id) {
+            info = nil; error = nil
             guard let sub = state.active, sub.kind == .xtream else { error = L.t("noEpisodes"); return }
             do {
-                let i = try await state.xtream(for: sub).seriesInfo(item.id)
+                let i = try await state.xtream(for: sub).seriesInfo(shown.id)
                 info = i
                 if season < 0 || i.seasons[season] == nil { season = i.seasons.keys.sorted().first ?? -1 }
-                if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .series, tmdbID: i.tmdb, name: item.name, year: item.year) }
+                if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .series, tmdbID: i.tmdb, name: shown.name, year: shown.year) }
             } catch { self.error = error.localizedDescription }
         }
         .task(id: "\(season)|\(tmdb?.id ?? 0)") {
@@ -442,7 +483,7 @@ struct SeriesDetailView: View {
     /// Start on "Resume", or on the first episode once the list has loaded, so the remote works immediately.
     private func focusStart() {
         guard !didFocus else { return }
-        let hasResume = state.history.values.contains { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == item.id }
+        let hasResume = state.history.values.contains { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == shown.id }
         guard hasResume || !(info?.seasons.isEmpty ?? true) else { return }
         didFocus = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { sFocus = hasResume ? .resume : .firstEpisode }

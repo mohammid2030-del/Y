@@ -328,13 +328,7 @@ struct SettingsView: View {
 
 struct CatalogView: View {
     let kind: MediaKind
-    var body: some View {
-        #if os(tvOS)
-        CatalogViewTV(kind: kind)
-        #else
-        CatalogViewPhone(kind: kind)
-        #endif
-    }
+    var body: some View { CatalogBrowser(kind: kind) }
 }
 
 struct LiveView: View {
@@ -366,71 +360,6 @@ private struct SideRow: View {
             }
             .font(.system(size: 26, weight: selected ? .bold : .medium))
         }
-    }
-}
-
-/// Movies / Series on Apple TV: categories on the left, a poster grid on the right.
-/// Lists stay small and fast, and the remote always moves predictably (left = categories, right = posters).
-struct CatalogViewTV: View {
-    let kind: MediaKind
-    @EnvironmentObject var state: AppState
-    @State private var selected = "__recent"
-
-    private var items: [MediaItem] {
-        switch selected {
-        case "__recent": return state.latest(kind, 60)
-        case "__fav": return state.favorites.filter { $0.subID == state.activeID && $0.kind == kind }.map(\.stream)
-        case "__cont": return state.continueWatching.filter { $0.kind == kind }.map(\.stream)
-        default: return state.items(kind, category: selected)
-        }
-    }
-
-    private var title: String {
-        switch selected {
-        case "__recent": return L.t("recentlyAdded")
-        case "__fav": return L.t("favorites")
-        case "__cont": return L.t("continueWatching")
-        default: return state.catalog.categories(kind).first { $0.id == selected }?.name ?? ""
-        }
-    }
-
-    var body: some View {
-        let cats = state.catalog.categories(kind)
-        let list = items
-        HStack(alignment: .top, spacing: 30) {
-            List {
-                SideRow(title: L.t("recentlyAdded"), icon: "sparkles", selected: selected == "__recent") { selected = "__recent" }
-                if state.continueWatching.contains(where: { $0.kind == kind }) {
-                    SideRow(title: L.t("continueWatching"), icon: "play.circle", selected: selected == "__cont") { selected = "__cont" }
-                }
-                SideRow(title: L.t("favorites"), icon: "heart", selected: selected == "__fav") { selected = "__fav" }
-                ForEach(cats) { c in
-                    SideRow(title: c.name, selected: selected == c.id) { selected = c.id }
-                }
-            }
-            .frame(width: 480)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(title).font(.title3.bold())
-                    Text("\(list.count)").foregroundStyle(.secondary)
-                }
-                if list.isEmpty {
-                    EmptyState(text: L.t(selected == "__fav" ? "emptyFav" : "empty"))
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(Theme.posterW), spacing: 44), count: 5), spacing: 56) {
-                            ForEach(list) { m in
-                                NavigationLink(value: kind == .movie ? Route.movie(m) : Route.series(m)) { PosterCard(item: m, kind: kind) }
-                                    .buttonStyle(.card)
-                            }
-                        }
-                        .padding(.vertical, 30).padding(.horizontal, 20)
-                    }
-                    .id(selected)
-                }
-            }
-        }
-        .padding(.leading, 40)
     }
 }
 
@@ -483,3 +412,242 @@ struct LiveViewTV: View {
     }
 }
 #endif
+
+
+// MARK: - Organised library (Movies / Series)
+
+/// A selectable pill (sections, categories, genres).
+struct Chip: View {
+    let title: String
+    var icon: String? = nil
+    let selected: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let icon { Image(systemName: icon) }
+                Text(title).lineLimit(1)
+                #if os(tvOS)
+                if selected { Image(systemName: "checkmark") }
+                #endif
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, Theme.isTV ? 10 : 14).padding(.vertical, Theme.isTV ? 4 : 8)
+            #if os(iOS)
+            .foregroundStyle(selected ? .white : .primary)
+            .background(selected ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.surface2), in: Capsule())
+            #endif
+        }
+        #if os(tvOS)
+        .buttonStyle(.bordered).tint(selected ? Theme.blue : nil)
+        #else
+        .buttonStyle(.plain)
+        #endif
+    }
+}
+
+/// Movies / Series organised like the big streaming apps: sections (Netflix, Shahid, Prime, Turkish, Korean…),
+/// the provider's categories inside each section, genre filters, and one card per title (best quality first).
+struct CatalogBrowser: View {
+    let kind: MediaKind
+    @EnvironmentObject var state: AppState
+    @State private var selection = "__recent"
+    @State private var category: String?
+    @State private var genre: GenreFilter?
+    @State private var filtered: [MediaItem]?
+    @State private var done = 0
+    @State private var total = 0
+
+    private var shelves: [Shelf] { state.shelves(kind) }
+    private var currentShelf: Shelf? { shelves.first { $0.id == selection } }
+
+    private var baseItems: [MediaItem] {
+        switch selection {
+        case "__recent": return state.latest(kind, 60)
+        case "__cont": return state.continueWatching.filter { $0.kind == kind }.map(\.stream)
+        case "__fav": return state.favorites.filter { $0.subID == state.activeID && $0.kind == kind }.map(\.stream)
+        default: return state.browse(kind, shelf: selection, category: category)
+        }
+    }
+
+    private var title: String {
+        switch selection {
+        case "__recent": return L.t("recentlyAdded")
+        case "__cont": return L.t("continueWatching")
+        case "__fav": return L.t("favorites")
+        default:
+            let shelf = currentShelf?.title ?? ""
+            if let category { return shelf + " · " + state.categoryName(kind, category) }
+            return shelf
+        }
+    }
+
+    private var filterKey: String { "\(selection)|\(category ?? "")|\(genre?.rawValue ?? "")|\(state.tmdbOn)|\(state.index == nil)" }
+
+    private func select(_ id: String) {
+        selection = id
+        category = nil
+    }
+
+    var body: some View {
+        Group {
+            if state.index == nil {
+                VStack(spacing: 16) { ProgressView(); Text(L.t("organizing")).foregroundStyle(.secondary) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                #if os(tvOS)
+                HStack(alignment: .top, spacing: 30) {
+                    List {
+                        SideRow(title: L.t("recentlyAdded"), icon: "sparkles", selected: selection == "__recent") { select("__recent") }
+                        if state.continueWatching.contains(where: { $0.kind == kind }) {
+                            SideRow(title: L.t("continueWatching"), icon: "play.circle", selected: selection == "__cont") { select("__cont") }
+                        }
+                        SideRow(title: L.t("favorites"), icon: "heart", selected: selection == "__fav") { select("__fav") }
+                        Section(L.t("sections")) {
+                            ForEach(shelves) { sh in
+                                SideRow(title: sh.title, icon: sh.icon, count: sh.count, selected: selection == sh.id) { select(sh.id) }
+                            }
+                        }
+                    }
+                    .frame(width: 440)
+                    VStack(alignment: .leading, spacing: 14) {
+                        header
+                        filters
+                        grid
+                    }
+                }
+                .padding(.leading, 40)
+                #else
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Chip(title: L.t("recentlyAdded"), icon: "sparkles", selected: selection == "__recent") { select("__recent") }
+                                if state.continueWatching.contains(where: { $0.kind == kind }) {
+                                    Chip(title: L.t("continueWatching"), icon: "play.circle", selected: selection == "__cont") { select("__cont") }
+                                }
+                                Chip(title: L.t("favorites"), icon: "heart", selected: selection == "__fav") { select("__fav") }
+                                ForEach(shelves) { sh in Chip(title: sh.title, icon: sh.icon, selected: selection == sh.id) { select(sh.id) } }
+                            }.padding(.horizontal, Theme.pad)
+                        }
+                        header.padding(.horizontal, Theme.pad)
+                        filters
+                        grid
+                    }
+                    .padding(.vertical, 12)
+                }
+                .navigationTitle(L.t(kind == .movie ? "movies" : "series"))
+                #endif
+            }
+        }
+        .task(id: filterKey) { await runGenreFilter() }
+    }
+
+    private var shown: [MediaItem] { genre == nil ? baseItems : (filtered ?? []) }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            Text(title).font(.title3.bold()).lineLimit(1)
+            Text("\(shown.count)").foregroundStyle(.secondary)
+            if genre != nil && total > 0 && done < total {
+                ProgressView()
+                Text(L.t("classifying", done, total)).font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if category != nil || genre != nil {
+                Button { category = nil; genre = nil } label: { Label(L.t("resetFilters"), systemImage: "arrow.uturn.backward") }
+                    #if os(tvOS)
+                    .buttonStyle(.bordered)
+                    #else
+                    .buttonStyle(.bordered).controlSize(.small)
+                    #endif
+            }
+        }
+    }
+
+    @ViewBuilder private var filters: some View {
+        if let sh = currentShelf, sh.categories.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.isTV ? 16 : 8) {
+                    Chip(title: L.t("all"), selected: category == nil) { category = nil }
+                    ForEach(sh.categories) { c in Chip(title: c.name, selected: category == c.id) { category = c.id } }
+                }
+                .padding(.horizontal, Theme.isTV ? 10 : Theme.pad).padding(.vertical, Theme.isTV ? 14 : 2)
+            }
+        }
+        if state.tmdbOn {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.isTV ? 16 : 8) {
+                    Chip(title: L.t("allGenres"), icon: "line.3.horizontal.decrease.circle", selected: genre == nil) { genre = nil }
+                    ForEach(GenreFilter.available(kind)) { g in Chip(title: g.label, selected: genre == g) { genre = g } }
+                }
+                .padding(.horizontal, Theme.isTV ? 10 : Theme.pad).padding(.vertical, Theme.isTV ? 14 : 2)
+            }
+        } else {
+            Text(L.t("genresNeedTMDB")).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.isTV ? 10 : Theme.pad)
+        }
+    }
+
+    @ViewBuilder private var grid: some View {
+        let list = shown
+        if list.isEmpty {
+            if genre != nil && done < total {
+                ProgressView().frame(maxWidth: .infinity).padding(40)
+            } else {
+                EmptyState(text: L.t(selection == "__fav" ? "emptyFav" : "empty")).frame(minHeight: 300)
+            }
+        } else {
+            #if os(tvOS)
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(Theme.posterW), spacing: 44), count: 5), spacing: 56) {
+                    ForEach(list) { m in
+                        NavigationLink(value: kind == .movie ? Route.movie(m) : Route.series(m)) { PosterCard(item: m, kind: kind) }
+                            .buttonStyle(.card)
+                    }
+                }
+                .padding(.vertical, 30).padding(.horizontal, 20)
+            }
+            .id(filterKey)
+            #else
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: Theme.posterW + 8), spacing: 14)], spacing: 20) {
+                ForEach(list) { m in
+                    NavigationLink(value: kind == .movie ? Route.movie(m) : Route.series(m)) { PosterCard(item: m, kind: kind) }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.pad)
+            #endif
+        }
+    }
+
+    /// Genre filter: categories that name the genre count at once; other titles are checked against TMDB
+    /// (cached after the first time), and the grid fills in as results arrive.
+    private func runGenreFilter() async {
+        guard let g = genre, state.tmdbOn, state.index != nil else { filtered = nil; done = 0; total = 0; return }
+        let base = baseItems
+        let wanted = g.ids(kind)
+        var out: [MediaItem] = []
+        filtered = []
+        done = 0
+        total = base.count
+        var i = 0
+        while i < base.count {
+            if Task.isCancelled { return }
+            let chunk = Array(base[i..<min(base.count, i + 18)])
+            var quick = Set<Int>()
+            for (j, m) in chunk.enumerated() where g.matchesCategory(state.categoryName(kind, m.category)) { quick.insert(j) }
+            let found = await withTaskGroup(of: (Int, [Int]).self) { group -> [Int: [Int]] in
+                for (j, m) in chunk.enumerated() where !quick.contains(j) {
+                    group.addTask { (j, await TMDB.shared.genres(kind: kind, name: m.name, year: m.year)) }
+                }
+                var d: [Int: [Int]] = [:]
+                for await (j, gs) in group { d[j] = gs }
+                return d
+            }
+            if Task.isCancelled { return }
+            for (j, m) in chunk.enumerated() where quick.contains(j) || !Set(found[j] ?? []).isDisjoint(with: wanted) { out.append(m) }
+            i += chunk.count
+            filtered = out
+            done = i
+        }
+    }
+}

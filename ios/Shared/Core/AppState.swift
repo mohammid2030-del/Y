@@ -16,7 +16,11 @@ final class AppState: ObservableObject {
     @Published var tab: Tab = .home
     @Published var subs: [Subscription] = []
     @Published var activeID: String = ""
-    @Published var catalog = Catalog()
+    @Published var catalog = Catalog() { didSet { rebuildIndex() } }
+    /// Shelves, duplicate groups and quality, rebuilt in the background whenever the catalog changes.
+    @Published var index: CatalogIndex?
+    private var indexJob: Task<Void, Never>?
+    private var browseCache: [String: [MediaItem]] = [:]
     @Published var favorites: [FavItem] = []
     @Published var history: [String: HistoryItem] = [:]
     @Published var playing: PlayRequest?
@@ -127,8 +131,9 @@ final class AppState: ObservableObject {
     func latest(_ kind: MediaKind, _ n: Int) -> [MediaItem] {
         let k = "latest|\(kind.rawValue)"
         if let hit = byCategoryCache[k] { return Array(hit.prefix(n)) }
-        let list = Array(catalog.items(kind).sorted { $0.added > $1.added }.prefix(60))
-        byCategoryCache[k] = list
+        let recent = Array(catalog.items(kind).sorted { $0.added > $1.added }.prefix(240))
+        let list = Array(collapse(kind, recent).prefix(60))
+        if index != nil { byCategoryCache[k] = list }   // cache once duplicates can be collapsed
         return Array(list.prefix(n))
     }
 
@@ -250,6 +255,61 @@ final class AppState: ObservableObject {
             return w.year.isEmpty || y.isEmpty || y == w.year
         }
         return (kind, sameYear ?? hits[0])
+    }
+
+    private func rebuildIndex() {
+        indexJob?.cancel()
+        index = nil
+        browseCache = [:]
+        let cat = catalog
+        indexJob = Task { [weak self] in
+            let idx = await Task.detached(priority: .userInitiated) { CatalogIndex.build(cat) }.value
+            if Task.isCancelled { return }
+            self?.index = idx
+        }
+    }
+
+    func shelves(_ kind: MediaKind) -> [Shelf] { index?.shelves[kind] ?? [] }
+
+    /// Titles of a shelf (or one of its categories), one card per title — the best copy (4K > FHD > HD), newest first.
+    func browse(_ kind: MediaKind, shelf: String, category: String?) -> [MediaItem] {
+        guard let idx = index else { return [] }
+        let ck = "\(kind.rawValue)|\(shelf)|\(category ?? "")"
+        if let hit = browseCache[ck] { return hit }
+        let source: [MediaItem]
+        if let category { source = items(kind, category: category) }
+        else { source = catalog.items(kind).filter { idx.shelfOfCategory["\(kind.rawValue)|\($0.category)"] == shelf } }
+        let out = collapse(kind, source)
+        browseCache[ck] = out
+        return out
+    }
+
+    /// One card per title, best copy first, newest titles first.
+    func collapse(_ kind: MediaKind, _ source: [MediaItem]) -> [MediaItem] {
+        guard let idx = index else { return source }
+        var best: [String: MediaItem] = [:]
+        var order: [String] = []
+        for m in source {
+            let k = idx.key["\(kind.rawValue)|\(m.id)"] ?? m.id
+            if let cur = best[k] {
+                let a = idx.quality["\(kind.rawValue)|\(m.id)"] ?? 0, b = idx.quality["\(kind.rawValue)|\(cur.id)"] ?? 0
+                if a > b || (a == b && m.added > cur.added) { best[k] = m }
+            } else {
+                best[k] = m
+                order.append(k)
+            }
+        }
+        return order.compactMap { best[$0] }.sorted { $0.added > $1.added }
+    }
+
+    /// Every copy of the same title in the library (4K / HD / dubbed / subtitled …), best first.
+    func variants(_ kind: MediaKind, _ item: MediaItem) -> [MediaItem] {
+        guard let idx = index, let k = idx.key["\(kind.rawValue)|\(item.id)"] else { return [item] }
+        return idx.variants["\(kind.rawValue)|\(k)"] ?? [item]
+    }
+
+    func categoryName(_ kind: MediaKind, _ id: String) -> String {
+        catalog.categories(kind).first { $0.id == id }?.name ?? ""
     }
 
     func searchFor(_ text: String) {

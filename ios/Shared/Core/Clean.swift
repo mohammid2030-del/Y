@@ -14,8 +14,19 @@ enum Clean {
         return !parts.isEmpty && parts.allSatisfy { tags.contains($0) || prefixCodes.contains($0) }
     }
 
+    private static var reCache: [String: NSRegularExpression] = [:]
+    private static let reLock = NSLock()
+    /// Compiled once: titles are cleaned tens of thousands of times when the library is indexed.
+    private static func regex(_ pattern: String) -> NSRegularExpression? {
+        reLock.lock(); defer { reLock.unlock() }
+        if let r = reCache[pattern] { return r }
+        let r = try? NSRegularExpression(pattern: pattern)
+        reCache[pattern] = r
+        return r
+    }
+
     private static func firstMatch(_ pattern: String, _ s: String) -> (range: Range<String.Index>, groups: [String])? {
-        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let re = regex(pattern) else { return nil }
         let ns = s as NSString
         guard let m = re.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)),
               let r = Range(m.range, in: s) else { return nil }

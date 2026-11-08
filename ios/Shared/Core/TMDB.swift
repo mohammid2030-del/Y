@@ -1,6 +1,6 @@
 import Foundation
 
-struct TMDBCard: Codable, Hashable { var poster: String; var title: String; var id: Int; var backdrop: String? = nil }
+struct TMDBCard: Codable, Hashable { var poster: String; var title: String; var id: Int; var backdrop: String? = nil; var genres: [Int]? = nil }
 
 struct TMDBPerson: Hashable { var name: String; var role: String; var photo: String; var id: Int = 0 }
 
@@ -25,7 +25,7 @@ actor TMDB {
     static let shared = TMDB()
 
     private var key: String = Keychain.get("tmdbKey") ?? ""
-    private var cards: [String: TMDBCard] = Storage.load("tmdbCards2", as: [String: TMDBCard].self) ?? [:]
+    private var cards: [String: TMDBCard] = Storage.load("tmdbCards3", as: [String: TMDBCard].self) ?? [:]
     private var infos: [String: TMDBInfo] = [:]
     private var seasons: [String: [Int: TMDBEpisode]] = [:]
     private var dirty = 0
@@ -40,14 +40,14 @@ actor TMDB {
         key = k
         Keychain.set(k, for: "tmdbKey")
         cards = [:]; infos = [:]; seasons = [:]
-        Storage.save("tmdbCards2", cards)
+        Storage.save("tmdbCards3", cards)
         return true
     }
 
     func removeKey() {
         key = ""; cards = [:]; infos = [:]
         Keychain.set(nil, for: "tmdbKey")
-        Storage.save("tmdbCards2", cards)
+        Storage.save("tmdbCards3", cards)
     }
 
     private func get(_ path: String, _ params: [String: String], key override: String? = nil) async throws -> [String: Any] {
@@ -109,11 +109,17 @@ actor TMDB {
         var title = jstr(f?[tv ? "name" : "title"])
         if TMDB.foreignScript(title) { let en = await englishTitle(tv, jint(f?["id"])); if !en.isEmpty { title = en } }
         let card = TMDBCard(poster: img(jstr(f?["poster_path"]), "w342"), title: title, id: jint(f?["id"]),
-                            backdrop: img(jstr(f?["backdrop_path"]), "w780"))
+                            backdrop: img(jstr(f?["backdrop_path"]), "w780"),
+                            genres: (f?["genre_ids"] as? [Any])?.map { jint($0) } ?? [])
         cards[ck] = card
         dirty += 1
-        if dirty % 20 == 0 { Storage.save("tmdbCards2", cards) }
+        if dirty % 20 == 0 { Storage.save("tmdbCards3", cards) }
         return card.id == 0 ? nil : card
+    }
+
+    /// Genre ids of a title (looked up once, then cached). Empty when TMDB doesn't know it.
+    func genres(kind: MediaKind, name: String, year: String) async -> [Int] {
+        await card(kind: kind, name: name, year: year)?.genres ?? []
     }
 
     func details(kind: MediaKind, tmdbID: String, name: String, year: String) async -> TMDBInfo? {
