@@ -43,7 +43,26 @@ class SettingsViewModel @Inject constructor(
     private val introStore: com.nova.iptv.data.repo.IntroStore,
     private val subtitlePrefs: com.nova.iptv.data.subs.SubtitlePrefs,
     private val tmdb: com.nova.iptv.data.tmdb.TmdbRepository,
+    private val account: com.nova.iptv.data.account.AccountRepository,
+    private val viewers: com.nova.iptv.data.viewers.ViewersRepository,
 ) : ViewModel() {
+    // ---- Google account + viewers
+    val accountEmail: StateFlow<String?> = account.email
+    val accountAvailable: Boolean get() = account.available
+    var syncing by mutableStateOf(false)
+        private set
+    fun signOut() = account.signOut()
+    fun syncNow(onDone: () -> Unit = {}) = viewModelScope.launch {
+        syncing = true
+        runCatching {
+            account.pull()
+            val sub = settingsRepo.current().activeSubscriptionId
+            if (sub != 0L) { viewers.pullViewers(sub); viewers.pullData(sub, viewers.current(sub)?.id ?: "main") }
+        }
+        syncing = false
+        onDone()
+    }
+
     val tmdbEnabled: StateFlow<Boolean> = tmdb.enabled
     var tmdbChecking by mutableStateOf(false)
         private set
@@ -56,7 +75,7 @@ class SettingsViewModel @Inject constructor(
         tmdbRejected = false
         val ok = tmdb.saveKey(key)
         tmdbChecking = false
-        if (ok) { message = SettingsMessage.TMDB_SAVED; onDone() } else tmdbRejected = true
+        if (ok) { message = SettingsMessage.TMDB_SAVED; account.pushTmdb(key.trim()); onDone() } else tmdbRejected = true
     }
 
     fun resetTmdbError() { tmdbRejected = false }
@@ -85,6 +104,7 @@ class SettingsViewModel @Inject constructor(
     fun setActive(id: Long) = viewModelScope.launch { settingsRepo.setActiveSubscription(id) }
 
     fun delete(sub: SubscriptionEntity, onAllRemoved: () -> Unit) = viewModelScope.launch {
+        account.deleteSub(sub.id).join()
         subs.delete(sub)
         if (subs.getAll().isEmpty()) onAllRemoved()
     }

@@ -2,6 +2,7 @@
 
 package com.nova.iptv.ui.settings
 
+import kotlinx.coroutines.launch
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -168,8 +169,13 @@ fun SettingsScreen(
     onHiddenCategories: () -> Unit,
     onAllRemoved: () -> Unit,
     onMatchPrefs: () -> Unit = {},
+    onSignIn: () -> Unit = {},
+    onViewers: () -> Unit = {},
+    onSwitchViewer: () -> Unit = {},
     vm: SettingsViewModel = hiltViewModel(),
 ) {
+    val accountEmail by vm.accountEmail.collectAsStateWithLifecycle()
+    val syncedText = stringResource(R.string.synced)
     val subs by vm.subscriptions.collectAsStateWithLifecycle()
     val s by vm.settings.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -240,6 +246,27 @@ fun SettingsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+            if (vm.accountAvailable) {
+                item { SectionHeader(stringResource(R.string.account)) }
+                item {
+                    val mail = accountEmail
+                    if (mail == null) SettingRow(stringResource(R.string.sign_in_google), stringResource(R.string.account_none), onClick = onSignIn)
+                    else {
+                        SettingRow(stringResource(R.string.signed_in_as, mail), stringResource(R.string.google_why))
+                        SettingRow(stringResource(R.string.sign_out), onClick = { vm.signOut() })
+                    }
+                }
+            }
+            item { SectionHeader(stringResource(R.string.viewers)) }
+            item {
+                SettingRow(stringResource(R.string.switch_viewer), onClick = onSwitchViewer)
+                SettingRow(stringResource(R.string.viewers_manage), onClick = onViewers)
+                SettingRow(
+                    stringResource(R.string.sync_now),
+                    onClick = if (vm.syncing) null else ({ vm.syncNow { scopeSnack(snackbar, syncedText) } }),
+                    trailing = if (vm.syncing) ({ CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }) else null,
+                )
+            }
             item { SectionHeader(stringResource(R.string.subscriptions)) }
             items(subs, key = { it.id }) { sub ->
                 val active = sub.id == s.activeSubscriptionId
@@ -580,6 +607,10 @@ fun SettingsScreen(
             onDismiss = { pendingAction = null; pendingUri = null },
         )
     }
+}
+
+private fun scopeSnack(host: SnackbarHostState, text: String) {
+    kotlinx.coroutines.MainScope().launch { host.showSnackbar(text) }
 }
 
 private fun formatOffset(min: Int): String {

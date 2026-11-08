@@ -54,7 +54,11 @@ fun isTvDevice(context: Context): Boolean {
 class MainViewModel @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val subs: SubscriptionRepository,
+    private val account: com.nova.iptv.data.account.AccountRepository,
 ) : ViewModel() {
+    /** Offer Google sign-in before the first subscription (when this build has it set up). */
+    val googleFirst: Boolean get() = account.available && !account.signedIn
+
     val settings: StateFlow<AppSettings?> = settingsRepo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _start = MutableStateFlow<String?>(null)
@@ -63,9 +67,11 @@ class MainViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val s = settingsRepo.current()
+            if (account.signedIn) runCatching { kotlinx.coroutines.withTimeoutOrNull(6000) { account.pull() } }
             val hasSubs = subs.getAll().isNotEmpty()
             _start.value = when {
                 !s.onboardingDone -> Routes.WELCOME
+                !hasSubs && googleFirst -> Routes.SIGNIN
                 !hasSubs -> Routes.ADD
                 else -> Routes.PROFILES
             }
@@ -84,7 +90,7 @@ fun NovaRoot(isTv: Boolean, vm: MainViewModel = hiltViewModel()) {
     }
     NovaTheme(themeMode = s.themeMode, flags = NovaUiFlags(lowEnd = s.lowEndMode, isTv = isTv)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            NovaNavHost(startDestination = start!!)
+            NovaNavHost(startDestination = start!!, googleFirst = vm.googleFirst)
         }
     }
 }

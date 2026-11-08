@@ -86,6 +86,9 @@ class TmdbRepository @Inject constructor(
 
     private fun key(): String = crypto.decrypt(prefs.getString(KEY, "").orEmpty())
 
+    /** The saved key (for account sync). */
+    fun currentKey(): String = key()
+
     /** Saves a key after checking it with TMDB. Returns false when TMDB rejects it. */
     suspend fun saveKey(raw: String): Boolean {
         val k = raw.trim()

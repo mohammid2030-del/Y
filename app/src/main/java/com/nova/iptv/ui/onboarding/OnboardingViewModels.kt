@@ -39,6 +39,7 @@ class AddSubscriptionViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val subs: SubscriptionRepository,
     private val settings: SettingsRepository,
+    private val account: com.nova.iptv.data.account.AccountRepository,
 ) : ViewModel() {
     val editId: Long = savedState.get<Long>("id") ?: 0L
 
@@ -96,6 +97,7 @@ class AddSubscriptionViewModel @Inject constructor(
             testResult = r
             if (r.ok) {
                 val id = subs.save(input.copy(id = editId))
+                account.pushSub(id)
                 settings.setOnboardingDone()
                 busy = false
                 onSaved(id)
