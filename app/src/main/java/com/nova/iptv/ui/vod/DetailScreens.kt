@@ -253,13 +253,7 @@ private fun TrailerButton(key: String) {
     if (key.isBlank()) return
     val context = LocalContext.current
     OutlinedButton(
-        onClick = {
-            runCatching {
-                context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-        },
+        onClick = { com.nova.iptv.player.TrailerActivity.start(context, key) },
         modifier = Modifier.novaFocus(),
     ) {
         Icon(Icons.Filled.Movie, null)
