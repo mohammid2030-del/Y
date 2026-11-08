@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 
 enum Theme {
     static let bg = Color(red: 0.027, green: 0.027, blue: 0.043)
@@ -34,22 +35,94 @@ extension View {
     }
 }
 
+/// Fast image pipeline: shared memory cache of downsampled bitmaps, decoding off the main thread,
+/// one download per URL even when many cards ask at once, disk cache through URLCache.
+final class ImagePipeline: @unchecked Sendable {
+    static let shared = ImagePipeline()
+    private let cache = NSCache<NSString, UIImage>()
+    private let flights = Flights()
+    fileprivate static let session: URLSession = {
+        let c = URLSessionConfiguration.default
+        c.urlCache = URLCache.shared
+        c.requestCachePolicy = .returnCacheDataElseLoad
+        c.timeoutIntervalForRequest = 20
+        c.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: c)
+    }()
+
+    init() { cache.totalCostLimit = 160 << 20 }
+
+    private func key(_ url: String, _ px: CGFloat) -> String { "\(Int(px))|\(url)" }
+
+    func cached(_ url: String, maxPixel: CGFloat) -> UIImage? { cache.object(forKey: key(url, maxPixel) as NSString) }
+
+    func load(_ url: String, maxPixel: CGFloat) async -> UIImage? {
+        let k = key(url, maxPixel)
+        if let hit = cache.object(forKey: k as NSString) { return hit }
+        let img = await flights.run(k) {
+            guard let u = URL(string: url), let (data, _) = try? await ImagePipeline.session.data(from: u) else { return nil }
+            return ImagePipeline.downsample(data, maxPixel: maxPixel)
+        }
+        if let img {
+            let cost = Int(img.size.width * img.size.height * img.scale * img.scale * 4)
+            cache.setObject(img, forKey: k as NSString, cost: cost)
+        }
+        return img
+    }
+
+    /// One download per key, however many cards ask at the same time.
+    private actor Flights {
+        private var running: [String: Task<UIImage?, Never>] = [:]
+        func run(_ key: String, _ work: @escaping @Sendable () async -> UIImage?) async -> UIImage? {
+            if let t = running[key] { return await t.value }
+            let t = Task.detached(priority: .userInitiated) { await work() }
+            running[key] = t
+            let v = await t.value
+            running[key] = nil
+            return v
+        }
+    }
+
+    static func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+        let opts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithData(data as CFData, opts) else { return nil }
+        let thumb = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                     kCGImageSourceShouldCacheImmediately: true,
+                     kCGImageSourceCreateThumbnailWithTransform: true,
+                     kCGImageSourceThumbnailMaxPixelSize: maxPixel] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, thumb) else { return UIImage(data: data) }
+        return UIImage(cgImage: cg)
+    }
+}
+
 struct RemoteImage: View {
     let url: String
     var contentMode: ContentMode = .fill
     var placeholderIcon = "film"
+    /// Longest side in pixels to decode; posters stay small so long lists scroll smoothly.
+    var maxPixel: CGFloat = Theme.isTV ? 600 : 500
+
+    @State private var image: UIImage?
+    @State private var failed = false
+    @State private var loadedURL = ""
 
     var body: some View {
-        if let u = URL(string: url), !url.isEmpty {
-            AsyncImage(url: u, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
-                switch phase {
-                case .success(let img): img.resizable().aspectRatio(contentMode: contentMode)
-                case .failure: placeholder
-                default: Theme.surface2
-                }
+        let shown: UIImage? = loadedURL == url ? image : ImagePipeline.shared.cached(url, maxPixel: maxPixel)
+        Group {
+            if let shown {
+                Image(uiImage: shown).resizable().aspectRatio(contentMode: contentMode)
+            } else if url.isEmpty || (failed && loadedURL == url) {
+                placeholder
+            } else {
+                Theme.surface2
             }
-        } else {
-            placeholder
+        }
+        .task(id: url) {
+            guard !url.isEmpty else { return }
+            if let hit = ImagePipeline.shared.cached(url, maxPixel: maxPixel) { image = hit; failed = false; loadedURL = url; return }
+            let img = await ImagePipeline.shared.load(url, maxPixel: maxPixel)
+            if Task.isCancelled { return }
+            withAnimation(.easeOut(duration: 0.2)) { image = img; failed = img == nil; loadedURL = url }
         }
     }
 
@@ -58,6 +131,34 @@ struct RemoteImage: View {
             LinearGradient(colors: [Theme.surface2, Theme.surface], startPoint: .top, endPoint: .bottom)
             Image(systemName: placeholderIcon).font(.title).foregroundStyle(.secondary)
         }
+    }
+}
+
+#if os(tvOS)
+/// Visible focus for non-button content on Apple TV (cast, plot): lift + glow, so the user always sees where focus is.
+private struct FocusLift: ViewModifier {
+    @Environment(\.isFocused) private var focused
+    var radius: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(focused ? Color.white.opacity(0.14) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(focused ? Theme.blue : .clear, lineWidth: 3))
+            .scaleEffect(focused ? 1.06 : 1)
+            .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 14, y: 8)
+            .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+#endif
+
+extension View {
+    /// Makes static content reachable with the Apple TV remote and shows clearly when it has focus.
+    @ViewBuilder func tvFocusable(radius: CGFloat = 16) -> some View {
+        #if os(tvOS)
+        self.modifier(FocusLift(radius: radius)).focusable()
+        #else
+        self
+        #endif
     }
 }
 
@@ -116,15 +217,18 @@ struct PosterCard: View {
 /// Wide 16:9 continue-watching card with "x% watched" and season/episode.
 struct ContinueCard: View {
     let h: HistoryItem
+    @EnvironmentObject var state: AppState
+    @State private var card: TMDBCard?
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: h.stream.logo).frame(width: Theme.wideW, height: Theme.wideW * 9 / 16).clipped()
+            RemoteImage(url: card?.backdrop?.isEmpty == false ? card!.backdrop! : h.stream.logo, maxPixel: 900)
+                .frame(width: Theme.wideW, height: Theme.wideW * 9 / 16).clipped()
             LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 4) {
                 if h.kind == .series, let se = Clean.seasonEpisode(h.subtitle) {
                     Text(L.t("seasonEpisode", se.0, se.1)).font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
                 }
-                Text(Clean.title(h.stream.name)).font(.headline).lineLimit(1)
+                Text(card?.title.isEmpty == false ? card!.title : Clean.title(h.stream.name)).font(.headline).lineLimit(1)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.25))
@@ -144,6 +248,10 @@ struct ContinueCard: View {
         .frame(width: Theme.wideW, height: Theme.wideW * 9 / 16)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .foregroundStyle(.white)
+        .task(id: h.stream.id + "\(state.tmdbOn)") {
+            guard state.tmdbOn else { card = nil; return }
+            card = await TMDB.shared.card(kind: h.kind, name: h.stream.name, year: h.stream.year)
+        }
     }
 }
 

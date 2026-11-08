@@ -1,6 +1,6 @@
 import Foundation
 
-struct TMDBCard: Codable, Hashable { var poster: String; var title: String; var id: Int }
+struct TMDBCard: Codable, Hashable { var poster: String; var title: String; var id: Int; var backdrop: String? = nil }
 
 struct TMDBPerson: Hashable { var name: String; var role: String; var photo: String }
 
@@ -21,7 +21,7 @@ actor TMDB {
     static let shared = TMDB()
 
     private var key: String = Keychain.get("tmdbKey") ?? ""
-    private var cards: [String: TMDBCard] = Storage.load("tmdbCards", as: [String: TMDBCard].self) ?? [:]
+    private var cards: [String: TMDBCard] = Storage.load("tmdbCards2", as: [String: TMDBCard].self) ?? [:]
     private var infos: [String: TMDBInfo] = [:]
     private var seasons: [String: [Int: TMDBEpisode]] = [:]
     private var dirty = 0
@@ -36,14 +36,14 @@ actor TMDB {
         key = k
         Keychain.set(k, for: "tmdbKey")
         cards = [:]; infos = [:]; seasons = [:]
-        Storage.save("tmdbCards", cards)
+        Storage.save("tmdbCards2", cards)
         return true
     }
 
     func removeKey() {
         key = ""; cards = [:]; infos = [:]
         Keychain.set(nil, for: "tmdbKey")
-        Storage.save("tmdbCards", cards)
+        Storage.save("tmdbCards2", cards)
     }
 
     private func get(_ path: String, _ params: [String: String], key override: String? = nil) async throws -> [String: Any] {
@@ -55,6 +55,23 @@ actor TMDB {
         c.queryItems = q
         let j = try await Net.json(c.url!, headers: bearer ? ["Authorization": "Bearer \(k)"] : [:])
         return j as? [String: Any] ?? [:]
+    }
+
+    /// True for titles in a script the viewer probably can't read (Cyrillic, CJK, Thai …): TMDB falls back to the
+    /// original title when there is no Arabic translation, so we show the English title instead.
+    nonisolated static func foreignScript(_ s: String) -> Bool {
+        for u in s.unicodeScalars where u.properties.isAlphabetic {
+            let v = u.value
+            let latin = v < 0x0250 || (0x1E00...0x1EFF).contains(v)
+            let arabic = (0x0600...0x06FF).contains(v) || (0x0750...0x077F).contains(v) || (0xFB50...0xFEFF).contains(v)
+            if !latin && !arabic { return true }
+        }
+        return false
+    }
+
+    private func englishTitle(_ tv: Bool, _ id: Int) async -> String {
+        guard id > 0, let o = try? await get("\(tv ? "tv" : "movie")/\(id)", ["language": "en-US"]) else { return "" }
+        return jstr(o[tv ? "name" : "title"])
     }
 
     private func img(_ path: String, _ size: String) -> String { path.isEmpty ? "" : "https://image.tmdb.org/t/p/\(size)\(path)" }
@@ -79,10 +96,13 @@ actor TMDB {
             results = ((try? await get(path, params))?["results"] as? [[String: Any]]) ?? []
         }
         let f = results.first
-        let card = TMDBCard(poster: img(jstr(f?["poster_path"]), "w342"), title: jstr(f?[tv ? "name" : "title"]), id: jint(f?["id"]))
+        var title = jstr(f?[tv ? "name" : "title"])
+        if TMDB.foreignScript(title) { let en = await englishTitle(tv, jint(f?["id"])); if !en.isEmpty { title = en } }
+        let card = TMDBCard(poster: img(jstr(f?["poster_path"]), "w342"), title: title, id: jint(f?["id"]),
+                            backdrop: img(jstr(f?["backdrop_path"]), "w780"))
         cards[ck] = card
         dirty += 1
-        if dirty % 20 == 0 { Storage.save("tmdbCards", cards) }
+        if dirty % 20 == 0 { Storage.save("tmdbCards2", cards) }
         return card.id == 0 ? nil : card
     }
 
@@ -117,6 +137,11 @@ actor TMDB {
         }
         var info = TMDBInfo(id: id)
         info.title = jstr(o[tv ? "name" : "title"]).isEmpty ? jstr(en?[tv ? "name" : "title"]) : jstr(o[tv ? "name" : "title"])
+        if TMDB.foreignScript(info.title) {
+            let enTitle = en.map { jstr($0[tv ? "name" : "title"]) } ?? ""
+            let t2 = enTitle.isEmpty ? await englishTitle(tv, id) : enTitle
+            if !t2.isEmpty { info.title = t2 }
+        }
         info.original = jstr(o[tv ? "original_name" : "original_title"])
         info.overview = jstr(o["overview"]).isEmpty ? jstr(en?["overview"]) : jstr(o["overview"])
         info.tagline = jstr(o["tagline"])

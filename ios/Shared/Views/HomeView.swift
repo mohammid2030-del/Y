@@ -68,13 +68,20 @@ struct HeroView: View {
     @State private var title = ""
     @State private var meta = ""
     @State private var plot = ""
+    private enum HeroField: Hashable { case primary, details, fav }
+    #if os(tvOS)
+    @FocusState private var heroFocus: HeroField?
+    private var userIsHere: Bool { heroFocus != nil }
+    #else
+    private var userIsHere: Bool { false }
+    #endif
 
     private var height: CGFloat { Theme.isTV ? 720 : 560 }
 
     var body: some View {
         let (kind, item) = items[min(index, items.count - 1)]
         ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: backdrop.isEmpty ? item.logo : backdrop)
+            RemoteImage(url: backdrop.isEmpty ? item.logo : backdrop, maxPixel: 1920)
                 .frame(maxWidth: .infinity).frame(height: height).clipped()
                 .id(backdrop + item.id).transition(.opacity)
             LinearGradient(colors: [.black.opacity(0.55), .clear, Theme.bg.opacity(0.85), Theme.bg],
@@ -85,7 +92,7 @@ struct HeroView: View {
                     .font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 5)
                     .background(.black.opacity(0.35), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.2)))
                 if !logo.isEmpty {
-                    RemoteImage(url: logo, contentMode: .fit).frame(maxWidth: Theme.isTV ? 640 : 340, maxHeight: Theme.isTV ? 160 : 110, alignment: .leading)
+                    RemoteImage(url: logo, contentMode: .fit, maxPixel: 900).frame(maxWidth: Theme.isTV ? 640 : 340, maxHeight: Theme.isTV ? 160 : 110, alignment: .leading)
                 } else {
                     Text(title.isEmpty ? Clean.title(item.name) : title)
                         .font(.system(size: Theme.isTV ? 64 : 38, weight: .heavy)).lineLimit(2).shadow(radius: 12)
@@ -99,6 +106,7 @@ struct HeroView: View {
                         }
                         #if os(tvOS)
                         .buttonStyle(.borderedProminent)
+                        .focused($heroFocus, equals: .primary)
                         #else
                         .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
                         #endif
@@ -109,6 +117,7 @@ struct HeroView: View {
                     }
                     #if os(tvOS)
                     .buttonStyle(.bordered)
+                    .focused($heroFocus, equals: .details)
                     #else
                     .buttonStyle(.plain).background(.white.opacity(0.18), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.3)))
                     #endif
@@ -117,6 +126,7 @@ struct HeroView: View {
                     }
                     #if os(tvOS)
                     .buttonStyle(.bordered)
+                    .focused($heroFocus, equals: .fav)
                     #else
                     .buttonStyle(.plain).background(.white.opacity(0.18), in: Circle())
                     #endif
@@ -135,6 +145,7 @@ struct HeroView: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
+                if userIsHere { continue }   // never swap the hero under the user's focus
                 withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % max(1, items.count) }
             }
         }
@@ -175,6 +186,7 @@ struct MatchesStrip: View {
     @State private var choose: (Match, [MediaItem])?
     @State private var showChooser = false
     @State private var message: String?
+    @State private var finding: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -186,11 +198,23 @@ struct MatchesStrip: View {
                     Text(L.t("today")).tag(0)
                     Text(L.t("tomorrow")).tag(1)
                 }.pickerStyle(.segmented).frame(width: Theme.isTV ? 420 : 200)
+                NavigationLink(value: Route.matchPrefs) {
+                    Image(systemName: "slider.horizontal.3").font(.headline)
+                        #if os(iOS)
+                        .padding(9).background(Theme.surface2, in: Circle())
+                        #endif
+                }
+                #if os(tvOS)
+                .buttonStyle(.bordered)
+                #else
+                .buttonStyle(.plain)
+                #endif
             }
             .padding(.horizontal, Theme.pad)
             if let list = matches {
                 if list.isEmpty {
-                    Text(L.t("noMatches")).foregroundStyle(.secondary).padding(.horizontal, Theme.pad).padding(.vertical, 8)
+                    Text(L.t(state.matchPrefs.only && !state.matchPrefs.teams.isEmpty ? "noFavMatches" : "noMatches"))
+                        .foregroundStyle(.secondary).padding(.horizontal, Theme.pad).padding(.vertical, 8)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: Theme.isTV ? 40 : 14) {
@@ -204,13 +228,17 @@ struct MatchesStrip: View {
             } else {
                 ProgressView().padding(.horizontal, Theme.pad)
             }
+            if let finding {
+                HStack(spacing: 10) { ProgressView(); Text(finding).font(.footnote) }.padding(.horizontal, Theme.pad)
+            }
             if let message { Text(message).font(.footnote).foregroundStyle(.orange).padding(.horizontal, Theme.pad) }
         }
-        .task(id: day) {
+        .task(id: "\(day)|\(state.matchPrefs.hashValue)") {
             matches = nil
             while !Task.isCancelled {
-                let list = await Matches.forDay(day)
-                matches = list
+                let list = await Matches.forDay(day, prefs: state.matchPrefs)
+                if Task.isCancelled { return }
+                if list != matches { matches = list }
                 try? await Task.sleep(nanoseconds: list.contains { $0.isLive } ? 45_000_000_000 : 600_000_000_000)
             }
         }
@@ -235,14 +263,126 @@ struct MatchesStrip: View {
             return
         }
         let ranked = Matches.rank(m, channels: state.catalog.live, subID: state.activeID)
-        guard let first = ranked.first else { message = L.t("noChannel"); return }
-        if Matches.isSure(m, ranked: ranked, channels: state.catalog.live, subID: state.activeID) {
-            Matches.remember(m, subID: state.activeID, channel: first)
-            state.playLive(first, list: ranked)
-        } else {
-            choose = (m, ranked)
-            showChooser = true
+        guard !ranked.isEmpty else { message = L.t("noChannel"); return }
+        let learned = Storage.string("pick|\(state.activeID)|m|\(m.id)")
+        if let first = ranked.first, first.0.id == learned || ranked.count == 1 {
+            state.playLive(first.0, list: ranked.map { $0.0 })
+            return
         }
+        guard let sub = state.active, sub.kind == .xtream else { ask(m, ranked.map { $0.0 }); return }
+        finding = L.t("findingChannel")
+        Task {
+            let boosted = await Matches.epgBoost(m, candidates: ranked, xtream: state.xtream(for: sub))
+            finding = nil
+            let list = boosted.map { $0.0 }
+            if let top = boosted.first, top.2, !(boosted.count > 1 && boosted[1].2 && boosted[1].1 == top.1) {
+                // The guide says this channel is showing the match.
+                Matches.remember(m, subID: state.activeID, channel: top.0)
+                state.playLive(top.0, list: list)
+            } else {
+                ask(m, list)
+            }
+        }
+    }
+
+    private func ask(_ m: Match, _ list: [MediaItem]) {
+        choose = (m, list)
+        showChooser = true
+    }
+}
+
+/// Followed competitions, favourite clubs and national teams.
+struct MatchPrefsView: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(L.t("onlyFavTeams"), isOn: Binding(get: { state.matchPrefs.only }, set: { v in state.updateMatchPrefs { $0.only = v } }))
+            } footer: { Text(L.t("onlyFavHint")) }
+            Section(L.t("favTeams")) {
+                if state.matchPrefs.teams.isEmpty {
+                    Text(L.t("noFavTeams")).foregroundStyle(.secondary)
+                }
+                ForEach(state.matchPrefs.teams) { t in
+                    Button { state.toggleTeam(t) } label: {
+                        HStack(spacing: 14) {
+                            RemoteImage(url: t.logo, contentMode: .fit, placeholderIcon: "shield.fill", maxPixel: 160).frame(width: 44, height: 44)
+                            Text(t.name)
+                            Spacer()
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            Section(L.t("addTeams")) {
+                ForEach(Matches.competitions, id: \.slug) { c in
+                    NavigationLink(value: Route.teams(c.slug)) {
+                        Label(c.label, systemImage: c.nat ? "flag.fill" : "soccerball")
+                    }
+                }
+            }
+            Section(L.t("followedComps")) {
+                ForEach(Matches.competitions, id: \.slug) { c in
+                    Button { state.toggleComp(c.slug) } label: {
+                        HStack {
+                            Text(c.label)
+                            Spacer()
+                            if state.matchPrefs.comps.contains(c.slug) { Image(systemName: "checkmark").foregroundStyle(Theme.blue) }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(L.t("matchPrefs"))
+    }
+}
+
+struct TeamPickerView: View {
+    let slug: String
+    @EnvironmentObject var state: AppState
+    @State private var teams: [FavTeam]?
+    @State private var query = ""
+
+    var body: some View {
+        let list = (teams ?? []).filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                #if os(iOS)
+                TextField(L.t("searchHint"), text: $query).textFieldStyle(.roundedBorder).padding(.horizontal, Theme.pad)
+                #endif
+                if teams == nil {
+                    ProgressView().frame(maxWidth: .infinity).padding(40)
+                } else if list.isEmpty {
+                    Text(L.t("noResults")).foregroundStyle(.secondary).padding(.horizontal, Theme.pad)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: Theme.isTV ? 220 : 110), spacing: Theme.isTV ? 36 : 12)], spacing: Theme.isTV ? 40 : 14) {
+                        ForEach(list) { t in
+                            let on = state.matchPrefs.teams.contains { $0.id == t.id }
+                            Button { state.toggleTeam(t) } label: {
+                                VStack(spacing: 10) {
+                                    RemoteImage(url: t.logo, contentMode: .fit, placeholderIcon: "shield.fill", maxPixel: 240)
+                                        .frame(width: Theme.isTV ? 110 : 60, height: Theme.isTV ? 110 : 60)
+                                    Text(t.name).font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center)
+                                }
+                                .frame(width: Theme.isTV ? 200 : 100, height: Theme.isTV ? 220 : 120)
+                                .padding(8)
+                                .background(on ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.surface), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .overlay(alignment: .topTrailing) {
+                                    if on { Image(systemName: "star.fill").foregroundStyle(Theme.gold).padding(10) }
+                                }
+                                .foregroundStyle(.white)
+                            }
+                            .cardStyle()
+                        }
+                    }
+                    .padding(.horizontal, Theme.pad)
+                }
+            }
+            .padding(.vertical, 20)
+        }
+        .navigationTitle(Matches.competition(slug)?.label ?? "")
+        .task { if teams == nil { teams = await Matches.teams(slug) } }
     }
 }
 
@@ -270,6 +410,7 @@ struct MatchCard: View {
                         RemoteImage(url: m.leagueLogo, contentMode: .fit).frame(width: 20, height: 20).padding(3).background(.white, in: Circle())
                     }
                     Text(m.league).font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                    if m.fav { Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.gold) }
                     Spacer()
                     status(m)
                 }

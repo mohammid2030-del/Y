@@ -114,4 +114,6 @@ enum Route: Hashable {
     case movie(MediaItem)
     case series(MediaItem)
     case category(MediaKind, Category)
+    case matchPrefs
+    case teams(String)
 }

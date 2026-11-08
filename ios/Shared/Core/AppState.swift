@@ -24,6 +24,7 @@ final class AppState: ObservableObject {
     @Published var syncError: String?
     @Published var tmdbOn = TMDB.enabledNow
     @Published var showMatches = Storage.string("showMatches") != "0"
+    @Published var matchPrefs: MatchPrefs = Storage.load("matchPrefs", as: MatchPrefs.self) ?? MatchPrefs()
 
     private var byCategoryCache: [String: [MediaItem]] = [:]
 
@@ -215,6 +216,25 @@ final class AppState: ObservableObject {
     func clearHistory() {
         history = history.filter { $0.value.subID != activeID }
         Storage.save("history", history)
+    }
+
+    func updateMatchPrefs(_ change: (inout MatchPrefs) -> Void) {
+        var p = matchPrefs
+        change(&p)
+        matchPrefs = p
+        Storage.save("matchPrefs", p)
+    }
+
+    func toggleTeam(_ t: FavTeam) {
+        updateMatchPrefs { p in
+            if let i = p.teams.firstIndex(where: { $0.id == t.id }) { p.teams.remove(at: i) } else { p.teams.append(t) }
+        }
+    }
+
+    func toggleComp(_ slug: String) {
+        updateMatchPrefs { p in
+            if let i = p.comps.firstIndex(of: slug) { p.comps.remove(at: i) } else { p.comps.append(slug) }
+        }
     }
 
     func setShowMatches(_ v: Bool) { showMatches = v; Storage.setString("showMatches", v ? "1" : "0") }

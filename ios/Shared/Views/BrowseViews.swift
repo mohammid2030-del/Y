@@ -297,6 +297,7 @@ struct SettingsView: View {
             } header: { Text(L.t("tmdb")) } footer: { Text(L.t("tmdbAttribution")) }
             Section(L.t("matchesSection")) {
                 Toggle(L.t("showMatches"), isOn: Binding(get: { state.showMatches }, set: { state.setShowMatches($0) }))
+                NavigationLink(value: Route.matchPrefs) { Label(L.t("matchPrefs"), systemImage: "star.circle.fill") }
             }
             Section {
                 Button(L.t("clearHistory"), role: .destructive) { state.clearHistory() }

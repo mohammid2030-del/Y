@@ -183,6 +183,19 @@ struct Xtream {
         return out
     }
 
+    /// Now / next programmes of a live channel (title + description, base64 in the Xtream API).
+    func shortEPG(_ streamID: String, limit: Int = 6) async -> [(start: Int, stop: Int, text: String)] {
+        guard let u = try? api("get_short_epg", ["stream_id": streamID, "limit": "\(limit)"]),
+              let j = try? await Net.json(u) as? [String: Any] else { return [] }
+        func b64(_ s: String) -> String {
+            guard let d = Data(base64Encoded: s, options: .ignoreUnknownCharacters), let t = String(data: d, encoding: .utf8) else { return s }
+            return t
+        }
+        return jlist(j["epg_listings"]).map { e in
+            (jint(e["start_timestamp"]), jint(e["stop_timestamp"]), b64(jstr(e["title"])) + " " + b64(jstr(e["description"])))
+        }
+    }
+
     func url(kind: MediaKind, item: MediaItem, episode: Episode? = nil) -> URL? {
         let u = user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? user
         let p = pass.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? pass

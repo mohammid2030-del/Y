@@ -17,13 +17,13 @@ private struct DetailHeader<Actions: View>: View {
         let rating = tmdb?.rating.isEmpty == false ? tmdb!.rating : item.rating
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottom) {
-                RemoteImage(url: backdrop.isEmpty ? poster : backdrop)
+                RemoteImage(url: backdrop.isEmpty ? poster : backdrop, maxPixel: 1920)
                     .frame(maxWidth: .infinity).frame(height: Theme.isTV ? 620 : 300).clipped()
                     .blur(radius: backdrop.isEmpty ? 24 : 0)
                 LinearGradient(colors: [.black.opacity(0.35), .clear, Theme.bg], startPoint: .top, endPoint: .bottom)
             }
             HStack(alignment: .top, spacing: Theme.isTV ? 50 : 18) {
-                RemoteImage(url: poster).frame(width: Theme.isTV ? 300 : 120, height: Theme.isTV ? 450 : 180)
+                RemoteImage(url: poster, maxPixel: 900).frame(width: Theme.isTV ? 300 : 120, height: Theme.isTV ? 450 : 180)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)).shadow(radius: 16)
                     .offset(y: Theme.isTV ? -160 : -70)
                     .padding(.bottom, Theme.isTV ? -160 : -70)
@@ -74,9 +74,7 @@ struct CastRow: View {
                                 Text(p.name).font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center)
                                 Text(p.role).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                             }.frame(width: Theme.isTV ? 160 : 90)
-                            #if os(tvOS)
-                            .focusable()
-                            #endif
+                            .tvFocusable(radius: 18)
                         }
                     }.padding(.horizontal, Theme.pad)
                 }
@@ -109,15 +107,16 @@ struct MovieDetailView: View {
                 }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : item.plot)
                 if !plot.isEmpty {
-                    Text(plot).font(.body).foregroundStyle(.white.opacity(0.85)).padding(.horizontal, Theme.pad)
-                        #if os(tvOS)
-                        .focusable()
-                        #endif
+                    Text(plot).font(.body).foregroundStyle(.white.opacity(0.85)).frame(maxWidth: .infinity, alignment: .leading)
+                        .tvFocusable(radius: 14).padding(.horizontal, Theme.pad - (Theme.isTV ? 8 : 0))
                 }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
                 else if let c = info?.cast, !c.isEmpty { Text(L.t("cast") + ": " + c).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.pad) }
                 let crew = tmdb?.creators.joined(separator: "، ") ?? info?.director ?? ""
-                if !crew.isEmpty { Text(L.t("director") + ": " + crew).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.pad) }
+                if !crew.isEmpty {
+                    Text(L.t("director") + ": " + crew).font(.footnote).foregroundStyle(.secondary)
+                        .tvFocusable(radius: 12).padding(.horizontal, Theme.pad - (Theme.isTV ? 8 : 0))
+                }
             }
             .padding(.bottom, 40)
         }
@@ -190,7 +189,10 @@ struct SeriesDetailView: View {
                     }
                 }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : item.plot)
-                if !plot.isEmpty { Text(plot).foregroundStyle(.white.opacity(0.85)).lineLimit(5).padding(.horizontal, Theme.pad) }
+                if !plot.isEmpty {
+                    Text(plot).foregroundStyle(.white.opacity(0.85)).lineLimit(5).frame(maxWidth: .infinity, alignment: .leading)
+                        .tvFocusable(radius: 14).padding(.horizontal, Theme.pad - (Theme.isTV ? 8 : 0))
+                }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
                 if let error {
                     Text(error).foregroundStyle(Theme.live).padding(.horizontal, Theme.pad)

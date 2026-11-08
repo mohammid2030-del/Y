@@ -48,7 +48,7 @@ struct MainTabs: View {
                 .tabItem { Label(L.t("search"), systemImage: "magnifyingglass") }.tag(Tab.search)
             NavigationStack { FavoritesView().navigationDestinations() }
                 .tabItem { Label(L.t("favorites"), systemImage: "heart.fill") }.tag(Tab.favorites)
-            NavigationStack { SettingsView() }
+            NavigationStack { SettingsView().navigationDestinations() }
                 .tabItem { Label(L.t("settings"), systemImage: "gearshape.fill") }.tag(Tab.settings)
         }
     }
@@ -61,6 +61,8 @@ extension View {
             case .movie(let m): MovieDetailView(item: m)
             case .series(let s): SeriesDetailView(item: s)
             case .category(let k, let c): CategoryGridView(kind: k, category: c)
+            case .matchPrefs: MatchPrefsView()
+            case .teams(let slug): TeamPickerView(slug: slug)
             }
         }
     }
