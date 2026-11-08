@@ -131,7 +131,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
     // FFmpeg audio decoders (AC-3, E-AC-3/Atmos, DTS, TrueHD…) for tracks the device can't decode itself.
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.1+1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
 
     // Images
     implementation("io.coil-kt:coil-compose:2.7.0")
