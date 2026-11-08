@@ -85,6 +85,10 @@ class PlayerUiState {
     var channelNumber by mutableStateOf(0)
     var videoInfo by mutableStateOf("")
     var qualities by mutableStateOf<List<QualityOption>>(emptyList())
+    var audioTracks by mutableStateOf<List<TrackOption>>(emptyList())
+    var textTracks by mutableStateOf<List<TrackOption>>(emptyList())
+    var textOff by mutableStateOf(false)
+    var tracksDialog by mutableStateOf(false)
     var canZap by mutableStateOf(false)
     var pipSupported by mutableStateOf(false)
     var skipIntroVisible by mutableStateOf(false)
@@ -100,6 +104,16 @@ class PlayerUiState {
 data class UpNextUi(val title: String, val subtitle: String, val image: String)
 
 data class QualityOption(val label: String, val groupIndex: Int, val trackIndex: Int, val selected: Boolean)
+
+/** An audio or subtitle track with a readable label ("العربية · 5.1 · E-AC-3"). */
+data class TrackOption(
+    val label: String,
+    val detail: String,
+    val groupIndex: Int,
+    val trackIndex: Int,
+    val selected: Boolean,
+    val supported: Boolean,
+)
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -214,6 +228,7 @@ class PlayerActivity : AppCompatActivity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             updateQualities(tracks)
+            updateTrackLists(tracks)
             updateVideoInfo()
         }
     }
@@ -261,6 +276,9 @@ class PlayerActivity : AppCompatActivity() {
                         onInfo = { ui.infoVisible = !ui.infoVisible },
                         onQuality = { ui.qualityDialog = true },
                         onSelectQuality = { selectQuality(it) },
+                        onTracks = { ui.tracksDialog = true },
+                        onSelectAudio = { selectTrack(C.TRACK_TYPE_AUDIO, it) },
+                        onSelectText = { selectTrack(C.TRACK_TYPE_TEXT, it) },
                         onZap = { zap(it) },
                         onSkipIntro = { skipIntro() },
                         onPlayNext = { playNext() },
@@ -303,7 +321,11 @@ class PlayerActivity : AppCompatActivity() {
                     .apply { if (lowEnd) setMaxVideoSize(1280, 720) }
             )
         }
-        val p = ExoPlayer.Builder(this)
+        // Device decoders first; FFmpeg fills in for codecs the device lacks (Dolby / DTS audio in many 4K files).
+        val renderers = androidx.media3.exoplayer.DefaultRenderersFactory(this)
+            .setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
+        val p = ExoPlayer.Builder(this, renderers)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)
             .setHandleAudioBecomingNoisy(true)
@@ -701,6 +723,79 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
         ui.qualities = out.sortedByDescending { it.label.substringBefore('p').toIntOrNull() ?: 0 }
+    }
+
+    private fun appLocale(): Locale {
+        val tag = androidx.appcompat.app.AppCompatDelegate.getApplicationLocales().toLanguageTags().substringBefore(',')
+        return if (tag.isNotBlank()) Locale.forLanguageTag(tag) else Locale.getDefault()
+    }
+
+    private fun languageName(code: String?): String {
+        if (code.isNullOrBlank() || code == "und") return ""
+        val loc = Locale.forLanguageTag(code)
+        return loc.getDisplayLanguage(appLocale()).replaceFirstChar { it.titlecase(appLocale()) }.ifBlank { code }
+    }
+
+    private fun codecName(mime: String?): String = when (mime) {
+        "audio/mp4a-latm" -> "AAC"
+        "audio/ac3" -> "Dolby Digital"
+        "audio/eac3" -> "Dolby Digital+"
+        "audio/eac3-joc" -> "Dolby Atmos"
+        "audio/true-hd" -> "Dolby TrueHD"
+        "audio/vnd.dts", "audio/vnd.dts.hd", "audio/vnd.dts.uhd;profile=p2" -> "DTS"
+        "audio/mpeg" -> "MP3"
+        "audio/opus" -> "Opus"
+        "audio/flac" -> "FLAC"
+        "application/x-subrip" -> "SRT"
+        "text/vtt" -> "WebVTT"
+        "text/x-ssa" -> "ASS"
+        "application/pgs" -> "PGS"
+        else -> mime?.substringAfter('/')?.uppercase(Locale.US).orEmpty()
+    }
+
+    private fun channelsName(n: Int): String = when {
+        n <= 0 -> ""
+        n == 1 -> "Mono"
+        n == 2 -> "Stereo"
+        n == 6 -> "5.1"
+        n == 8 -> "7.1"
+        else -> "${n}ch"
+    }
+
+    private fun updateTrackLists(tracks: Tracks) {
+        val audio = ArrayList<TrackOption>()
+        val text = ArrayList<TrackOption>()
+        tracks.groups.forEachIndexed { gi, group ->
+            if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
+            for (ti in 0 until group.length) {
+                val f = group.getTrackFormat(ti)
+                val lang = languageName(f.language)
+                val name = listOf(lang, f.label.orEmpty().takeIf { it.isNotBlank() && !it.equals(lang, true) && !it.equals(f.language, true) }.orEmpty())
+                    .filter { it.isNotBlank() }.joinToString(" · ")
+                    .ifBlank { getString(if (group.type == C.TRACK_TYPE_AUDIO) R.string.audio_track_n else R.string.subtitle_track_n, (if (group.type == C.TRACK_TYPE_AUDIO) audio.size else text.size) + 1) }
+                val detail = if (group.type == C.TRACK_TYPE_AUDIO) {
+                    listOf(channelsName(f.channelCount), codecName(f.sampleMimeType)).filter { it.isNotBlank() }.joinToString(" · ")
+                } else codecName(f.sampleMimeType ?: f.containerMimeType)
+                val opt = TrackOption(name, detail, gi, ti, group.isTrackSelected(ti), group.isTrackSupported(ti))
+                if (group.type == C.TRACK_TYPE_AUDIO) audio += opt else text += opt
+            }
+        }
+        ui.audioTracks = audio
+        ui.textTracks = text
+        ui.textOff = player?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true || text.none { it.selected }
+    }
+
+    private fun selectTrack(type: Int, option: TrackOption?) {
+        val p = player ?: return
+        val params = p.trackSelectionParameters.buildUpon()
+        if (option == null) {
+            params.setTrackTypeDisabled(type, true)
+        } else {
+            val group = p.currentTracks.groups.getOrNull(option.groupIndex) ?: return
+            params.setTrackTypeDisabled(type, false)
+            params.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex))
+        }
+        p.trackSelectionParameters = params.build()
     }
 
     private fun selectQuality(option: QualityOption?) {

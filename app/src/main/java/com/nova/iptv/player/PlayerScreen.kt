@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material3.RadioButton
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -80,6 +82,9 @@ class PlayerActions(
     val onInfo: () -> Unit,
     val onQuality: () -> Unit,
     val onSelectQuality: (QualityOption?) -> Unit,
+    val onTracks: () -> Unit = {},
+    val onSelectAudio: (TrackOption) -> Unit = {},
+    val onSelectText: (TrackOption?) -> Unit = {},
     val onZap: (Int) -> Unit,
     val onSkipIntro: () -> Unit = {},
     val onPlayNext: () -> Unit = {},
@@ -196,6 +201,30 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             if (next != null) UpNextCard(next, state.upNextSeconds, state.upNextTotal, state.autoNext, actions)
         }
 
+        if (state.tracksDialog) {
+            AlertDialog(
+                onDismissRequest = { state.tracksDialog = false },
+                title = { Text(stringResource(R.string.audio_and_subtitles)) },
+                text = {
+                    LazyColumn {
+                        item { TrackHeader(stringResource(R.string.audio_label)) }
+                        if (state.audioTracks.isEmpty()) {
+                            item { Text(stringResource(R.string.no_audio_tracks), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp)) }
+                        }
+                        items(state.audioTracks) { t ->
+                            TrackRow(t.label, t.detail, t.selected, t.supported) { actions.onSelectAudio(t) }
+                        }
+                        item { TrackHeader(stringResource(R.string.subtitles_section)) }
+                        item { TrackRow(stringResource(R.string.intro_off), "", state.textOff, true) { actions.onSelectText(null) } }
+                        items(state.textTracks) { t ->
+                            TrackRow(t.label, t.detail, t.selected && !state.textOff, t.supported) { actions.onSelectText(t) }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { state.tracksDialog = false }) { Text(stringResource(R.string.close)) } },
+            )
+        }
+
         if (state.qualityDialog) {
             AlertDialog(
                 onDismissRequest = { state.qualityDialog = false },
@@ -275,6 +304,9 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions) {
             Text(state.videoInfo, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelMedium)
         }
         IconButton(onClick = actions.onInfo) { Icon(Icons.Filled.Info, stringResource(R.string.stream_info), tint = Color.White) }
+        IconButton(onClick = actions.onTracks) {
+            Icon(Icons.Filled.Audiotrack, stringResource(R.string.audio_and_subtitles), tint = Color.White)
+        }
         IconButton(onClick = actions.onQuality) { Icon(Icons.Filled.HighQuality, stringResource(R.string.video_quality), tint = Color.White) }
         IconButton(onClick = actions.onAspect) { Icon(Icons.Filled.AspectRatio, stringResource(R.string.aspect_ratio), tint = Color.White) }
         if (state.pipSupported) {
@@ -462,6 +494,40 @@ private fun UpNextCard(next: UpNextUi, seconds: Int, total: Int, autoNext: Boole
                 contentAlignment = Alignment.Center,
             ) {
                 Text(stringResource(R.string.cancel), color = Color.White, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun TrackHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp),
+    )
+}
+
+@Composable
+private fun TrackRow(label: String, detail: String, selected: Boolean, supported: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable(enabled = supported, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = if (supported) onClick else null, enabled = supported)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+            val sub = listOf(detail, if (!supported) stringResource(R.string.track_unsupported) else "").filter { it.isNotBlank() }.joinToString(" · ")
+            if (sub.isNotBlank()) {
+                Text(sub, style = MaterialTheme.typography.bodySmall, color = if (supported) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
             }
         }
     }

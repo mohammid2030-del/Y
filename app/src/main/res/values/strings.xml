@@ -8,6 +8,9 @@
     <string name="app_name" translatable="false">NOVA IPTV</string>
     <string name="appearance">Appearance</string>
     <string name="aspect_ratio">Aspect ratio</string>
+    <string name="audio_and_subtitles">Audio &amp; subtitles</string>
+    <string name="audio_label">Audio</string>
+    <string name="audio_track_n">Audio %1$d</string>
     <string name="auto">Auto</string>
     <string name="auto_refresh">Automatic refresh</string>
     <string name="auto_refresh_desc">Refresh channels and guide every 12 hours on Wi‑Fi or mobile data</string>
@@ -129,6 +132,7 @@
     <string name="next_channel">Next channel</string>
     <string name="next_episode">Next episode</string>
     <string name="next_program">Next: %1$s %2$s</string>
+    <string name="no_audio_tracks">No audio tracks in this stream</string>
     <string name="no_channel_found">No matching channel in your subscription</string>
     <string name="no_episodes">No episodes available</string>
     <string name="no_guide_data">No guide data for these channels. Refresh the guide or add an EPG URL.</string>
@@ -214,6 +218,7 @@
     <string name="subs_size">Subtitle size</string>
     <string name="subscriptions">Subscriptions</string>
     <string name="subscriptions_title">Subscriptions</string>
+    <string name="subtitle_track_n">Subtitle %1$d</string>
     <string name="subtitles_section">Subtitles</string>
     <string name="switch_profile">Switch profile</string>
     <string name="sync_failed">Could not load the subscription</string>
@@ -243,6 +248,7 @@
     <string name="tmdb_votes">%1$d votes</string>
     <string name="today">Today</string>
     <string name="tomorrow">Tomorrow</string>
+    <string name="track_unsupported">Not supported on this device</string>
     <string name="trailer">Trailer</string>
     <string name="tv_guide">TV guide</string>
     <string name="type_file">Local file</string>

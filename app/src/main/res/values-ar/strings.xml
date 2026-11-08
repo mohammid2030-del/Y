@@ -7,6 +7,9 @@
     <string name="all_categories">كل التصنيفات</string>
     <string name="appearance">المظهر</string>
     <string name="aspect_ratio">نسبة العرض</string>
+    <string name="audio_and_subtitles">الصوت والترجمة</string>
+    <string name="audio_label">الصوت</string>
+    <string name="audio_track_n">صوت %1$d</string>
     <string name="auto">تلقائي</string>
     <string name="auto_refresh">التحديث التلقائي</string>
     <string name="auto_refresh_desc">تحديث القنوات والدليل كل 12 ساعة عند توفر الإنترنت</string>
@@ -128,6 +131,7 @@
     <string name="next_channel">القناة التالية</string>
     <string name="next_episode">الحلقة التالية</string>
     <string name="next_program">التالي: %1$s %2$s</string>
+    <string name="no_audio_tracks">لا توجد مسارات صوت في هذا البث</string>
     <string name="no_channel_found">لا توجد قناة مطابقة في اشتراكك</string>
     <string name="no_episodes">لا توجد حلقات متاحة</string>
     <string name="no_guide_data">لا توجد بيانات دليل لهذه القنوات. حدّث الدليل أو أضف رابط EPG.</string>
@@ -213,6 +217,7 @@
     <string name="subs_size">حجم الترجمة</string>
     <string name="subscriptions">الاشتراكات</string>
     <string name="subscriptions_title">الاشتراكات</string>
+    <string name="subtitle_track_n">ترجمة %1$d</string>
     <string name="subtitles_section">الترجمة</string>
     <string name="switch_profile">تبديل الملف</string>
     <string name="sync_failed">تعذر تحميل الاشتراك</string>
@@ -242,6 +247,7 @@
     <string name="tmdb_votes">%1$d تقييم</string>
     <string name="today">اليوم</string>
     <string name="tomorrow">غداً</string>
+    <string name="track_unsupported">غير مدعوم على هذا الجهاز</string>
     <string name="trailer">الإعلان</string>
     <string name="tv_guide">دليل البرامج</string>
     <string name="type_file">ملف محلي</string>
