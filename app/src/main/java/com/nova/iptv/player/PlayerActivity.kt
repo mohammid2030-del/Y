@@ -135,7 +135,7 @@ class PlayerActivity : AppCompatActivity() {
     private var episodeCtx: com.nova.iptv.data.repo.EpisodeContext? = null
     private var currentSkip: Pair<String, com.nova.iptv.data.network.Segment>? = null
     private var upNextShownAt = 0L
-    private var internalSeek = false
+    private var lastIntro: com.nova.iptv.data.network.Segment? = null
     private var introStartMs = 0L
     private var introEndMs = 0L
     private var programmaticSeek = false
@@ -209,16 +209,6 @@ class PlayerActivity : AppCompatActivity() {
             else oldPosition.positionMs
             chainFrom = from; chainTo = to; chainAt = now
             seekCandidate = if (from < 6 * 60_000L && to - from in 20_000L..240_000L) from to to else null
-        }
-
-        override fun onPositionDiscontinuity(
-            oldPosition: Player.PositionInfo,
-            newPosition: Player.PositionInfo,
-            reason: Int,
-        ) {
-            if (reason != Player.DISCONTINUITY_REASON_SEEK) return
-            if (internalSeek) { internalSeek = false; return }
-            onManualSeek(oldPosition.positionMs, newPosition.positionMs)
         }
 
         override fun onTracksChanged(tracks: Tracks) {
@@ -484,14 +474,24 @@ class PlayerActivity : AppCompatActivity() {
         val ctx = content.episodeContext(req.subscriptionId, req.remoteId, req.episodeId)
         episodeCtx = ctx
         nextEpisode = ctx?.next
-        if (ctx != null) {
-            learnedIntro = skipRepo.learnedIntro(req.subscriptionId, req.remoteId, ctx.current.season)
-            segments = skipRepo.segments(ctx.tmdbId, ctx.current.season, ctx.current.episodeNum)
-        }
+        seekCandidate = null
+        ui.introAdjustVisible = false
+        learnedIntro = introStore.get(req.subscriptionId, req.remoteId)?.let { com.nova.iptv.data.network.Segment(it.startMs, it.endMs) }
+        if (ctx != null) segments = skipRepo.segments(ctx.tmdbId, ctx.current.season, ctx.current.episodeNum)
         while (true) {
             val p = player
             if (p != null && p.playbackState == Player.STATE_READY && ui.error == null) {
-                updateSkip(p.currentPosition, p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L, req)
+                val pos = p.currentPosition
+                // learn from a manual skip once playback continues 12 s past the landing point
+                val cand = seekCandidate
+                if (cand != null && pos >= cand.second + 12_000L) {
+                    seekCandidate = null
+                    if (segments?.intro == null) {
+                        saveIntro(if (cand.first < 15_000L) 0L else cand.first, cand.second)
+                        android.widget.Toast.makeText(this, R.string.intro_saved, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                updateSkip(pos, p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L, req)
             }
             delay(400)
         }
@@ -547,23 +547,43 @@ class PlayerActivity : AppCompatActivity() {
     private fun skipIntro() {
         val p = player ?: return
         val (kind, seg) = currentSkip ?: return
-        internalSeek = true
-        val target = if (seg.endMs > 0) seg.endMs else p.currentPosition + 85_000L
-        p.seekTo(target)
+        programmaticSeek = true
+        p.seekTo(if (seg.endMs > 0) seg.endMs else p.currentPosition + 85_000L)
         skippedSegments += kind
         ui.skipIntroVisible = false
+        // exact community data needs no tuning; learned/fallback times can be fine-tuned with ◀ ▶
+        if (kind == "intro" && segments?.intro == null) {
+            lastIntro = seg
+            showIntroAdjust()
+        }
     }
 
-    /** Learns where the intro ends when the user jumps over it manually near the start of an episode. */
-    private fun onManualSeek(fromMs: Long, toMs: Long) {
-        val req = request
-        val ctx = episodeCtx ?: return
-        if (req.type != ContentType.SERIES || segments?.intro != null) return
-        val jump = toMs - fromMs
-        if (fromMs in 0L..6 * 60_000L && jump in 15_000L..4 * 60_000L && toMs <= 9 * 60_000L) {
-            skipRepo.learnIntro(req.subscriptionId, req.remoteId, ctx.current.season, fromMs, toMs)
-            learnedIntro = com.nova.iptv.data.network.Segment(fromMs, toMs)
-            skippedSegments += "intro"
+    private fun saveIntro(start: Long, end: Long) {
+        val seg = com.nova.iptv.data.network.Segment(start, end)
+        learnedIntro = seg
+        lastIntro = seg
+        skippedSegments += "intro"
+        ui.introLearned = true
+        introStore.save(request.subscriptionId, request.remoteId, start, end)
+    }
+
+    /** Fine-tune where the intro ends; the new point is remembered for this series. */
+    private fun adjustIntro(deltaMs: Long) {
+        val p = player ?: return
+        val base = lastIntro ?: learnedIntro ?: com.nova.iptv.data.network.Segment(0L, p.currentPosition)
+        val end = (base.endMs + deltaMs).coerceIn(5_000L, 6 * 60_000L)
+        programmaticSeek = true
+        p.seekTo(end)
+        saveIntro(base.startMs.coerceAtMost(end - 1_000L).coerceAtLeast(0L), end)
+        showIntroAdjust()
+    }
+
+    private fun showIntroAdjust() {
+        ui.introAdjustVisible = true
+        adjustJob?.cancel()
+        adjustJob = lifecycleScope.launch {
+            delay(8_000)
+            ui.introAdjustVisible = false
         }
     }
 
