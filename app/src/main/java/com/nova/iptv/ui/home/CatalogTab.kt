@@ -258,6 +258,8 @@ internal fun PosterRow(list: List<ContentEntity>, favorites: Set<String>, onClic
                 subtitle = c.year,
                 rating = c.rating,
                 favorite = favKey(c.type, c.remoteId) in favorites,
+                type = c.type,
+                year = c.year,
                 modifier = Modifier.width(w),
                 onClick = { onClick(c) },
             )
@@ -294,6 +296,8 @@ private fun CategoryGrid(vm: VodViewModel, selected: String, gridState: LazyGrid
                     subtitle = c.year,
                     rating = c.rating,
                     favorite = favKey(vm.type, c.remoteId) in favorites,
+                    type = vm.type,
+                    year = c.year,
                     onClick = { vm.open(c, onOpen) },
                 )
             }

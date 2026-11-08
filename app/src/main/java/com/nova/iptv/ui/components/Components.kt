@@ -117,9 +117,12 @@ fun PosterCard(
     progress: Float? = null,
     favorite: Boolean = false,
     rating: String = "",
+    type: String = "",
+    year: String = "",
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val (shownImage, shownTitle) = rememberTmdbCard(type, title, year, image)
     Column(modifier.padding(4.dp)) {
         Box(
             Modifier
@@ -131,7 +134,7 @@ fun PosterCard(
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable(onClick = onClick)
         ) {
-            NetImage(image, Modifier.fillMaxSize())
+            NetImage(shownImage, Modifier.fillMaxSize())
             // soft vignette so badges stay readable on any artwork
             Box(
                 Modifier.fillMaxSize().background(
@@ -169,7 +172,7 @@ fun PosterCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            title.cleanTitle(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            if (shownTitle == title) title.cleanTitle() else shownTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 2.dp),
         )
         if (subtitle.isNotBlank()) {

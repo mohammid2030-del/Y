@@ -3,6 +3,7 @@
     <string name="about">About</string>
     <string name="about_desc">A player for IPTV subscriptions you are authorised to use. NOVA does not provide any channels or content.</string>
     <string name="add_subscription">Add subscription</string>
+    <string name="add_team">Add team</string>
     <string name="all_categories">All categories</string>
     <string name="app_name" translatable="false">NOVA IPTV</string>
     <string name="appearance">Appearance</string>
@@ -29,12 +30,15 @@
     <string name="clear_history">Clear watch history</string>
     <string name="clear_image_cache">Clear image cache</string>
     <string name="close">Close</string>
+    <string name="club_competitions">Club competitions</string>
     <string name="connection_ok">Connection successful</string>
     <string name="continue_cached">Continue with saved content</string>
     <string name="continue_episode">Continue %1$s</string>
     <string name="continue_label">Continue</string>
     <string name="continue_watching">Continue watching</string>
     <string name="current_pin">Current PIN</string>
+    <string name="customize_matches">My teams &amp; competitions</string>
+    <string name="customize_matches_desc">Pick favourite clubs, national teams and competitions</string>
     <string name="data_privacy">Data &amp; privacy</string>
     <string name="delete">Delete</string>
     <string name="delete_subscription_q">Delete this subscription?</string>
@@ -119,6 +123,8 @@
     <string name="msg_intro_reset">Intro timings cleared</string>
     <string name="msg_pin_removed">PIN removed</string>
     <string name="msg_pin_saved">PIN saved</string>
+    <string name="my_teams">Favourite teams</string>
+    <string name="national_competitions">National teams</string>
     <string name="new_pin">New PIN (4–8 digits)</string>
     <string name="next_channel">Next channel</string>
     <string name="next_episode">Next episode</string>
@@ -132,6 +138,8 @@
     <string name="no_subscription">No subscription yet. Add your Xtream Codes or M3U subscription to start watching.</string>
     <string name="now">Now</string>
     <string name="ok">OK</string>
+    <string name="only_my_teams">Only my teams\' matches</string>
+    <string name="only_my_teams_desc">Hide other matches in the strip</string>
     <string name="opens_in">Channel opens in %1$s</string>
     <string name="parental_control">Parental control</string>
     <string name="passphrase">Passphrase (min. 6 characters)</string>
@@ -169,6 +177,7 @@
     <string name="save_and_load">Save &amp; load</string>
     <string name="search_hint">Search channels, movies, series</string>
     <string name="search_prompt">Type at least 2 characters to search</string>
+    <string name="search_team">Search team (English name)</string>
     <string name="season_episode">Season %1$d · Episode %2$d</string>
     <string name="season_n">Season %1$d</string>
     <string name="seasons_count">%1$d seasons</string>
@@ -214,6 +223,7 @@
     <string name="tab_movies">Movies</string>
     <string name="tab_search">Search</string>
     <string name="tab_series">Series</string>
+    <string name="teams_error">Couldn\'t load teams — check your connection</string>
     <string name="test_connection">Test connection</string>
     <string name="testing">Testing…</string>
     <string name="theme">Theme</string>

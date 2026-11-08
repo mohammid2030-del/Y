@@ -28,6 +28,7 @@ object Routes {
     const val SYNC = "sync/{id}"
     const val HOME = "home"
     const val PROFILES = "profiles"
+    const val MATCH_PREFS = "match_prefs"
     const val MOVIE = "movie/{id}"
     const val SERIES = "series/{id}"
     const val EPG = "epg"
@@ -79,6 +80,9 @@ fun NovaNavHost(startDestination: String) {
                 onEdit = { id -> nav.navigate(Routes.add(id)) },
             )
         }
+        composable(Routes.MATCH_PREFS) {
+            com.nova.iptv.ui.settings.MatchPrefsScreen(onBack = { nav.popBackStack() })
+        }
         composable(Routes.PROFILES) {
             ProfilesScreen(
                 onChosen = { nav.goHomeClearing() },
@@ -93,6 +97,7 @@ fun NovaNavHost(startDestination: String) {
                 onOpenEpg = { nav.navigate(Routes.EPG) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 onAddSubscription = { nav.navigate(Routes.add()) },
+                onMatchPrefs = { nav.navigate(Routes.MATCH_PREFS) },
                 onSwitchProfile = {
                     nav.navigate(Routes.PROFILES) {
                         popUpTo(nav.graph.id) { inclusive = true }
@@ -117,6 +122,7 @@ fun NovaNavHost(startDestination: String) {
                 onEdit = { nav.navigate(Routes.add(it)) },
                 onSync = { nav.navigate(Routes.sync(it)) },
                 onHiddenCategories = { nav.navigate(Routes.HIDDEN) },
+                onMatchPrefs = { nav.navigate(Routes.MATCH_PREFS) },
                 onAllRemoved = { nav.navigate(Routes.add()) { popUpTo(nav.graph.id) { inclusive = true } } },
             )
         }

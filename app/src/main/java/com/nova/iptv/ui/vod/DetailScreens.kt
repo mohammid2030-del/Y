@@ -370,6 +370,7 @@ private fun SimilarRow(list: List<ContentEntity>, onClick: (ContentEntity) -> Un
             items(list, key = { it.id }) { c ->
                 PosterCard(
                     title = c.name, image = c.logo, subtitle = c.year, rating = c.rating,
+                    type = c.type, year = c.year,
                     modifier = Modifier.width(118.dp), onClick = { onClick(c) },
                 )
             }

@@ -97,6 +97,7 @@ fun DiscoverHome(
     onOpenMovie: (Long) -> Unit,
     onOpenSeries: (Long) -> Unit,
     onGoTo: (HomeTab) -> Unit,
+    onMatchPrefs: () -> Unit = {},
     vm: DiscoverViewModel = hiltViewModel(),
 ) {
     val featured by vm.featured.collectAsStateWithLifecycle()
@@ -148,7 +149,7 @@ fun DiscoverHome(
                 Spacer(Modifier.height(homeTopInset()))
             }
         }
-        item(key = "matches") { MatchesStrip() }
+        item(key = "matches") { MatchesStrip(onCustomize = onMatchPrefs) }
         if (continueList.isNotEmpty()) {
             item(key = "continue") {
                 RowSection(stringResource(R.string.continue_watching), accent = true) {

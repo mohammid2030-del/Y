@@ -3,6 +3,7 @@
     <string name="about">حول التطبيق</string>
     <string name="about_desc">مشغل لاشتراكات IPTV التي تملك صلاحية استخدامها. لا يوفر NOVA أي قنوات أو محتوى.</string>
     <string name="add_subscription">إضافة اشتراك</string>
+    <string name="add_team">إضافة فريق</string>
     <string name="all_categories">كل التصنيفات</string>
     <string name="appearance">المظهر</string>
     <string name="aspect_ratio">نسبة العرض</string>
@@ -28,12 +29,15 @@
     <string name="clear_history">مسح سجل المشاهدة</string>
     <string name="clear_image_cache">مسح ذاكرة الصور المؤقتة</string>
     <string name="close">إغلاق</string>
+    <string name="club_competitions">بطولات الأندية</string>
     <string name="connection_ok">تم الاتصال بنجاح</string>
     <string name="continue_cached">المتابعة بالمحتوى المحفوظ</string>
     <string name="continue_episode">متابعة %1$s</string>
     <string name="continue_label">متابعة</string>
     <string name="continue_watching">متابعة المشاهدة</string>
     <string name="current_pin">رمز PIN الحالي</string>
+    <string name="customize_matches">فرقي والبطولات</string>
+    <string name="customize_matches_desc">اختر أنديتك ومنتخباتك والبطولات المفضلة</string>
     <string name="data_privacy">البيانات والخصوصية</string>
     <string name="delete">حذف</string>
     <string name="delete_subscription_q">حذف هذا الاشتراك؟</string>
@@ -118,6 +122,8 @@
     <string name="msg_intro_reset">تم مسح توقيتات المقدمة</string>
     <string name="msg_pin_removed">تمت إزالة رمز PIN</string>
     <string name="msg_pin_saved">تم حفظ رمز PIN</string>
+    <string name="my_teams">الفرق المفضلة</string>
+    <string name="national_competitions">بطولات المنتخبات</string>
     <string name="new_pin">رمز PIN جديد (4–8 أرقام)</string>
     <string name="next_channel">القناة التالية</string>
     <string name="next_episode">الحلقة التالية</string>
@@ -131,6 +137,8 @@
     <string name="no_subscription">لا يوجد اشتراك بعد. أضف اشتراك Xtream Codes أو M3U لبدء المشاهدة.</string>
     <string name="now">الآن</string>
     <string name="ok">موافق</string>
+    <string name="only_my_teams">مباريات فرقي فقط</string>
+    <string name="only_my_teams_desc">إخفاء باقي المباريات من الشريط</string>
     <string name="opens_in">تفتح القناة بعد %1$s</string>
     <string name="parental_control">الرقابة الأبوية</string>
     <string name="passphrase">عبارة المرور (6 أحرف على الأقل)</string>
@@ -168,6 +176,7 @@
     <string name="save_and_load">حفظ وتحميل</string>
     <string name="search_hint">ابحث عن قنوات وأفلام ومسلسلات</string>
     <string name="search_prompt">اكتب حرفين على الأقل للبحث</string>
+    <string name="search_team">ابحث عن فريق (بالاسم الإنجليزي)</string>
     <string name="season_episode">الموسم %1$d · الحلقة %2$d</string>
     <string name="season_n">الموسم %1$d</string>
     <string name="seasons_count">%1$d مواسم</string>
@@ -213,6 +222,7 @@
     <string name="tab_movies">الأفلام</string>
     <string name="tab_search">بحث</string>
     <string name="tab_series">المسلسلات</string>
+    <string name="teams_error">تعذّر تحميل الفرق — تحقق من الاتصال</string>
     <string name="test_connection">اختبار الاتصال</string>
     <string name="testing">جارٍ الاختبار…</string>
     <string name="theme">السمة</string>

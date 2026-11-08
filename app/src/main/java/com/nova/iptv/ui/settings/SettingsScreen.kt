@@ -167,6 +167,7 @@ fun SettingsScreen(
     onSync: (Long) -> Unit,
     onHiddenCategories: () -> Unit,
     onAllRemoved: () -> Unit,
+    onMatchPrefs: () -> Unit = {},
     vm: SettingsViewModel = hiltViewModel(),
 ) {
     val subs by vm.subscriptions.collectAsStateWithLifecycle()
@@ -380,6 +381,12 @@ fun SettingsScreen(
                     stringResource(R.string.show_matches), stringResource(R.string.show_matches_desc),
                     onClick = { vm.setShowMatches(!s.showMatches) },
                     trailing = { Switch(checked = s.showMatches, onCheckedChange = { vm.setShowMatches(it) }) },
+                )
+            }
+            item {
+                SettingRow(
+                    stringResource(R.string.customize_matches), stringResource(R.string.customize_matches_desc),
+                    onClick = onMatchPrefs,
                 )
             }
 

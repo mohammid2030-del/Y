@@ -123,6 +123,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onAddSubscription: () -> Unit,
     onSwitchProfile: () -> Unit = {},
+    onMatchPrefs: () -> Unit = {},
     vm: HomeViewModel = hiltViewModel(),
 ) {
     var tabIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -155,7 +156,7 @@ fun HomeScreen(
             val padded = Modifier.fillMaxSize().padding(top = homeTopInset())
             CompositionLocalProvider(LocalReselect provides (reselects[tab] ?: 0)) {
             when (tab) {
-                HomeTab.HOME -> DiscoverHome(onOpenMovie = onOpenMovie, onOpenSeries = onOpenSeries, onGoTo = goTo)
+                HomeTab.HOME -> DiscoverHome(onOpenMovie = onOpenMovie, onOpenSeries = onOpenSeries, onGoTo = goTo, onMatchPrefs = onMatchPrefs)
                 HomeTab.LIVE -> Box(padded) { LiveTab(wide = wide) }
                 HomeTab.MOVIES -> VodTab(vm = hiltViewModel<MoviesViewModel>(), onOpen = onOpenMovie)
                 HomeTab.SERIES -> VodTab(vm = hiltViewModel<SeriesViewModel>(), onOpen = onOpenSeries)

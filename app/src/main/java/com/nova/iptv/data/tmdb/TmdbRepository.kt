@@ -16,6 +16,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URLEncoder
@@ -23,6 +24,9 @@ import java.security.MessageDigest
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** Localised poster + title for list cards. */
+data class TmdbCard(val poster: String, val title: String)
 
 data class TmdbPerson(val name: String, val role: String, val photo: String)
 
@@ -76,6 +80,8 @@ class TmdbRepository @Inject constructor(
     private val infoCache = LruCache<String, TmdbInfo>(150)
     private val missCache = HashSet<String>()
     private val seasonCache = LruCache<String, Map<Int, TmdbEpisode>>(30)
+    private val posterCache = LruCache<String, TmdbCard>(3000)
+    private val posterLimit = kotlinx.coroutines.sync.Semaphore(6)
     private val diskDir by lazy { File(context.cacheDir, "tmdb").apply { mkdirs() } }
 
     private fun key(): String = crypto.decrypt(prefs.getString(KEY, "").orEmpty())
@@ -99,7 +105,7 @@ class TmdbRepository @Inject constructor(
     }
 
     private fun clearCaches() {
-        infoCache.evictAll(); seasonCache.evictAll()
+        infoCache.evictAll(); seasonCache.evictAll(); posterCache.evictAll()
         synchronized(missCache) { missCache.clear() }
         runCatching { diskDir.listFiles()?.forEach { it.delete() } }
     }
@@ -126,6 +132,39 @@ class TmdbRepository @Inject constructor(
             id?.let { details(isTv, it, lang) }
         }.getOrNull()
         if (result != null) infoCache.put(cacheKey, result) else synchronized(missCache) { missCache += cacheKey }
+        return result
+    }
+
+    private fun posterKey(isTv: Boolean, title: String, year: String) = "${if (isTv) "tv" else "mv"}|${lang()}|$title|$year"
+
+    /** Already-resolved poster (no network) so lists don't flicker when scrolling back. */
+    fun cachedPoster(isTv: Boolean, title: String, year: String): TmdbCard? =
+        if (!_enabled.value) null else posterCache.get(posterKey(isTv, title, year))
+
+    /** Poster in the app language for list cards (one search request, cached in memory and on disk). */
+    suspend fun poster(isTv: Boolean, title: String, year: String): TmdbCard {
+        if (!_enabled.value) return EMPTY_CARD
+        val k = posterKey(isTv, title, year)
+        posterCache.get(k)?.let { return it }
+        val lang = lang()
+        val clean = title.cleanTitle().replace(YEAR_IN_TITLE, "").trim()
+        val y = year.take(4).ifBlank { YEAR_IN_TITLE.find(title)?.groupValues?.get(1).orEmpty() }
+        val result = posterLimit.withPermit {
+            runCatching {
+                val params = buildMap {
+                    put("query", clean)
+                    put("language", lang)
+                    put("include_adult", "false")
+                    if (y.length == 4) put(if (isTv) "first_air_date_year" else "year", y)
+                }
+                val path = if (isTv) "search/tv" else "search/movie"
+                var res = request(path, params).arr("results")
+                if (res.size() == 0 && y.length == 4) res = request(path, params - (if (isTv) "first_air_date_year" else "year")).arr("results")
+                val first = res.firstOrNull()?.obj()
+                TmdbCard(img(first?.str("poster_path").orEmpty(), "w342"), first?.str(if (isTv) "name" else "title").orEmpty())
+            }.getOrDefault(EMPTY_CARD)
+        }
+        posterCache.put(k, result)
         return result
     }
 
@@ -282,6 +321,7 @@ class TmdbRepository @Inject constructor(
 
     companion object {
         private const val KEY = "key"
+        private val EMPTY_CARD = TmdbCard("", "")
         private const val BASE = "https://api.themoviedb.org/3/"
         private const val USER_AGENT = "NOVA-IPTV/1.0 (Android)"
         private const val TTL_MS = 7L * 24 * 3600 * 1000

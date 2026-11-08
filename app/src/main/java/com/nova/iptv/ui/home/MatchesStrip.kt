@@ -26,6 +26,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.nova.iptv.data.db.ContentEntity
 import com.nova.iptv.data.sports.BroadcastResolver
+import com.nova.iptv.data.sports.MatchPrefs
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
 import com.nova.iptv.data.sports.ChannelPick
 import com.nova.iptv.ui.components.ChannelLogo
 import androidx.compose.foundation.border
@@ -111,6 +114,7 @@ class MatchesViewModel @Inject constructor(
     private val content: ContentRepository,
     private val settings: SettingsRepository,
     val resolver: BroadcastResolver,
+    private val prefs: MatchPrefs,
 ) : ViewModel() {
     /** Match whose channel list is being shown in the chooser. */
     var sheet by mutableStateOf<Pair<Match, List<ChannelPick>>?>(null)
@@ -119,14 +123,14 @@ class MatchesViewModel @Inject constructor(
         private set
     val day = MutableStateFlow(0)
 
-    val ui: StateFlow<MatchesUi> = combine(settings.settings.map { it.showMatches }, day) { on, d -> on to d }
-        .flatMapLatest { (on, d) ->
+    val ui: StateFlow<MatchesUi> = combine(settings.settings.map { it.showMatches }, day, prefs.state) { on, d, p -> Triple(on, d, p) }
+        .flatMapLatest { (on, d, p) ->
             if (!on) flowOf(MatchesUi(loading = false, enabled = false))
             else flow {
                 emit(MatchesUi(loading = true))
                 // Refreshes every 45 s while a match is live, otherwise every 10 minutes (and on each app open).
                 while (true) {
-                    val list = runCatching { repo.matchesFor(d) }.getOrDefault(emptyList())
+                    val list = runCatching { repo.matchesFor(d, p.competitions, p.teams, p.onlyFavorites) }.getOrDefault(emptyList())
                     emit(MatchesUi(loading = false, matches = list))
                     delay(if (list.any { it.isLive }) 45_000 else 600_000)
                 }
@@ -174,7 +178,7 @@ private fun Match.canOpen(now: Long): Boolean = when (state) {
 }
 
 @Composable
-fun MatchesStrip(vm: MatchesViewModel = hiltViewModel()) {
+fun MatchesStrip(onCustomize: () -> Unit = {}, vm: MatchesViewModel = hiltViewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val day by vm.day.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -203,6 +207,12 @@ fun MatchesStrip(vm: MatchesViewModel = hiltViewModel()) {
             DayChip(stringResource(R.string.today), day == 0) { vm.select(0) }
             Spacer(Modifier.width(6.dp))
             DayChip(stringResource(R.string.tomorrow), day == 1) { vm.select(1) }
+            Spacer(Modifier.width(4.dp))
+            Box(
+                Modifier.novaFocus(CircleShape).size(34.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onCustomize),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Tune, stringResource(R.string.customize_matches), modifier = Modifier.size(18.dp)) }
         }
         when {
             ui.loading -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -376,6 +386,10 @@ private fun MatchCard(m: Match, now: Long, network: String, resolving: Boolean, 
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (m.favorite) {
+                    Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC94D), modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
                 StatusPill(m)
             }
             Spacer(Modifier.height(12.dp))
