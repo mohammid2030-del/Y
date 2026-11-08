@@ -82,10 +82,6 @@ class PlayerActions(
     val onSelectQuality: (QualityOption?) -> Unit,
     val onZap: (Int) -> Unit,
     val onSkipIntro: () -> Unit = {},
-    val onArabicSubs: () -> Unit = {},
-    val onFindSubs: () -> Unit = {},
-    val onSearchTitle: (String) -> Unit = {},
-    val onLinkTitle: (com.nova.iptv.data.subs.FeatureResult) -> Unit = {},
     val onPlayNext: () -> Unit = {},
     val onDismissNext: () -> Unit = {},
     val onAdjustIntro: (Long) -> Unit = {},
@@ -200,30 +196,6 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             if (next != null) UpNextCard(next, state.upNextSeconds, state.upNextTotal, state.autoNext, actions)
         }
 
-        AnimatedVisibility(
-            visible = state.subtitleNote != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 90.dp),
-        ) {
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.72f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
-                    .padding(horizontal = 18.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Subtitles, null, tint = Color(0xFF9EA8FF), modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(state.subtitleNote.orEmpty(), color = Color.White, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-
-        if (state.subsDialog) {
-            SubtitleDialog(state, actions)
-        }
-
         if (state.qualityDialog) {
             AlertDialog(
                 onDismissRequest = { state.qualityDialog = false },
@@ -301,12 +273,6 @@ private fun TopBar(state: PlayerUiState, actions: PlayerActions) {
         }
         if (state.infoVisible && state.videoInfo.isNotBlank()) {
             Text(state.videoInfo, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelMedium)
-        }
-        if (!state.isLive) {
-            IconButton(onClick = actions.onArabicSubs) {
-                if (state.subtitleBusy) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                else Icon(Icons.Filled.Subtitles, stringResource(R.string.arabic_subtitles), tint = Color.White)
-            }
         }
         IconButton(onClick = actions.onInfo) { Icon(Icons.Filled.Info, stringResource(R.string.stream_info), tint = Color.White) }
         IconButton(onClick = actions.onQuality) { Icon(Icons.Filled.HighQuality, stringResource(R.string.video_quality), tint = Color.White) }
@@ -499,64 +465,4 @@ private fun UpNextCard(next: UpNextUi, seconds: Int, total: Int, autoNext: Boole
             }
         }
     }
-}
-
-
-@Composable
-private fun SubtitleDialog(state: PlayerUiState, actions: PlayerActions) {
-    var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(state.title) }
-    AlertDialog(
-        onDismissRequest = { state.subsDialog = false },
-        title = { Text(stringResource(R.string.arabic_subtitles)) },
-        text = {
-            Column {
-                if (state.subsStatus.isNotBlank()) {
-                    Text(state.subsStatus, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(12.dp))
-                }
-                Text(
-                    stringResource(R.string.subs_link_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        placeholder = { Text("Medcezir") },
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    if (state.linkSearching) {
-                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else {
-                        TextButton(onClick = { actions.onSearchTitle(query) }) { Text(stringResource(R.string.search_action)) }
-                    }
-                }
-                if (state.linkResults.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
-                        items(state.linkResults, key = { it.tmdbId }) { f ->
-                            Text(
-                                f.title + if (f.year.isNotBlank()) " (${f.year})" else "",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { actions.onLinkTitle(f) }
-                                    .padding(vertical = 12.dp, horizontal = 8.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { actions.onFindSubs(); state.subsDialog = false }, enabled = !state.subtitleBusy) {
-                Text(stringResource(R.string.subs_find_now))
-            }
-        },
-        dismissButton = { TextButton(onClick = { state.subsDialog = false }) { Text(stringResource(R.string.close)) } },
-    )
 }

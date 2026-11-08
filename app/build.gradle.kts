@@ -21,8 +21,6 @@ android {
         versionName = System.getenv("VERSION_NAME") ?: "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        // Phones, tablets and TV boxes are ARM; dropping x86 halves the ML Kit native libraries
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -135,9 +133,6 @@ dependencies {
 
     // Images
     implementation("io.coil-kt:coil-compose:2.7.0")
-
-    // On-device subtitle translation (Turkish/English -> Arabic)
-    implementation("com.google.mlkit:translate:17.0.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

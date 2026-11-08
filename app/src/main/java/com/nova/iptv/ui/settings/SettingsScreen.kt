@@ -137,26 +137,6 @@ fun SecretDialog(
 }
 
 @Composable
-private fun TextFieldDialog(title: String, initial: String, password: Boolean, onSave: (String) -> Unit, onDismiss: () -> Unit) {
-    var value by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                singleLine = true,
-                visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Ascii),
-            )
-        },
-        confirmButton = { TextButton(onClick = { onSave(value); onDismiss() }) { Text(stringResource(R.string.save)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
-}
-
-@Composable
 private fun SectionHeader(text: String) {
     Text(
         text,
@@ -198,7 +178,6 @@ fun SettingsScreen(
     var bufferDialog by remember { mutableStateOf(false) }
     var offsetDialog by remember { mutableStateOf(false) }
     var introDialog by remember { mutableStateOf(false) }
-    var subsField by remember { mutableStateOf<String?>(null) }
     var subsSizeDialog by remember { mutableStateOf(false) }
     var pinDialog by remember { mutableStateOf(false) }
     var removePinDialog by remember { mutableStateOf(false) }
@@ -366,57 +345,12 @@ fun SettingsScreen(
 
             item { SectionHeader(stringResource(R.string.subtitles_section)) }
             item {
-                val sc = vm.subtitleConfig
-                SettingRow(
-                    stringResource(R.string.subs_auto_arabic), stringResource(R.string.subs_auto_arabic_desc),
-                    onClick = { vm.updateSubtitles { it.copy(autoArabic = !sc.autoArabic) } },
-                    trailing = { Switch(checked = sc.autoArabic, onCheckedChange = { v -> vm.updateSubtitles { it.copy(autoArabic = v) } }) },
-                )
-            }
-            item {
-                val sc = vm.subtitleConfig
-                SettingRow(
-                    stringResource(R.string.subs_translate), stringResource(R.string.subs_translate_desc),
-                    onClick = { vm.updateSubtitles { it.copy(translate = !sc.translate) } },
-                    trailing = { Switch(checked = sc.translate, onCheckedChange = { v -> vm.updateSubtitles { it.copy(translate = v) } }) },
-                )
-            }
-            item {
-                SettingRow(
-                    stringResource(R.string.subs_api_key),
-                    if (vm.subtitleConfig.apiKey.isBlank()) stringResource(R.string.subs_api_key_help) else stringResource(R.string.subs_configured),
-                    onClick = { subsField = "key" },
-                )
-            }
-            item {
-                SettingRow(
-                    stringResource(R.string.subs_username),
-                    vm.subtitleConfig.username.ifBlank { stringResource(R.string.subs_optional) },
-                    onClick = { subsField = "user" },
-                )
-            }
-            item {
-                SettingRow(
-                    stringResource(R.string.subs_password),
-                    if (vm.subtitleConfig.password.isBlank()) stringResource(R.string.subs_optional) else "••••••",
-                    onClick = { subsField = "pass" },
-                )
-            }
-            item {
                 SettingRow(
                     stringResource(R.string.subs_size),
-                    stringResource(listOf(R.string.size_small, R.string.size_medium, R.string.size_large, R.string.size_xlarge)[vm.subtitleConfig.size.coerceIn(0, 3)]),
+                    stringResource(listOf(R.string.size_small, R.string.size_medium, R.string.size_large, R.string.size_xlarge)[vm.subtitleSize.coerceIn(0, 3)]),
                     onClick = { subsSizeDialog = true },
                 )
             }
-            item {
-                SettingRow(
-                    stringResource(R.string.subs_test),
-                    stringResource(if (vm.subtitleTesting) R.string.testing else R.string.subs_test_desc),
-                    onClick = { vm.testSubtitleCredentials() },
-                )
-            }
-            item { SettingRow(stringResource(R.string.subs_clear_cache), onClick = { vm.clearSubtitleCache() }) }
 
             item { SectionHeader(stringResource(R.string.tv_guide)) }
             item {
@@ -505,53 +439,13 @@ fun SettingsScreen(
             onDismiss = { bufferDialog = false },
         )
     }
-    vm.subtitleTest?.let { r ->
-        AlertDialog(
-            onDismissRequest = { vm.dismissSubtitleTest() },
-            title = { Text(stringResource(R.string.subs_test)) },
-            text = {
-                Column {
-                    Text(
-                        when {
-                            r.keyMessage == "NO_KEY" -> stringResource(R.string.subs_no_key)
-                            r.keyOk -> "✓ " + stringResource(R.string.subs_key_ok)
-                            else -> "✕ " + stringResource(R.string.subs_key_bad, r.keyMessage)
-                        },
-                        color = if (r.keyOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    )
-                    when (r.loginOk) {
-                        true -> Text("✓ " + stringResource(R.string.subs_login_ok, r.allowedDownloads), color = MaterialTheme.colorScheme.primary)
-                        false -> Text("✕ " + stringResource(R.string.subs_login_bad, r.loginMessage), color = MaterialTheme.colorScheme.error)
-                        null -> {}
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { vm.dismissSubtitleTest() }) { Text(stringResource(R.string.ok)) } },
-        )
-    }
-    subsField?.let { field ->
-        val sc = vm.subtitleConfig
-        TextFieldDialog(
-            title = stringResource(
-                when (field) { "key" -> R.string.subs_api_key; "user" -> R.string.subs_username; else -> R.string.subs_password }
-            ),
-            initial = when (field) { "key" -> sc.apiKey; "user" -> sc.username; else -> "" },
-            password = field == "pass",
-            onSave = { v ->
-                vm.updateSubtitles {
-                    when (field) { "key" -> it.copy(apiKey = v.trim()); "user" -> it.copy(username = v.trim()); else -> it.copy(password = v) }
-                }
-            },
-            onDismiss = { subsField = null },
-        )
-    }
     if (subsSizeDialog) {
         ChoiceDialog(
             stringResource(R.string.subs_size),
             listOf(R.string.size_small, R.string.size_medium, R.string.size_large, R.string.size_xlarge)
                 .mapIndexed { i, r -> Choice(i, stringResource(r)) },
-            vm.subtitleConfig.size,
-            onPick = { v -> vm.updateSubtitles { it.copy(size = v) } },
+            vm.subtitleSize,
+            onPick = { v -> vm.setSubtitleSize(v) },
             onDismiss = { subsSizeDialog = false },
         )
     }

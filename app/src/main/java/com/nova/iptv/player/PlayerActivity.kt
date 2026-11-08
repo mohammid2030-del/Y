@@ -92,13 +92,6 @@ class PlayerUiState {
     var upNextSeconds by mutableStateOf(0)
     var upNextTotal by mutableStateOf(25)
     var skipIsRecap by mutableStateOf(false)
-    var subtitleNote by mutableStateOf<String?>(null)
-    var subtitleBusy by mutableStateOf(false)
-    var subsDialog by mutableStateOf(false)
-    var subsStatus by mutableStateOf("")
-    var linkResults by mutableStateOf<List<com.nova.iptv.data.subs.FeatureResult>>(emptyList())
-    var linkSearching by mutableStateOf(false)
-    var linkedTitle by mutableStateOf("")
     var autoNext by mutableStateOf(true)
     var introAdjustVisible by mutableStateOf(false)
     var introLearned by mutableStateOf(false)
@@ -117,7 +110,7 @@ class PlayerActivity : AppCompatActivity() {
     @Inject lateinit var okHttp: OkHttpClient
     @Inject lateinit var skipRepo: com.nova.iptv.data.repo.SkipRepository
     @Inject lateinit var introStore: com.nova.iptv.data.repo.IntroStore
-    @Inject lateinit var subtitleRepo: com.nova.iptv.data.subs.SubtitleRepository
+    @Inject lateinit var subtitlePrefs: com.nova.iptv.data.subs.SubtitlePrefs
 
     private val ui = PlayerUiState()
     private var player: ExoPlayer? = null
@@ -144,9 +137,6 @@ class PlayerActivity : AppCompatActivity() {
     private var currentSkip: Pair<String, com.nova.iptv.data.network.Segment>? = null
     private var upNextShownAt = 0L
     private var lastIntro: com.nova.iptv.data.network.Segment? = null
-    private var sideSubtitle: java.io.File? = null
-    private var subtitleJob: Job? = null
-    private var subtitleNoteJob: Job? = null
     private var introStartMs = 0L
     private var introEndMs = 0L
     private var programmaticSeek = false
@@ -273,10 +263,6 @@ class PlayerActivity : AppCompatActivity() {
                         onSelectQuality = { selectQuality(it) },
                         onZap = { zap(it) },
                         onSkipIntro = { skipIntro() },
-                        onArabicSubs = { ui.subsDialog = true },
-                        onFindSubs = { requestArabicSubtitles(manual = true) },
-                        onSearchTitle = { q -> searchTitle(q) },
-                        onLinkTitle = { f -> linkTitle(f) },
                         onPlayNext = { playNext() },
                         onDismissNext = { dismissUpNext() },
                         onAdjustIntro = { adjustIntro(it) },
@@ -360,14 +346,7 @@ class PlayerActivity : AppCompatActivity() {
                 }
             }
             fromStart = false
-            subtitleJob?.cancel()
-            ui.subtitleBusy = false
-            sideSubtitle = if (req.type != ContentType.LIVE && req.catchupStartMs == 0L) subtitleRepo.cached(subtitleKey(req)) else null
             prepare(r, startPos)
-            if (sideSubtitle == null && req.type != ContentType.LIVE && req.catchupStartMs == 0L) {
-                val cfg = subtitleRepo.config()
-                if (cfg.autoArabic && cfg.apiKey.isNotBlank()) requestArabicSubtitles(manual = false)
-            }
 
             // History: live channels are recorded as "recently watched", VOD gets resume points.
             content.saveHistory(
@@ -404,7 +383,6 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         val httpSource = OkHttpDataSource.Factory(okHttp)
             .setUserAgent(r.userAgent.ifBlank { DEFAULT_USER_AGENT })
-        // DefaultDataSource also reads local files (downloaded / translated subtitles)
         val dataSource = androidx.media3.datasource.DefaultDataSource.Factory(this, httpSource)
         val factory = DefaultMediaSourceFactory(dataSource, extractors)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(6))
@@ -412,20 +390,6 @@ class PlayerActivity : AppCompatActivity() {
             .setUri(r.url)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(ui.title).build())
             .apply { mimeFor(r.url)?.let { setMimeType(it) } }
-            .apply {
-                sideSubtitle?.let { f ->
-                    setSubtitleConfigurations(
-                        listOf(
-                            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.fromFile(f))
-                                .setMimeType(MimeTypes.APPLICATION_SUBRIP)
-                                .setLanguage("ar")
-                                .setLabel(getString(R.string.arabic_subtitles))
-                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                                .build()
-                        )
-                    )
-                }
-            }
             .build()
         val source = factory.createMediaSource(item)
         if (startPos != C.TIME_UNSET && startPos > 0) p.setMediaSource(source, startPos) else p.setMediaSource(source)
@@ -498,11 +462,9 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    // ---- Arabic subtitles (OpenSubtitles + on-device translation) ----
-    private fun subtitleKey(req: PlaybackRequest) = "${req.subscriptionId}_${req.type}_${req.remoteId}_${req.episodeId}"
-
+    // ---- Subtitle look (embedded / stream subtitles) ----
     private fun applySubtitleStyle() {
-        val size = subtitleRepo.config().size
+        val size = subtitlePrefs.size
         playerView.subtitleView?.apply {
             setStyle(
                 androidx.media3.ui.CaptionStyleCompat(
@@ -517,118 +479,6 @@ class PlayerActivity : AppCompatActivity() {
             val factor = when (size) { 0 -> 0.85f; 2 -> 1.25f; 3 -> 1.5f; else -> 1.05f }
             setFractionalTextSize(androidx.media3.ui.SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * factor)
         }
-    }
-
-    private fun hasArabicTrack(): Boolean {
-        val p = player ?: return false
-        return p.currentTracks.groups.any { g ->
-            g.type == C.TRACK_TYPE_TEXT && (0 until g.length).any { i ->
-                g.getTrackFormat(i).language.orEmpty().lowercase().startsWith("ar")
-            }
-        }
-    }
-
-    private fun note(text: String?, sticky: Boolean = false) {
-        ui.subtitleNote = text
-        subtitleNoteJob?.cancel()
-        if (text != null && !sticky) {
-            subtitleNoteJob = lifecycleScope.launch { delay(4_000); ui.subtitleNote = null }
-        }
-    }
-
-    private fun requestArabicSubtitles(manual: Boolean) {
-        val req = request
-        if (req.type == ContentType.LIVE || ui.subtitleBusy) return
-        if (sideSubtitle != null) { if (manual) note(getString(R.string.subs_already)); return }
-        subtitleJob?.cancel()
-        subtitleJob = lifecycleScope.launch {
-            ui.subtitleBusy = true
-            try {
-                if (!manual) {
-                    delay(3_500) // let the stream expose its own text tracks first
-                    if (hasArabicTrack()) return@launch
-                }
-                val linked = subtitleRepo.linkedTmdb(req.subscriptionId, req.type, req.remoteId)
-                val target = if (req.type == ContentType.SERIES) {
-                    val ctx = content.episodeContext(req.subscriptionId, req.remoteId, req.episodeId)
-                    com.nova.iptv.data.subs.SubtitleTarget(
-                        linked.ifBlank { ctx?.tmdbId.orEmpty() },
-                        ctx?.current?.season ?: 0,
-                        ctx?.current?.episodeNum ?: 0,
-                    )
-                } else {
-                    com.nova.iptv.data.subs.SubtitleTarget(linked.ifBlank { content.movieTmdbId(req.subscriptionId, req.remoteId) })
-                }
-                val file = subtitleRepo.fetchArabic(subtitleKey(req), target) { st ->
-                    lifecycleScope.launch { showSubStatus(st, manual) }
-                }
-                if (file != null && request === req) attachSubtitle(file)
-            } finally {
-                ui.subtitleBusy = false
-            }
-        }
-    }
-
-    private fun showSubStatus(st: com.nova.iptv.data.subs.SubStatus, manual: Boolean) {
-        val lang = when {
-            st.fromLang.startsWith("tr") -> getString(R.string.lang_turkish)
-            st.fromLang.startsWith("en") -> getString(R.string.lang_english_name)
-            else -> java.util.Locale(st.fromLang.take(2)).getDisplayLanguage(java.util.Locale("ar"))
-        }
-        val text = when (st.step) {
-            com.nova.iptv.data.subs.SubStep.SEARCHING -> getString(R.string.subs_searching)
-            com.nova.iptv.data.subs.SubStep.DOWNLOADING -> getString(R.string.subs_downloading)
-            com.nova.iptv.data.subs.SubStep.TRANSLATING -> getString(R.string.subs_translating, lang, st.progress)
-            com.nova.iptv.data.subs.SubStep.ADDED -> getString(R.string.subs_added)
-            com.nova.iptv.data.subs.SubStep.ADDED_TRANSLATED -> getString(R.string.subs_added_translated, lang)
-            com.nova.iptv.data.subs.SubStep.NOT_FOUND -> getString(R.string.subs_not_found)
-            com.nova.iptv.data.subs.SubStep.NO_TMDB -> getString(R.string.subs_no_tmdb)
-            com.nova.iptv.data.subs.SubStep.NO_KEY -> getString(R.string.subs_no_key)
-            com.nova.iptv.data.subs.SubStep.LIMIT -> getString(R.string.subs_limit)
-            com.nova.iptv.data.subs.SubStep.AUTH -> getString(R.string.subs_auth)
-            com.nova.iptv.data.subs.SubStep.FAILED -> getString(R.string.subs_failed)
-        }
-        ui.subsStatus = if (st.detail.isNotBlank()) "$text\n(${st.detail})" else text
-        val busy = st.step == com.nova.iptv.data.subs.SubStep.SEARCHING ||
-            st.step == com.nova.iptv.data.subs.SubStep.DOWNLOADING ||
-            st.step == com.nova.iptv.data.subs.SubStep.TRANSLATING
-        if (st.step == com.nova.iptv.data.subs.SubStep.FAILED && !manual) note(null) else note(text, sticky = busy)
-    }
-
-    private fun searchTitle(query: String) {
-        lifecycleScope.launch {
-            ui.linkSearching = true
-            val (results, error) = subtitleRepo.searchTitles(query, tv = request.type == ContentType.SERIES)
-            ui.linkResults = results
-            ui.subsStatus = when {
-                error == "NO_KEY" -> getString(R.string.subs_no_key)
-                error != null -> getString(R.string.subs_server_error, error)
-                results.isEmpty() -> getString(R.string.subs_no_titles)
-                else -> ui.subsStatus
-            }
-            ui.linkSearching = false
-        }
-    }
-
-    private fun linkTitle(f: com.nova.iptv.data.subs.FeatureResult) {
-        val req = request
-        subtitleRepo.link(req.subscriptionId, req.type, req.remoteId, f.tmdbId)
-        ui.linkedTitle = f.title
-        ui.linkResults = emptyList()
-        ui.subsStatus = getString(R.string.subs_linked, f.title)
-        requestArabicSubtitles(manual = true)
-    }
-
-    private fun attachSubtitle(file: java.io.File) {
-        val p = player ?: return
-        val r = resolved ?: return
-        sideSubtitle = file
-        val pos = p.currentPosition
-        prepare(r, if (pos > 0) pos else C.TIME_UNSET)
-        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-            .setPreferredTextLanguage("ar")
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            .build()
     }
 
     // ---- Series: skip intro/recap & up next ----

@@ -41,35 +41,14 @@ class SettingsViewModel @Inject constructor(
     private val content: ContentRepository,
     private val backup: BackupRepository,
     private val introStore: com.nova.iptv.data.repo.IntroStore,
-    private val subtitles: com.nova.iptv.data.subs.SubtitleRepository,
+    private val subtitlePrefs: com.nova.iptv.data.subs.SubtitlePrefs,
 ) : ViewModel() {
-    var subtitleConfig by mutableStateOf(subtitles.config())
+    var subtitleSize by mutableStateOf(subtitlePrefs.size)
         private set
 
-    fun updateSubtitles(transform: (com.nova.iptv.data.subs.SubtitleConfig) -> com.nova.iptv.data.subs.SubtitleConfig) {
-        subtitleConfig = transform(subtitleConfig)
-        subtitles.save(subtitleConfig)
-    }
-
-    var subtitleTest by mutableStateOf<com.nova.iptv.data.subs.SubtitleRepository.KeyTest?>(null)
-        private set
-    var subtitleTesting by mutableStateOf(false)
-        private set
-
-    fun testSubtitleCredentials() {
-        if (subtitleTesting) return
-        viewModelScope.launch {
-            subtitleTesting = true
-            subtitleTest = subtitles.testCredentials()
-            subtitleTesting = false
-        }
-    }
-
-    fun dismissSubtitleTest() { subtitleTest = null }
-
-    fun clearSubtitleCache() {
-        subtitles.clearCache()
-        message = SettingsMessage.CACHE_CLEARED
+    fun setSubtitleSize(v: Int) {
+        subtitlePrefs.size = v
+        subtitleSize = v
     }
 
     val subscriptions: StateFlow<List<SubscriptionEntity>> =
