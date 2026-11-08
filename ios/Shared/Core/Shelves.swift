@@ -112,6 +112,37 @@ struct CatalogIndex {
         return (L.isArabic ? r.ar : r.en, r.icon)
     }
 
+    /// "Zmora: PL" / "ZMORA" / "Zmóra" → "zmora".
+    static func normalize(_ title: String) -> String {
+        var words = title.split(separator: " ").map(String.init)
+        // trailing country / language codes some providers append ("Zmora PL", "Dark DE")
+        while words.count > 1, let last = words.last, last.count <= 3, last == last.uppercased(), last.allSatisfy({ $0.isLetter && $0.isASCII }) {
+            words.removeLast()
+        }
+        let folded = words.joined(separator: " ").folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
+        let out = String(folded.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))
+        return out.isEmpty ? title.lowercased() : out
+    }
+
+    /// Language of a copy, from its name and category: what the version picker shows and sorts by (Arabic first).
+    static func language(name: String, category: String) -> (label: String, rank: Int) {
+        let n = (name + " " + category).lowercased()
+        func has(_ p: String) -> Bool { n.range(of: p, options: .regularExpression) != nil }
+        let ar = L.isArabic
+        if has("مدبلج|dubbed ?ar|ar ?dub|arabic dub") { return (ar ? "مدبلج عربي" : "Arabic dubbed", 0) }
+        if has("مترجم|arsub|ar-sub|ar sub|sub ?ar|arabic sub|subbed") { return (ar ? "مترجم عربي" : "Arabic subtitles", 1) }
+        if has("عرب|arab|(^|[^a-z])ar([^a-z]|$)") { return (ar ? "عربي" : "Arabic", 2) }
+        if has("english|(^|[^a-z])(en|eng|us|uk)([^a-z]|$)") { return (ar ? "إنجليزي" : "English", 3) }
+        if has("españa|espana|spain|spanish|latino|(^|[^a-z])(es|esp)([^a-z]|$)") { return (ar ? "إسباني" : "Spanish", 5) }
+        if has("nordic|sweden|swedish|norway|danish|denmark|finland|(^|[^a-z])(se|no|dk|fi)([^a-z]|$)") { return (ar ? "إسكندنافي" : "Nordic", 5) }
+        if has("turk|ترك|(^|[^a-z])tr([^a-z]|$)") { return (ar ? "تركي" : "Turkish", 4) }
+        if has("french|france|(^|[^a-z])fr([^a-z]|$)") { return (ar ? "فرنسي" : "French", 5) }
+        if has("german|deutsch|(^|[^a-z])de([^a-z]|$)") { return (ar ? "ألماني" : "German", 5) }
+        if has("poland|polish|(^|[^a-z])pl([^a-z]|$)") { return (ar ? "بولندي" : "Polish", 5) }
+        if has("india|hindi|هند") { return (ar ? "هندي" : "Hindi", 5) }
+        return ("", 4)
+    }
+
     static func qualityScore(_ name: String) -> Int {
         let n = name.uppercased()
         if n.range(of: #"(^|[^A-Z0-9])(4K|UHD|2160P?)([^A-Z0-9]|$)"#, options: .regularExpression) != nil { return 3 }
@@ -139,19 +170,33 @@ struct CatalogIndex {
                 let sorted = cats.sorted { (counts[$0.id] ?? 0) > (counts[$1.id] ?? 0) }
                 return Shelf(id: sid, title: t, icon: icon, categories: sorted, count: sorted.reduce(0) { $0 + (counts[$1.id] ?? 0) })
             }
-            var buckets: [String: [MediaItem]] = [:]
+            // Same title in several categories / qualities / languages → one card. Titles are compared without
+            // punctuation, accents or trailing country codes; different years stay apart (remakes), unknown years join.
+            var byTitle: [String: [(MediaItem, String)]] = [:]
             for m in items {
                 let c = Clean.full(m.name)
                 let year = m.year.count >= 4 && m.year.prefix(4).allSatisfy(\.isNumber) ? String(m.year.prefix(4)) : c.year
-                let k = c.title.lowercased() + "|" + year
-                idx.key["\(kind.rawValue)|\(m.id)"] = k
+                byTitle[normalize(c.title), default: []].append((m, year))
                 idx.quality["\(kind.rawValue)|\(m.id)"] = qualityScore(m.name)
-                buckets[k, default: []].append(m)
             }
-            for (k, list) in buckets {
-                idx.variants["\(kind.rawValue)|\(k)"] = list.sorted {
-                    let a = idx.quality["\(kind.rawValue)|\($0.id)"] ?? 0, b = idx.quality["\(kind.rawValue)|\($1.id)"] ?? 0
-                    return a != b ? a > b : $0.added > $1.added
+            for (t, list) in byTitle {
+                var years: [String: Int] = [:]
+                for (_, y) in list where !y.isEmpty { years[y, default: 0] += 1 }
+                let main = years.max { $0.value < $1.value }?.key ?? ""
+                var groups: [String: [MediaItem]] = [:]
+                for (m, y) in list {
+                    // a year within one of a known year is the same release (providers disagree by a year)
+                    let near = years.keys.first { k in Int(k).flatMap { a in Int(y).map { abs(a - $0) <= 1 } } ?? false }
+                    let g = y.isEmpty ? main : (near ?? y)
+                    groups[g, default: []].append(m)
+                }
+                for (y, ms) in groups {
+                    let k = t + "|" + y
+                    for m in ms { idx.key["\(kind.rawValue)|\(m.id)"] = k }
+                    idx.variants["\(kind.rawValue)|\(k)"] = ms.sorted {
+                        let a = idx.quality["\(kind.rawValue)|\($0.id)"] ?? 0, b = idx.quality["\(kind.rawValue)|\($1.id)"] ?? 0
+                        return a != b ? a > b : $0.added > $1.added
+                    }
                 }
             }
         }

@@ -69,36 +69,50 @@ private struct DetailHeader<Actions: View>: View {
     }
 }
 
-/// Other copies of the same title (4K / HD / dubbed / subtitled, other categories); pick one to watch.
-struct VariantsRow: View {
-    let kind: MediaKind
-    let variants: [MediaItem]
-    let current: MediaItem
-    let choose: (MediaItem) -> Void
-    @EnvironmentObject var state: AppState
-
-    private func label(_ m: MediaItem) -> String {
-        let q = ["", "HD", "FHD", "4K"][min(3, CatalogIndex.qualityScore(m.name))]
-        let cat = state.categoryName(kind, m.category)
-        var tags: [String] = []
-        let n = m.name.lowercased() + " " + cat.lowercased()
-        if n.contains("مدبلج") || n.contains("dub") { tags.append(L.isArabic ? "مدبلج" : "Dubbed") }
-        else if n.contains("مترجم") || n.contains("sub") { tags.append(L.isArabic ? "مترجم" : "Subtitled") }
-        return ([q] + tags + [cat]).filter { !$0.isEmpty }.joined(separator: " · ")
+/// Copies of the same title, Arabic first (dubbed, subtitled, Arabic), then by quality.
+enum Versions {
+    static func ordered(_ kind: MediaKind, _ list: [MediaItem], _ state: AppState) -> [MediaItem] {
+        list.map { m -> (MediaItem, Int, Int) in
+            (m, CatalogIndex.language(name: m.name, category: state.categoryName(kind, m.category)).rank, CatalogIndex.qualityScore(m.name))
+        }
+        .sorted { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 > $1.2 }
+        .map { $0.0 }
     }
 
-    var body: some View {
-        if variants.count > 1 {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("versions")).font(.headline).padding(.horizontal, Theme.pad)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Theme.isTV ? 16 : 8) {
-                        ForEach(variants) { v in Chip(title: label(v), selected: v.id == current.id) { choose(v) } }
-                    }
-                    .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 14 : 2)
-                }
+    static func label(_ kind: MediaKind, _ m: MediaItem, _ state: AppState) -> String {
+        let cat = state.categoryName(kind, m.category)
+        let lang = CatalogIndex.language(name: m.name, category: cat).label
+        let q = ["", "HD", "FHD", "4K"][min(3, CatalogIndex.qualityScore(m.name))]
+        return [lang, q, cat].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// Asks which copy to open every time the page is entered (Arabic copies listed first and pre-selected).
+struct VersionChooser: ViewModifier {
+    let kind: MediaKind
+    let variants: [MediaItem]
+    @Binding var pick: MediaItem?
+    @Binding var show: Bool
+    @EnvironmentObject var state: AppState
+    @State private var asked = false
+
+    func body(content: Content) -> some View {
+        let ordered = Versions.ordered(kind, variants, state)
+        content
+            .onAppear {
+                guard !asked, ordered.count > 1 else { return }
+                asked = true
+                if pick == nil { pick = ordered.first }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { show = true }
             }
-        }
+            .confirmationDialog(L.t("chooseVersion"), isPresented: $show, titleVisibility: .visible) {
+                ForEach(ordered) { v in
+                    Button((v.id == pick?.id ? "✓ " : "") + Versions.label(kind, v, state)) { pick = v }
+                }
+                Button(L.t("cancel"), role: .cancel) {}
+            } message: {
+                Text(L.t("chooseVersionHint"))
+            }
     }
 }
 
@@ -275,6 +289,7 @@ struct MovieDetailView: View {
     @State private var tmdb: TMDBInfo?
     @State private var trailer: String?
     @State private var pick: MediaItem?
+    @State private var showVersions = false
     private var shown: MediaItem { pick ?? item }
     #if os(tvOS)
     @FocusState private var playFocused: Bool
@@ -293,7 +308,6 @@ struct MovieDetailView: View {
                                     tmdb == nil ? (info?.genre ?? "") : ""]) {
                     actionButtons(canResume: canResume)
                 }
-                VariantsRow(kind: .movie, variants: state.variants(.movie, item), current: shown) { pick = $0 }
                 if canResume, let h {
                     ProgressView(value: h.progress).tint(Theme.blue).padding(.horizontal, Theme.pad)
                 }
@@ -310,6 +324,7 @@ struct MovieDetailView: View {
         }
         .ignoresSafeArea(edges: Theme.isTV ? [] : .top)
         .background(DetailBackdrop(url: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? "")))
+        .modifier(VersionChooser(kind: .movie, variants: state.variants(.movie, item), pick: $pick, show: $showVersions))
         #if os(tvOS)
         .onAppear {
             // Always start on Play, so the remote works immediately.
@@ -344,6 +359,10 @@ struct MovieDetailView: View {
                 Button { trailer = key } label: { Label(L.t("trailer"), systemImage: "film") }.buttonStyle(.bordered)
             }
             #endif
+            if state.variants(.movie, item).count > 1 {
+                Button { showVersions = true } label: { Label(Versions.label(.movie, shown, state), systemImage: "rectangle.stack") }
+                    .buttonStyle(.bordered).lineLimit(1)
+            }
             Button { state.toggleFavorite(.movie, shown) } label: {
                 Image(systemName: state.isFavorite(.movie, shown) ? "heart.fill" : "heart")
             }.buttonStyle(.bordered).tint(state.isFavorite(.movie, shown) ? Theme.live : nil)
@@ -361,6 +380,7 @@ struct SeriesDetailView: View {
     @State private var tmEpisodes: [Int: TMDBEpisode] = [:]
     @State private var trailer: String?
     @State private var pick: MediaItem?
+    @State private var showVersions = false
     private var shown: MediaItem { pick ?? item }
     private enum SField: Hashable { case resume, firstEpisode, season }
     #if os(tvOS)
@@ -394,12 +414,15 @@ struct SeriesDetailView: View {
                             Button { trailer = key } label: { Label(L.t("trailer"), systemImage: "film") }.buttonStyle(.bordered)
                         }
                         #endif
+                        if state.variants(.series, item).count > 1 {
+                            Button { showVersions = true } label: { Label(Versions.label(.series, shown, state), systemImage: "rectangle.stack") }
+                                .buttonStyle(.bordered).lineLimit(1)
+                        }
                         Button { state.toggleFavorite(.series, shown) } label: {
                             Image(systemName: state.isFavorite(.series, shown) ? "heart.fill" : "heart")
                         }.buttonStyle(.bordered).tint(state.isFavorite(.series, shown) ? Theme.live : nil)
                     }
                 }
-                VariantsRow(kind: .series, variants: state.variants(.series, item), current: shown) { pick = $0 }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : shown.plot)
                 if !plot.isEmpty { PlotBlock(text: plot) }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
@@ -448,6 +471,7 @@ struct SeriesDetailView: View {
         }
         .ignoresSafeArea(edges: Theme.isTV ? [] : .top)
         .background(DetailBackdrop(url: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? "")))
+        .modifier(VersionChooser(kind: .series, variants: state.variants(.series, item), pick: $pick, show: $showVersions))
         #if os(tvOS)
         .onChange(of: info?.seasons.count ?? -1) { _ in focusStart() }
         .onAppear { focusStart() }
