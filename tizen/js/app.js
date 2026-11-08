@@ -1227,6 +1227,7 @@
     const list = matchList || [];
     if (!list.length) { box.innerHTML = `<div class="empty small">${esc(t('noMatches'))}</div>`; return; }
     const focusedId = Nav.current && box.contains(Nav.current) ? Nav.current.getAttribute('data-mid') : null;
+    const keepX = box.scrollLeft;
     box.innerHTML = list.map(function (m, i) {
       const open = Matches.canOpen(m), net = Matches.network(m.slug);
       const hc = m.home.color || '#2a2f5a';
@@ -1246,6 +1247,7 @@
           <span class="mteam"><span class="mlogo">${img(m.away.logo)}</span>${esc(m.away.short)}</span></span>
         <span class="mfoot${open ? ' on' : ''}">${foot}</span></button>`;
     }).join('');
+    box.scrollLeft = keepX;
     if (focusedId) { const again = box.querySelector('[data-mid="' + cssEsc(focusedId) + '"]'); if (again) Nav.focus(again, { noScroll: true }); }
   }
   async function watchMatch(m) {
