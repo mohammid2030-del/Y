@@ -67,6 +67,19 @@ jobs:
           NOVA_KEY_PASSWORD: ${{ secrets.NOVA_KEY_PASSWORD }}
         run: set -o pipefail; ./gradlew --no-daemon assembleRelease 2>&1 | tee -a build.log
 
+      - name: Check Firebase key (never printed)
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+        run: |
+          KEY=$(printf '%s' "$FIREBASE_API_KEY" | tr -cd 'A-Za-z0-9_-')
+          case "$KEY" in AIza*) P=yes;; *) P=no;; esac
+          echo "key length=${#KEY} starts-with-AIza=$P"
+          echo "db url host: $(printf '%s' "$FIREBASE_DB_URL" | sed -E 's#https?://([^/]+).*#\1#')"
+          R=$(curl -s -X POST -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY")
+          echo "firebase says: $(printf '%s' "$R" | grep -o '"message": *"[^"]*"' | head -1)"
+          printf '%s' "$R" | grep -q idToken && echo "firebase key OK" || true
+
       - name: Collect APKs
         env:
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
