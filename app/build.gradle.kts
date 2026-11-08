@@ -21,6 +21,8 @@ android {
         versionName = System.getenv("VERSION_NAME") ?: "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        // Phones, tablets and TV boxes are ARM; dropping x86 halves the ML Kit native libraries
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
