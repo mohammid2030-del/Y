@@ -350,8 +350,11 @@
         var ch = channels[i];
         var text = (ch.name || '').toLowerCase();
         var score = 0, hinted = false;
-        hints.forEach(function (h, idx) { if (text.indexOf(h) >= 0) { score = Math.max(score, 60 - idx * 8); hinted = true; } });
-        if (!hinted && !/sport|رياض/.test(text)) continue;
+        // sports channels only: "beIN BOX OFFICE", "MBC 2" or a movies channel is never the match channel
+        if (!/sport|سبورت|رياض|ssc|thmanyah|ثمانية|alkass|al kass|الكاس|action|اكشن|أكشن/.test(text)) continue;
+        if (/box ?office|movie|cinema|سينما|افلام|أفلام|film|drama|دراما|kids|اطفال|أطفال|junior|jeem|news|اخبار|أخبار|series|مسلسل|documentar|وثائقي|gourmet|nat ?geo|discovery|music|موسيقى|quran|قرآن|comedy|كوميدي/.test(text)) continue;
+        score = 10;
+        hints.forEach(function (h, idx) { if (text.indexOf(h) >= 0) { score = Math.max(score, 70 - idx * 8); hinted = true; } });
         var isAr = /(^|[^a-z])(ar|arab|arabic)([^a-z]|$)/.test(text) || /[؀-ۿ]/.test(text);
         var isEn = /(^|[^a-z])(en|eng|english|uk)([^a-z]|$)/.test(text);
         var other = /(^|[^a-z])(es|esp|spain|spanish|fr|french|tr|turk|de|ger|it|ita|pt|por|in|hindi|ru|pl|nl|us|usa)([^a-z]|$)/.test(text);

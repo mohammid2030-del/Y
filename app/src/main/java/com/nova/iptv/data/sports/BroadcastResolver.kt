@@ -86,7 +86,13 @@ class BroadcastResolver @Inject constructor(
         val learnedFamily = prefs.getString("$subId|${m.leagueSlug}", null)
         val learnedForMatch = prefs.getString("$subId|match|${m.id}", null)
 
-        val picks = bag.values.map { ch ->
+        // Sports channels only: "beIN BOX OFFICE", "MBC 2" or a movies channel is never the match channel.
+        val sportsRe = Regex("sport|سبورت|رياض|ssc|thmanyah|ثمانية|alkass|al kass|الكاس|action|اكشن|أكشن", RegexOption.IGNORE_CASE)
+        val notSportsRe = Regex("box ?office|movie|cinema|سينما|افلام|أفلام|film|drama|دراما|kids|اطفال|أطفال|junior|jeem|news|اخبار|أخبار|series|مسلسل|documentar|وثائقي|gourmet|nat ?geo|discovery|music|موسيقى|quran|قرآن|comedy|كوميدي", RegexOption.IGNORE_CASE)
+        val picks = bag.values.filter { ch ->
+            val n = ch.name.lowercase(Locale.ROOT)
+            (sportsRe.containsMatchIn(n) || sportsRe.containsMatchIn(categoryNames[ch.categoryId].orEmpty())) && !notSportsRe.containsMatchIn(n)
+        }.map { ch ->
             val text = (ch.name + " " + categoryNames[ch.categoryId].orEmpty()).lowercase(Locale.ROOT)
             var score = 0
             hints.forEachIndexed { i, h -> if (text.contains(h.lowercase(Locale.ROOT))) score = maxOf(score, 60 - i * 8) }
