@@ -59,7 +59,8 @@ jobs:
           set -e
           mkdir -p ~/.appstoreconnect/private_keys
           KEY=~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
-          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          printf '%s\n' "$ASC_KEY_P8" | tr -d '\r' > "$KEY"
+          grep -q "BEGIN PRIVATE KEY" "$KEY" || { echo "error: ASC_KEY_P8 does not look like a .p8 key (missing BEGIN PRIVATE KEY line)" | tee ../archive-key.log; exit 1; }
           AUTH="-allowProvisioningUpdates -authenticationKeyPath $KEY -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
           cat > ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -88,6 +89,19 @@ jobs:
             echo "::endgroup::"
           done
           rm -f "$KEY"
+
+      - name: Report status on the commit
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            BODY="Apple build OK: iOS + tvOS uploaded to TestFlight (build $((BUILD_NUMBER + 100)))."
+          else
+            MISSING=""; for V in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do [ -z "${!V}" ] && MISSING="$MISSING $V"; done
+            BODY="Apple build OK, TestFlight upload skipped. Missing secrets:$MISSING"
+          fi
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$BODY" >/dev/null || true
 
       - name: Report errors on the commit
         if: failure()
