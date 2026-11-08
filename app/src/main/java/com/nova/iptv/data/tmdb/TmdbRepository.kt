@@ -11,7 +11,7 @@ import com.nova.iptv.data.ErrorKind
 import com.nova.iptv.data.NovaException
 import com.nova.iptv.data.network.HttpFetcher
 import com.nova.iptv.data.security.CryptoManager
-import com.nova.iptv.ui.components.cleanTitle
+import com.nova.iptv.ui.components.searchTitle
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -122,8 +122,8 @@ class TmdbRepository @Inject constructor(
     suspend fun lookup(isTv: Boolean, tmdbId: String, title: String, year: String): TmdbInfo? {
         if (!_enabled.value) return null
         val lang = lang()
-        val clean = title.cleanTitle().replace(YEAR_IN_TITLE, "").trim()
-        val y = year.take(4).ifBlank { YEAR_IN_TITLE.find(title)?.groupValues?.get(1).orEmpty() }
+        val (clean, titleYear) = searchTitle(title)
+        val y = year.take(4).filter { it.isDigit() }.takeIf { it.length == 4 } ?: titleYear
         val cacheKey = "${if (isTv) "tv" else "movie"}|$lang|${tmdbId.ifBlank { "$clean|$y" }}"
         infoCache.get(cacheKey)?.let { return it }
         synchronized(missCache) { if (cacheKey in missCache) return null }
@@ -147,8 +147,8 @@ class TmdbRepository @Inject constructor(
         val k = posterKey(isTv, title, year)
         posterCache.get(k)?.let { return it }
         val lang = lang()
-        val clean = title.cleanTitle().replace(YEAR_IN_TITLE, "").trim()
-        val y = year.take(4).ifBlank { YEAR_IN_TITLE.find(title)?.groupValues?.get(1).orEmpty() }
+        val (clean, titleYear) = searchTitle(title)
+        val y = year.take(4).filter { it.isDigit() }.takeIf { it.length == 4 } ?: titleYear
         val result = posterLimit.withPermit {
             runCatching {
                 val params = buildMap {

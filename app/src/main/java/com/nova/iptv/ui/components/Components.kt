@@ -172,7 +172,7 @@ fun PosterCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            if (shownTitle == title) title.cleanTitle() else shownTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            if (shownTitle == title) searchTitle(title).first else shownTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 2.dp),
         )
         if (subtitle.isNotBlank()) {

@@ -49,3 +49,31 @@ fun String.cleanTitle(): String {
 /** Season / episode numbers found in an episode label such as "S01E02 - …" or "S1 E2". */
 fun seasonEpisodeOf(text: String): Pair<Int, Int>? =
     seRe.find(text)?.let { m -> m.groupValues[1].toIntOrNull()?.let { s -> m.groupValues[2].toIntOrNull()?.let { e -> s to e } } }
+
+private val SearchTagTokens = TagTokens + setOf(
+    "AMZ", "ATV", "DSNP", "HMAX", "MAX", "HULU", "PRIME", "US", "UK", "GB", "CA", "AU", "IN", "KR", "JP", "FR", "DE",
+    "ES", "IT", "MX", "BR", "SUIBS", "DV", "DOLBY", "ATMOS", "REMUX", "WEB", "WEBDL", "BLURAY", "1080P", "720P", "2160P",
+)
+private val upperPrefixRe = Regex("""^[A-Z0-9][A-Z0-9\-]{1,14}\s*[-|]\s+""")
+private val yearBracketRe = Regex("""[(\[]((?:19|20)\d{2})[)\]]""")
+private val anyBracketRe = Regex("""[(\[][^)\]]*[)\]]""")
+
+/**
+ * Aggressive clean-up for looking a title up (and for display when nothing better is known):
+ * "4K-AMZ - Drive (2025) (US) HEVC" → ("Drive", "2025").
+ */
+fun searchTitle(raw: String): Pair<String, String> {
+    var t = raw.cleanTitle()
+    t = t.replace(upperPrefixRe, "")
+    var year = ""
+    yearBracketRe.find(t)?.let { m ->
+        year = m.groupValues[1]
+        if (m.range.first > 0) t = t.substring(0, m.range.first)
+    }
+    t = t.replace(anyBracketRe, " ")
+    val words = t.split(' ').filter { it.isNotBlank() }.toMutableList()
+    while (words.size > 1 && words.last().trim('-', '|').uppercase() in SearchTagTokens) words.removeAt(words.lastIndex)
+    while (words.size > 1 && words.last() in setOf("-", "|")) words.removeAt(words.lastIndex)
+    val out = words.joinToString(" ").trim()
+    return (out.ifBlank { raw.trim() }) to year
+}
