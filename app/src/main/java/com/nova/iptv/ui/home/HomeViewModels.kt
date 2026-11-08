@@ -123,10 +123,6 @@ class LiveViewModel @Inject constructor(
     }
 
     fun toggleFavorite(c: ContentEntity) {
-        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, type, c.remoteId, c.name, c.logo) }
-    }
-
-    fun toggleFavorite(c: ContentEntity) {
         viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.LIVE, c.remoteId, c.name, c.logo) }
     }
 
@@ -185,6 +181,10 @@ abstract class VodViewModel(
 
     fun count(categoryId: String): Flow<Int> =
         subId.flatMapLatest { content.categoryCount(it, type, categoryId) }
+
+    fun toggleFavorite(c: ContentEntity) {
+        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, type, c.remoteId, c.name, c.logo) }
+    }
 
     fun select(category: String) {
         selected.value = category
