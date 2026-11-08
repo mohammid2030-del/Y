@@ -1,4 +1,8 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package com.nova.iptv.data.repo
+
+import kotlinx.coroutines.flow.flatMapLatest
 
 import android.util.LruCache
 import androidx.paging.Pager
@@ -76,7 +80,17 @@ class ContentRepository @Inject constructor(
     private val fetcher: HttpFetcher,
     private val crypto: CryptoManager,
     private val tmdb: com.nova.iptv.data.tmdb.TmdbRepository,
+    private val viewers: com.nova.iptv.data.viewers.ViewersRepository,
 ) {
+    /** History / favourites belong to the viewer watching now (see ViewersRepository.ownerFor). */
+    private fun owner(subId: Long) = viewers.ownerFor(subId)
+    private fun <T> perViewer(subId: Long, block: (Long) -> kotlinx.coroutines.flow.Flow<T>): kotlinx.coroutines.flow.Flow<T> =
+        viewers.current.flatMapLatest { block(owner(subId)) }
+    private fun ownerKey(key: String): String {
+        val parts = key.split('|', limit = 2)
+        val sub = parts[0].toLongOrNull() ?: return key
+        return if (parts.size == 2 && sub > 0) "${owner(sub)}|${parts[1]}" else key
+    }
     private val seriesCache = LruCache<String, XSeriesInfo>(20)
     private val vodCache = LruCache<String, XVodInfo>(50)
     private val heroCache = LruCache<String, HeroInfo>(60)
@@ -129,37 +143,47 @@ class ContentRepository @Inject constructor(
     }
 
     // ---- Favorites ----
-    fun favorites(subId: Long): Flow<List<FavoriteEntity>> = favoriteDao.observe(subId)
+    fun favorites(subId: Long): Flow<List<FavoriteEntity>> = perViewer(subId) { favoriteDao.observe(it) }
     fun favoriteKeys(subId: Long): Flow<Set<String>> =
-        favoriteDao.observe(subId).map { list -> list.map { "${it.type}|${it.remoteId}" }.toSet() }
+        favorites(subId).map { list -> list.map { "${it.type}|${it.remoteId}" }.toSet() }
 
     suspend fun toggleFavorite(subId: Long, type: String, remoteId: String, name: String, logo: String) {
-        if (favoriteDao.exists(subId, type, remoteId) > 0) {
-            favoriteDao.delete(subId, type, remoteId)
+        val o = owner(subId)
+        if (favoriteDao.exists(o, type, remoteId) > 0) {
+            favoriteDao.delete(o, type, remoteId)
+            viewers.pushFavorite(FavoriteEntity(o, type, remoteId, name, logo), deleted = true)
         } else {
-            val pos = (favoriteDao.maxPosition(subId) ?: 0) + 1
-            favoriteDao.upsert(FavoriteEntity(subId, type, remoteId, name, logo, pos))
+            val pos = (favoriteDao.maxPosition(o) ?: 0) + 1
+            val f = FavoriteEntity(o, type, remoteId, name, logo, pos)
+            favoriteDao.upsert(f)
+            viewers.pushFavorite(f, deleted = false)
         }
     }
 
-    suspend fun removeFavorite(f: FavoriteEntity) = favoriteDao.delete(f.subscriptionId, f.type, f.remoteId)
+    suspend fun removeFavorite(f: FavoriteEntity) {
+        favoriteDao.delete(f.subscriptionId, f.type, f.remoteId)
+        viewers.pushFavorite(f, deleted = true)
+    }
 
     suspend fun moveFavorite(list: List<FavoriteEntity>, from: Int, to: Int) {
         if (from !in list.indices || to !in list.indices) return
         val m = list.toMutableList()
-        val item = m.removeAt(from)
-        m.add(to, item)
+        m.add(to, m.removeAt(from))
         favoriteDao.updateAll(m.mapIndexed { i, f -> f.copy(position = i) })
     }
 
-    // ---- History / resume ----
-    fun recent(subId: Long, type: String, limit: Int = 20) = historyDao.observeRecent(subId, type, limit)
-    fun continueWatching(subId: Long) = historyDao.observeContinue(subId)
-    fun seriesHistory(subId: Long, seriesId: String) = historyDao.observeSeries(subId, seriesId)
-    fun movieHistory(subId: Long, movieId: String) = historyDao.observeMovie(subId, movieId)
-    suspend fun history(key: String) = historyDao.get(key)
-    suspend fun saveHistory(item: HistoryEntity) = historyDao.upsert(item)
-    suspend fun clearHistory(subId: Long) = historyDao.clear(subId)
+    fun recent(subId: Long, type: String, limit: Int = 20) = perViewer(subId) { historyDao.observeRecent(it, type, limit) }
+    fun continueWatching(subId: Long) = perViewer(subId) { historyDao.observeContinue(it) }
+    fun seriesHistory(subId: Long, seriesId: String) = perViewer(subId) { historyDao.observeSeries(it, seriesId) }
+    fun movieHistory(subId: Long, movieId: String) = perViewer(subId) { historyDao.observeMovie(it, movieId) }
+    suspend fun history(key: String) = historyDao.get(ownerKey(key))
+    suspend fun saveHistory(item: HistoryEntity) {
+        val o = if (item.subscriptionId > 0) owner(item.subscriptionId) else item.subscriptionId
+        val h = item.copy(subscriptionId = o, historyKey = HistoryEntity.key(o, item.type, item.remoteId, item.episodeId))
+        historyDao.upsert(h)
+        if (h.type != com.nova.iptv.data.db.ContentType.LIVE || true) viewers.pushHistory(h)
+    }
+    suspend fun clearHistory(subId: Long) { val o = owner(subId); historyDao.clear(o); viewers.clearRemoteHistory(o) }
     suspend fun clearAllHistory() = historyDao.clearAll()
 
     // ---- Details (Xtream) ----

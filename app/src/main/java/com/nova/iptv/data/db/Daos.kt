@@ -188,6 +188,9 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorites")
     suspend fun all(): List<FavoriteEntity>
 
+    @Query("SELECT * FROM favorites WHERE subscriptionId = :owner")
+    suspend fun allFor(owner: Long): List<FavoriteEntity>
+
     @Query("DELETE FROM favorites WHERE subscriptionId = :subId")
     suspend fun deleteBySub(subId: Long)
 }
@@ -218,6 +221,9 @@ interface HistoryDao {
 
     @Query("DELETE FROM history WHERE subscriptionId = :subId")
     suspend fun clear(subId: Long)
+
+    @Query("SELECT * FROM history WHERE subscriptionId = :owner")
+    suspend fun allFor(owner: Long): List<HistoryEntity>
 
     @Query("DELETE FROM history")
     suspend fun clearAll()

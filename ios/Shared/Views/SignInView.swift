@@ -37,7 +37,7 @@ struct GoogleSignInView: View {
                     }
                     HStack(spacing: 10) { ProgressView(); Text(status.isEmpty ? L.t("googleWaiting") : status).foregroundStyle(.secondary) }
                 } else if failed {
-                    Text(status).foregroundStyle(.orange)
+                    Text(status).foregroundStyle(.orange).multilineTextAlignment(.center).frame(maxWidth: 1100)
                 } else {
                     ProgressView()
                 }
@@ -59,7 +59,11 @@ struct GoogleSignInView: View {
 
     private func run() async {
         failed = false; status = ""; code = nil
-        guard let c = await Cloud.shared.startGoogle() else { failed = true; status = L.t("googleFailed"); return }
+        guard let c = await Cloud.shared.startGoogle() else {
+            failed = true
+            status = L.t("googleFailed") + "\n" + explain(await Cloud.shared.lastError)
+            return
+        }
         code = c
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: UInt64(c.interval) * 1_000_000_000)
@@ -72,9 +76,19 @@ struct GoogleSignInView: View {
             case .pending: continue
             case .denied: failed = true; code = nil; status = L.t("googleDenied"); return
             case .expired: attempt += 1; return
-            case .failed: failed = true; code = nil; status = L.t("googleFailed"); return
+            case .failed: failed = true; code = nil; status = L.t("googleFailed") + "\n" + explain(await Cloud.shared.lastError); return
             }
         }
+    }
+
+    /// Turns Google's error code into a hint about what to fix.
+    private func explain(_ e: String) -> String {
+        let l = e.lowercased()
+        if l.contains("invalid_client") || l.contains("unauthorized_client") { return L.t("gErrClient") + "  (" + e + ")" }
+        if l.contains("restricted") || l.contains("consent") || l.contains("access_denied") { return L.t("gErrConsent") + "  (" + e + ")" }
+        if l.contains("operation_not_allowed") || l.contains("not enabled") { return L.t("gErrProvider") + "  (" + e + ")" }
+        if l.contains("invalid_idp_response") || l.contains("audience") { return L.t("gErrAudience") + "  (" + e + ")" }
+        return e
     }
 
     private func qrImage(_ text: String) -> UIImage? {

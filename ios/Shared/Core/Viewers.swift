@@ -37,11 +37,44 @@ actor Cloud {
     struct DeviceCode { let device: String; let user: String; let url: String; let interval: Int; let expires: Date }
     enum LoginResult { case ok(String), pending, denied, expired, failed }
 
+    /// Last Google / Firebase error, shown on the sign-in screen so a setup problem is visible (e.g. invalid_client).
+    private(set) var lastError = ""
+
+    /// Like post(), but keeps the error body (Google answers 4xx with a JSON error).
+    private func postAny(_ url: String, body: String, form: Bool) async -> [String: Any]? {
+        guard let u = URL(string: url) else { return nil }
+        var r = URLRequest(url: u)
+        r.httpMethod = "POST"
+        r.timeoutInterval = 20
+        r.setValue(form ? "application/x-www-form-urlencoded" : "application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = body.data(using: .utf8)
+        do {
+            let (d, _) = try await URLSession.shared.data(for: r)
+            return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? ["error": "bad_response"]
+        } catch {
+            return ["error": "network", "error_description": error.localizedDescription]
+        }
+    }
+
+    private func describe(_ j: [String: Any]) -> String {
+        if let e = j["error"] as? [String: Any] { return jstr(e["message"]) }   // Firebase style
+        let code = jstr(j["error"]), desc = jstr(j["error_description"])
+        return desc.isEmpty ? code : "\(code): \(desc)"
+    }
+
     func startGoogle() async -> DeviceCode? {
-        guard googleAvailable else { return nil }
+        guard googleAvailable else { lastError = "not_configured"; return nil }
         let body = "client_id=\(form(CloudConfig.googleClientID))&scope=\(form("openid email profile"))"
-        guard let j = await post("https://oauth2.googleapis.com/device/code", body: body, form: true),
-              let dc = j["device_code"] as? String, let uc = j["user_code"] as? String else { return nil }
+        var j: [String: Any]?
+        for attempt in 0..<3 {   // a brand-new client or a flaky network: try a few times
+            j = await postAny("https://oauth2.googleapis.com/device/code", body: body, form: true)
+            if j?["device_code"] != nil { break }
+            if attempt < 2 { try? await Task.sleep(nanoseconds: 1_500_000_000) }
+        }
+        guard let j, let dc = j["device_code"] as? String, let uc = j["user_code"] as? String else {
+            lastError = j.map(describe) ?? "network"; return nil
+        }
+        lastError = ""
         let url = jstr(j["verification_url"]).isEmpty ? "https://www.google.com/device" : jstr(j["verification_url"])
         return DeviceCode(device: dc, user: uc, url: url, interval: max(5, jint(j["interval"])),
                           expires: Date().addingTimeInterval(Double(max(60, jint(j["expires_in"])))))
@@ -64,15 +97,16 @@ actor Cloud {
             case "authorization_pending", "slow_down": return .pending
             case "access_denied": return .denied
             case "expired_token": return .expired
-            default: return .failed
+            default: lastError = describe(j); return .failed
             }
         }
-        guard let googleID = j["id_token"] as? String else { return .failed }
+        guard let googleID = j["id_token"] as? String else { lastError = "no id_token"; return .failed }
         let payload: [String: Any] = ["postBody": "id_token=\(googleID)&providerId=google.com", "requestUri": "http://localhost",
                                       "returnSecureToken": true, "returnIdpCredential": true]
         guard let data = try? JSONSerialization.data(withJSONObject: payload), let bodyStr = String(data: data, encoding: .utf8),
-              let f = await post("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=\(CloudConfig.apiKey)", body: bodyStr, form: false),
-              let t = f["idToken"] as? String, let refresh = f["refreshToken"] as? String else { return .failed }
+              let f = await postAny("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=\(CloudConfig.apiKey)", body: bodyStr, form: false)
+        else { lastError = "firebase"; return .failed }
+        guard let t = f["idToken"] as? String, let refresh = f["refreshToken"] as? String else { lastError = "Firebase: " + describe(f); return .failed }
         idToken = t
         expiry = Date().addingTimeInterval(Double(jint(f["expiresIn"])) - 120)
         Keychain.set(refresh, for: "fbUserRefresh")

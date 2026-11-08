@@ -1229,6 +1229,16 @@
     return changed;
   }
 
+  /** Turns Google's error code into a hint about what to fix. */
+  function googleHint(e) {
+    const l = String(e || '').toLowerCase();
+    if (/invalid_client|unauthorized_client/.test(l)) return t('gErrClient') + ' (' + e + ')';
+    if (/restricted|consent|access_denied/.test(l)) return t('gErrConsent') + ' (' + e + ')';
+    if (/operation_not_allowed|not enabled/.test(l)) return t('gErrProvider') + ' (' + e + ')';
+    if (/invalid_idp_response|audience/.test(l)) return t('gErrAudience') + ' (' + e + ')';
+    return e || '';
+  }
+
   /** Google sign-in for TVs: a short code on screen, entered on the phone at google.com/device. */
   function showGoogle() {
     let alive = true, code = null;
@@ -1252,7 +1262,7 @@
       code = await Cloud.startGoogle();
       const box = $('#g-box');
       if (!alive || !box) return;
-      if (!code) { box.innerHTML = `<p class="error">${esc(t('googleFailed'))}</p>`; return; }
+      if (!code) { box.innerHTML = `<p class="error">${esc(t('googleFailed'))}</p><p class="muted">${esc(googleHint(Cloud.lastError()))}</p>`; return; }
       box.innerHTML = `<p style="font-size:30px">1. ${esc(t('googleStep1'))} <b style="color:var(--primary)">${esc(code.url.replace('https://', ''))}</b></p>
         <p style="font-size:30px">2. ${esc(t('googleStep2'))}</p>
         <div style="font-size:72px;font-weight:900;letter-spacing:10px;background:var(--s2);padding:14px 40px;border-radius:18px;direction:ltr">${esc(code.user)}</div>
@@ -1270,7 +1280,7 @@
           return;
         }
         if (r === 'expired') { alive = false; showGoogle(); return; }
-        if (r === 'denied' || r === 'failed') { const w = $('#g-wait'); if (w) w.textContent = t(r === 'denied' ? 'googleDenied' : 'googleFailed'); alive = false; return; }
+        if (r === 'denied' || r === 'failed') { const w = $('#g-wait'); if (w) w.textContent = r === 'denied' ? t('googleDenied') : t('googleFailed') + ' — ' + googleHint(Cloud.lastError()); alive = false; return; }
       }
     })();
   }

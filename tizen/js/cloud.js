@@ -7,15 +7,24 @@
 
   function enabled() { return !!(cfg.dbUrl && cfg.apiKey); }
 
-  function req(method, url, body, form) {
+  var lastError = '';
+  function describe(j) {
+    if (!j) return 'network';
+    if (j.error && typeof j.error === 'object') return j.error.message || 'error';
+    return j.error_description ? j.error + ': ' + j.error_description : String(j.error || 'error');
+  }
+  function req(method, url, body, form, keepError) {
     return new Promise(function (resolve) {
       var x = new XMLHttpRequest();
       x.open(method, url, true);
-      x.timeout = 15000;
+      x.timeout = 20000;
       if (body != null) x.setRequestHeader('Content-Type', form ? 'application/x-www-form-urlencoded' : 'application/json');
       x.onload = function () {
         if (x.status === 401) idToken = '';
-        if (x.status !== 200) return resolve(undefined);
+        if (x.status !== 200) {
+          if (keepError) { try { return resolve(JSON.parse(x.responseText)); } catch (e) { return resolve({ error: 'http_' + x.status }); } }
+          return resolve(undefined);
+        }
         try { resolve(JSON.parse(x.responseText)); } catch (e) { resolve(undefined); }
       };
       x.onerror = x.ontimeout = function () { resolve(undefined); };
@@ -28,9 +37,15 @@
   /* ---- Google account: code on the TV, google.com/device on the phone */
   function googleAvailable() { return enabled() && !!(cfg.gid && cfg.gsec); }
   async function startGoogle() {
-    if (!googleAvailable()) return null;
-    var r = await req('POST', 'https://oauth2.googleapis.com/device/code', form({ client_id: cfg.gid, scope: 'openid email profile' }), true);
-    if (!r || !r.device_code) return null;
+    if (!googleAvailable()) { lastError = 'not_configured'; return null; }
+    var r;
+    for (var attempt = 0; attempt < 3; attempt++) {   // a brand-new client or a flaky network: try a few times
+      r = await req('POST', 'https://oauth2.googleapis.com/device/code', form({ client_id: cfg.gid, scope: 'openid email profile' }), true, true);
+      if (r && r.device_code) break;
+      await new Promise(function (ok) { setTimeout(ok, 1500); });
+    }
+    if (!r || !r.device_code) { lastError = describe(r); return null; }
+    lastError = '';
     return { device: r.device_code, user: r.user_code, url: r.verification_url || 'https://www.google.com/device',
       interval: Math.max(5, r.interval || 5), expires: Date.now() + Math.max(60, r.expires_in || 900) * 1000 };
   }
@@ -44,12 +59,17 @@
       x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
       x.onload = function () {
         var j = {}; try { j = JSON.parse(x.responseText); } catch (e) { /* ignore */ }
-        if (j.error) return resolve(j.error === 'authorization_pending' || j.error === 'slow_down' ? 'pending' : j.error === 'access_denied' ? 'denied' : j.error === 'expired_token' ? 'expired' : 'failed');
-        if (!j.id_token) return resolve('failed');
+        if (j.error) {
+          if (j.error === 'authorization_pending' || j.error === 'slow_down') return resolve('pending');
+          if (j.error === 'access_denied') return resolve('denied');
+          if (j.error === 'expired_token') return resolve('expired');
+          lastError = describe(j); return resolve('failed');
+        }
+        if (!j.id_token) { lastError = 'no id_token'; return resolve('failed'); }
         req('POST', 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=' + cfg.apiKey,
-          JSON.stringify({ postBody: 'id_token=' + j.id_token + '&providerId=google.com', requestUri: 'http://localhost', returnSecureToken: true }), false)
+          JSON.stringify({ postBody: 'id_token=' + j.id_token + '&providerId=google.com', requestUri: 'http://localhost', returnSecureToken: true }), false, true)
           .then(async function (f) {
-            if (!f || !f.idToken) return resolve('failed');
+            if (!f || !f.idToken) { lastError = 'Firebase: ' + describe(f); return resolve('failed'); }
             idToken = f.idToken; expiry = Date.now() + (parseInt(f.expiresIn, 10) - 120) * 1000;
             await Store.set('fbUser', { refresh: f.refreshToken, uid: f.localId, email: f.email || '' });
             account = { uid: f.localId, email: f.email || '' };
@@ -181,6 +201,7 @@
   global.Cloud = {
     enabled: enabled,
     googleAvailable: googleAvailable, startGoogle: startGoogle, pollGoogle: pollGoogle,
+    lastError: function () { return lastError; },
     loadAccount: loadAccount, account: function () { return account; }, signOut: signOut,
     subKey: subKey,
     safe: safe,

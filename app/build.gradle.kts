@@ -21,6 +21,12 @@ android {
         versionName = System.getenv("VERSION_NAME") ?: "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        // Viewer / account sync (filled from repository secrets in CI; empty = feature off)
+        fun cfg(name: String) = (System.getenv(name) ?: "").filter { it.isLetterOrDigit() || it in ":/._-" }
+        buildConfigField("String", "FIREBASE_DB_URL", "\"${cfg("FIREBASE_DB_URL")}\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"${cfg("FIREBASE_API_KEY")}\"")
+        buildConfigField("String", "GOOGLE_TV_CLIENT_ID", "\"${cfg("GOOGLE_TV_CLIENT_ID")}\"")
+        buildConfigField("String", "GOOGLE_TV_CLIENT_SECRET", "\"${cfg("GOOGLE_TV_CLIENT_SECRET")}\"")
     }
 
     signingConfigs {

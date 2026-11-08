@@ -16,6 +16,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     env:
+      FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+      FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+      GOOGLE_TV_CLIENT_ID: ${{ secrets.GOOGLE_TV_CLIENT_ID }}
+      GOOGLE_TV_CLIENT_SECRET: ${{ secrets.GOOGLE_TV_CLIENT_SECRET }}
       VERSION_CODE: ${{ github.run_number }}
       VERSION_NAME: 1.0.${{ github.run_number }}
     steps:
