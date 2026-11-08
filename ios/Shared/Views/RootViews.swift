@@ -21,6 +21,7 @@ struct RootView: View {
             Theme.bg.ignoresSafeArea()
             switch state.phase {
             case .profiles: ProfilesView()
+            case .viewers: ViewersView()
             case .addSubscription(let id): AddSubscriptionView(editingID: id)
             case .syncing(let id): SyncView(subID: id)
             case .main: MainTabs()
@@ -97,8 +98,8 @@ struct ProfilesView: View {
                         Text("NOVA").font(.system(size: Theme.isTV ? 48 : 36, weight: .black)).kerning(6)
                     }
                     VStack(spacing: 8) {
-                        Text(L.t("who")).font(.system(size: Theme.isTV ? 60 : 36, weight: .heavy))
-                        Text(L.t("whoHint")).foregroundStyle(.secondary)
+                        Text(L.t("chooseSub")).font(.system(size: Theme.isTV ? 60 : 36, weight: .heavy))
+                        Text(L.t("chooseSubHint")).foregroundStyle(.secondary)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: Theme.isTV ? 260 : 150), spacing: Theme.isTV ? 40 : 18)],
                               spacing: Theme.isTV ? 40 : 24) {

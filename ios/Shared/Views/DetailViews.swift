@@ -298,7 +298,7 @@ struct MovieDetailView: View {
     #endif
 
     var body: some View {
-        let h = state.history[HistoryItem.key(state.activeID, .movie, shown.id)]
+        let h = state.history[HistoryItem.key(state.ownerID, .movie, shown.id)]
         let canResume = h?.resumable ?? false
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -392,7 +392,7 @@ struct SeriesDetailView: View {
     var body: some View {
         let seasons = info.map { $0.seasons.keys.sorted() } ?? []
         let episodes = info?.seasons[season] ?? []
-        let last = state.history.values.filter { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == shown.id }
+        let last = state.history.values.filter { $0.subID == state.ownerID && $0.kind == .series && $0.stream.id == shown.id }
             .max { $0.updated < $1.updated }
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -456,7 +456,7 @@ struct SeriesDetailView: View {
                         let isFirst = e.id == episodes.first?.id
                         Button { state.playEpisode(e, of: shown, all: episodes) } label: {
                             EpisodeRow(episode: e, tm: tmEpisodes[e.num], fallback: shown.logo,
-                                       progress: state.history[HistoryItem.key(state.activeID, .series, shown.id, e.id)]?.progress)
+                                       progress: state.history[HistoryItem.key(state.ownerID, .series, shown.id, e.id)]?.progress)
                         }
                         #if os(tvOS)
                         .buttonStyle(.card)
@@ -508,7 +508,7 @@ struct SeriesDetailView: View {
     /// Start on "Resume", or on the first episode once the list has loaded, so the remote works immediately.
     private func focusStart() {
         guard !didFocus else { return }
-        let hasResume = state.history.values.contains { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == shown.id }
+        let hasResume = state.history.values.contains { $0.subID == state.ownerID && $0.kind == .series && $0.stream.id == shown.id }
         guard hasResume || !(info?.seasons.isEmpty ?? true) else { return }
         didFocus = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { sFocus = hasResume ? .resume : .firstEpisode }

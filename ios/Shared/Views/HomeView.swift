@@ -28,7 +28,7 @@ struct HomeView: View {
                 }
                 posterRow(L.t("latestMovies"), .movie, state.latest(.movie, 20))
                 posterRow(L.t("latestSeries"), .series, state.latest(.series, 20))
-                let favs = state.favorites.filter { $0.subID == state.activeID && $0.kind != .live }
+                let favs = state.favorites.filter { $0.subID == state.ownerID && $0.kind != .live }
                 if !favs.isEmpty {
                     HRow(title: L.t("favorites")) {
                         ForEach(favs) { f in

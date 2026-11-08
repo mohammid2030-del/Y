@@ -228,7 +228,7 @@ struct SearchView: View {
 struct FavoritesView: View {
     @EnvironmentObject var state: AppState
     var body: some View {
-        let mine = state.favorites.filter { $0.subID == state.activeID }
+        let mine = state.favorites.filter { $0.subID == state.ownerID }
         Group {
             if mine.isEmpty {
                 EmptyState(text: L.t("emptyFav"))
@@ -281,6 +281,14 @@ struct SettingsView: View {
                 }
                 Button(L.t("addSub")) { state.phase = .addSubscription(nil) }
                 Button(L.t("switchProfile")) { state.phase = .profiles }
+            }
+            Section(L.t("viewers")) {
+                Button(L.t("switchViewer") + " (" + (state.currentViewer?.name ?? "") + ")") { state.phase = .viewers }
+                Text(Cloud.shared.enabled ? L.t("cloudOnHint") : L.t("cloudOffHint")).font(.footnote).foregroundStyle(.secondary)
+                if Cloud.shared.enabled {
+                    Button(L.t("syncNow")) { Task { await state.cloudPullViewers(); await state.cloudPullData() } }
+                    if !state.cloudStatus.isEmpty { Text(state.cloudStatus).font(.footnote).foregroundStyle(Theme.blue) }
+                }
             }
             Section {
                 if state.tmdbOn {
@@ -466,7 +474,7 @@ struct CatalogBrowser: View {
         switch selection {
         case "__recent": return state.latest(kind, 60)
         case "__cont": return state.continueWatching.filter { $0.kind == kind }.map(\.stream)
-        case "__fav": return state.favorites.filter { $0.subID == state.activeID && $0.kind == kind }.map(\.stream)
+        case "__fav": return state.favorites.filter { $0.subID == state.ownerID && $0.kind == kind }.map(\.stream)
         default: return state.browse(kind, shelf: selection, category: category)
         }
     }

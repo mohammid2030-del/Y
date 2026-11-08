@@ -18,6 +18,8 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+      FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +30,15 @@ jobs:
           echo "Using $XC"
           sudo xcode-select -s "$XC"
           xcodebuild -version
+
+      - name: Viewer sync settings
+        working-directory: ios
+        run: |
+          # Only letters, digits and URL punctuation reach the source file.
+          DB=$(printf '%s' "$FIREBASE_DB_URL" | tr -cd 'A-Za-z0-9:/._-')
+          KEY=$(printf '%s' "$FIREBASE_API_KEY" | tr -cd 'A-Za-z0-9_-')
+          printf 'enum CloudConfig {\n    static let dbURL = "%s"\n    static let apiKey = "%s"\n}\n' "$DB" "$KEY" > Shared/Core/CloudConfig.swift
+          [ -n "$DB" ] && echo "Viewer sync: on" || echo "Viewer sync: off (no FIREBASE secrets)"
 
       - name: Generate project & install VLC engine
         working-directory: ios

@@ -3,6 +3,7 @@ import SwiftUI
 
 enum Phase: Equatable {
     case profiles
+    case viewers
     case addSubscription(String?)
     case syncing(String)
     case main
@@ -16,6 +17,10 @@ final class AppState: ObservableObject {
     @Published var tab: Tab = .home
     @Published var subs: [Subscription] = []
     @Published var activeID: String = ""
+    /// People watching on the active subscription, and who is watching now.
+    @Published var viewers: [Viewer] = []
+    @Published var viewerID = "main"
+    @Published var cloudStatus = ""
     @Published var catalog = Catalog() { didSet { rebuildIndex() } }
     /// Shelves, duplicate groups and quality, rebuilt in the background whenever the catalog changes.
     @Published var index: CatalogIndex?
@@ -44,6 +49,9 @@ final class AppState: ObservableObject {
     }
 
     var active: Subscription? { subs.first { $0.id == activeID } }
+    /// History / favorites owner: the subscription for the first viewer (keeps existing data), "sub#viewer" for the others.
+    var ownerID: String { viewerID == "main" ? activeID : "\(activeID)#\(viewerID)" }
+    var currentViewer: Viewer? { viewers.first { $0.id == viewerID } }
 
     // MARK: subscriptions
 
@@ -53,7 +61,7 @@ final class AppState: ObservableObject {
         byCategoryCache = [:]
         if let c = Storage.loadCatalog(for: id) {
             catalog = c
-            phase = .main
+            enterAfterSubscription()
         } else {
             phase = .syncing(id)
         }
@@ -75,8 +83,8 @@ final class AppState: ObservableObject {
 
     func delete(_ id: String) {
         subs.removeAll { $0.id == id }
-        favorites.removeAll { $0.subID == id }
-        history = history.filter { $0.value.subID != id }
+        favorites.removeAll { $0.subID == id || $0.subID.hasPrefix(id + "#") }
+        history = history.filter { $0.value.subID != id && !$0.value.subID.hasPrefix(id + "#") }
         Keychain.set(nil, for: "pass|\(id)"); Keychain.set(nil, for: "m3u|\(id)")
         Storage.deleteCatalog(for: id)
         Storage.save("subs", subs); Storage.save("favorites", favorites); Storage.save("history", history)
@@ -110,7 +118,7 @@ final class AppState: ObservableObject {
             byCategoryCache = [:]
             activeID = id
             Storage.setString("activeSub", id)
-            phase = .main
+            enterAfterSubscription()
         } catch {
             syncError = error.localizedDescription
         }
@@ -150,27 +158,31 @@ final class AppState: ObservableObject {
 
     var continueWatching: [HistoryItem] {
         var seen = Set<String>()
-        return history.values.filter { $0.subID == activeID && $0.kind != .live && $0.resumable }
+        return history.values.filter { $0.subID == ownerID && $0.kind != .live && $0.resumable }
             .sorted { $0.updated > $1.updated }
             .filter { seen.insert("\($0.kind.rawValue)|\($0.stream.id)").inserted }   // one card per series
             .prefix(15).map { $0 }
     }
 
     var recentChannels: [MediaItem] {
-        history.values.filter { $0.subID == activeID && $0.kind == .live }.sorted { $0.updated > $1.updated }.prefix(15).map(\.stream)
+        history.values.filter { $0.subID == ownerID && $0.kind == .live }.sorted { $0.updated > $1.updated }.prefix(15).map(\.stream)
     }
 
     // MARK: favorites
 
     func isFavorite(_ kind: MediaKind, _ item: MediaItem) -> Bool {
-        favorites.contains { $0.subID == activeID && $0.kind == kind && $0.stream.id == item.id }
+        favorites.contains { $0.subID == ownerID && $0.kind == kind && $0.stream.id == item.id }
     }
 
     func toggleFavorite(_ kind: MediaKind, _ item: MediaItem) {
-        if let i = favorites.firstIndex(where: { $0.subID == activeID && $0.kind == kind && $0.stream.id == item.id }) {
-            favorites.remove(at: i)
+        let owner = ownerID
+        if let i = favorites.firstIndex(where: { $0.subID == owner && $0.kind == kind && $0.stream.id == item.id }) {
+            let f = favorites.remove(at: i)
+            cloudPush(fav: f, deleted: true)
         } else {
-            favorites.append(FavItem(subID: activeID, kind: kind, stream: item))
+            let f = FavItem(subID: owner, kind: kind, stream: item)
+            favorites.append(f)
+            cloudPush(fav: f, deleted: false)
         }
         Storage.save("favorites", favorites)
     }
@@ -191,14 +203,14 @@ final class AppState: ObservableObject {
 
     func playMovie(_ item: MediaItem, fromStart: Bool = false) {
         guard let u = url(.movie, item) else { return }
-        let h = history[HistoryItem.key(activeID, .movie, item.id)]
+        let h = history[HistoryItem.key(ownerID, .movie, item.id)]
         playing = PlayRequest(kind: .movie, stream: item, title: Clean.title(item.name), url: u,
                               startMs: !fromStart && (h?.resumable ?? false) ? h!.position : 0)
     }
 
     func playEpisode(_ e: Episode, of series: MediaItem, all: [Episode], fromStart: Bool = false) {
         guard let u = url(.series, series, episode: e) else { return }
-        let h = history[HistoryItem.key(activeID, .series, series.id, e.id)]
+        let h = history[HistoryItem.key(ownerID, .series, series.id, e.id)]
         playing = PlayRequest(kind: .series, stream: series, title: Clean.title(series.name),
                               subtitle: "S\(e.season) E\(e.num)" + (e.title.isEmpty ? "" : " — \(e.title)"), url: u,
                               startMs: !fromStart && (h?.resumable ?? false) ? h!.position : 0, episode: e, seriesEpisodes: all)
@@ -214,15 +226,20 @@ final class AppState: ObservableObject {
     }
 
     func record(kind: MediaKind, item: MediaItem, episode: Episode? = nil, subtitle: String = "", position: Int, duration: Int) {
-        let key = HistoryItem.key(activeID, kind, item.id, episode?.id ?? "")
-        history[key] = HistoryItem(subID: activeID, kind: kind, stream: item, episodeID: episode?.id ?? "", episodeExt: episode?.ext ?? "",
-                                   subtitle: subtitle, position: position, duration: duration, updated: Date())
+        let owner = ownerID
+        let key = HistoryItem.key(owner, kind, item.id, episode?.id ?? "")
+        let h = HistoryItem(subID: owner, kind: kind, stream: item, episodeID: episode?.id ?? "", episodeExt: episode?.ext ?? "",
+                            subtitle: subtitle, position: position, duration: duration, updated: Date())
+        history[key] = h
         Storage.save("history", history)
+        cloudPush(history: h)
     }
 
     func clearHistory() {
-        history = history.filter { $0.value.subID != activeID }
+        let owner = ownerID
+        history = history.filter { $0.value.subID != owner }
         Storage.save("history", history)
+        if let p = cloudPath("data/\(viewerID)/h") { Task { await Cloud.shared.put(p, [String: Any]()) } }
     }
 
     private var titleIndexCache: [MediaKind: [String: [MediaItem]]] = [:]
@@ -382,6 +399,183 @@ final class AppState: ObservableObject {
         updateMatchPrefs { p in
             if let i = p.comps.firstIndex(of: slug) { p.comps.remove(at: i) } else { p.comps.append(slug) }
         }
+    }
+
+    // MARK: viewers
+
+    private func defaultViewers() -> [Viewer] {
+        [Viewer(id: "main", name: L.isArabic ? "أنا" : "Me", color: 0, updated: 0)]
+    }
+
+    private func loadViewers() {
+        let list = (Storage.load("viewers|\(activeID)", as: [Viewer].self) ?? defaultViewers()).filter { $0.deleted != true }
+        viewers = list.isEmpty ? defaultViewers() : list
+        let saved = Storage.string("viewer|\(activeID)") ?? "main"
+        viewerID = viewers.contains { $0.id == saved } ? saved : viewers[0].id
+    }
+
+    private func saveViewers(_ all: [Viewer]) {
+        Storage.save("viewers|\(activeID)", all)
+        viewers = all.filter { $0.deleted != true }
+    }
+
+    /// After the subscription is chosen: pick a viewer, or go straight in when there is one viewer without a PIN.
+    func enterAfterSubscription() {
+        loadViewers()
+        if viewers.count == 1 && !(viewers[0].hasPIN) {
+            chooseViewer(viewers[0])
+        } else {
+            phase = .viewers
+        }
+        Task { await cloudPullViewers() }
+    }
+
+    func chooseViewer(_ v: Viewer) {
+        viewerID = v.id
+        Storage.setString("viewer|\(activeID)", v.id)
+        byCategoryCache = [:]
+        phase = .main
+        tab = .home
+        Task { await cloudPullData() }
+    }
+
+    func pinHash(_ pin: String) -> String { Hash.sha256((subKey ?? activeID) + ":" + pin) }
+
+    func checkPIN(_ v: Viewer, _ pin: String) -> Bool { !v.hasPIN || v.pinHash == pinHash(pin) }
+
+    func saveViewer(id: String?, name: String, color: Int, pin: String?, clearPIN: Bool) {
+        var all = Storage.load("viewers|\(activeID)", as: [Viewer].self) ?? viewers
+        if all.isEmpty { all = defaultViewers() }
+        let now = Date().timeIntervalSince1970
+        if let id, let i = all.firstIndex(where: { $0.id == id }) {
+            all[i].name = name; all[i].color = color; all[i].updated = now
+            if clearPIN { all[i].pinHash = nil } else if let pin, pin.count == 4 { all[i].pinHash = pinHash(pin) }
+            cloudPush(viewer: all[i])
+        } else {
+            guard all.filter({ $0.deleted != true }).count < 5 else { return }
+            var v = Viewer(id: UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12).lowercased(), name: name, color: color, updated: now)
+            if let pin, pin.count == 4 { v.pinHash = pinHash(pin) }
+            all.append(v)
+            cloudPush(viewer: v)
+        }
+        saveViewers(all)
+    }
+
+    func deleteViewer(_ v: Viewer) {
+        var all = Storage.load("viewers|\(activeID)", as: [Viewer].self) ?? viewers
+        guard all.filter({ $0.deleted != true }).count > 1, let i = all.firstIndex(where: { $0.id == v.id }) else { return }
+        all[i].deleted = true
+        all[i].updated = Date().timeIntervalSince1970
+        cloudPush(viewer: all[i])
+        let owner = v.id == "main" ? activeID : "\(activeID)#\(v.id)"
+        history = history.filter { $0.value.subID != owner }
+        favorites.removeAll { $0.subID == owner }
+        Storage.save("history", history); Storage.save("favorites", favorites)
+        saveViewers(all)
+        if viewerID == v.id, let first = viewers.first { viewerID = first.id }
+    }
+
+    // MARK: cloud sync (same subscription on any device = same viewers and progress)
+
+    /// Hash of the subscription's own credentials: the private folder all devices with this subscription share.
+    var subKey: String? {
+        guard let sub = active else { return nil }
+        let raw = sub.kind == .xtream ? "\(Xtream.normalize(sub.server).lowercased())|\(sub.username)|\(Keychain.get("pass|\(sub.id)") ?? "")"
+                                      : (Keychain.get("m3u|\(sub.id)") ?? "")
+        guard raw.count > 3 else { return nil }
+        return String(Hash.sha256("nova:" + raw).prefix(40))
+    }
+
+    private func cloudPath(_ sub: String) -> String? {
+        guard Cloud.shared.enabled, let k = subKey else { return nil }
+        return "nova/v1/\(k)/\(sub)"
+    }
+
+    private func cloudPush(viewer v: Viewer) {
+        guard let p = cloudPath("profiles/\(Cloud.safe(v.id))") else { return }
+        let d = CloudCodec.viewer(v)
+        Task { await Cloud.shared.put(p, d) }
+    }
+
+    private func cloudPush(history h: HistoryItem) {
+        guard let p = cloudPath("data/\(Cloud.safe(viewerID))/h/\(CloudCodec.historyKey(h))") else { return }
+        let d = CloudCodec.history(h)
+        Task { await Cloud.shared.put(p, d) }
+    }
+
+    private func cloudPush(fav f: FavItem, deleted: Bool) {
+        guard let p = cloudPath("data/\(Cloud.safe(viewerID))/f/\(CloudCodec.favKey(f.kind, f.stream.id))") else { return }
+        let d = CloudCodec.fav(f, deleted: deleted)
+        Task { await Cloud.shared.put(p, d) }
+    }
+
+    /// Viewers: newest change wins on each side; deletions travel as tombstones.
+    func cloudPullViewers() async {
+        guard let p = cloudPath("profiles") else { return }
+        let sid = activeID
+        let remote = (await Cloud.shared.get(p) as? [String: Any]) ?? [:]
+        guard sid == activeID else { return }
+        var all = Storage.load("viewers|\(sid)", as: [Viewer].self) ?? viewers
+        var changed = false
+        for (id, raw) in remote {
+            guard let d = raw as? [String: Any] else { continue }
+            let rv = CloudCodec.viewer(id, d)
+            if let i = all.firstIndex(where: { $0.id == id }) {
+                if rv.updated > all[i].updated { all[i] = rv; changed = true }
+                else if rv.updated < all[i].updated { cloudPush(viewer: all[i]) }
+            } else {
+                all.append(rv); changed = true
+            }
+        }
+        for v in all where remote[v.id] == nil { cloudPush(viewer: v) }
+        if changed {
+            // "main" created on two devices: keep the newest name/PIN, which the merge above already did.
+            saveViewers(all)
+            if !viewers.contains(where: { $0.id == viewerID }), let first = viewers.first { viewerID = first.id }
+            if phase == .main, viewers.count > 1, currentViewer?.hasPIN == true, Storage.string("viewer|\(sid)") == nil { phase = .viewers }
+        }
+        cloudStatus = L.t("cloudSynced")
+    }
+
+    /// Progress and favorites of the current viewer: newest wins per title, both ways.
+    func cloudPullData() async {
+        guard let base = cloudPath("data/\(Cloud.safe(viewerID))") else { return }
+        let owner = ownerID
+        let remote = (await Cloud.shared.get(base) as? [String: Any]) ?? [:]
+        guard owner == ownerID else { return }
+        let rh = remote["h"] as? [String: Any] ?? [:]
+        var seen = Set<String>()
+        for (_, raw) in rh {
+            guard let d = raw as? [String: Any], let h = CloudCodec.history(d, owner: owner) else { continue }
+            let key = HistoryItem.key(owner, h.kind, h.stream.id, h.episodeID)
+            seen.insert(CloudCodec.historyKey(h))
+            if let local = history[key] {
+                if h.updated > local.updated { history[key] = h }
+                else if h.updated < local.updated { cloudPush(history: local) }
+            } else {
+                history[key] = h
+            }
+        }
+        for h in history.values where h.subID == owner && !seen.contains(CloudCodec.historyKey(h)) { cloudPush(history: h) }
+        let rf = remote["f"] as? [String: Any] ?? [:]
+        var remoteFav = Set<String>()
+        for (k, raw) in rf {
+            guard let d = raw as? [String: Any], let kind = MediaKind(rawValue: jstr(d["k"])) else { continue }
+            remoteFav.insert(k)
+            let id = jstr(d["i"])
+            let has = favorites.contains { $0.subID == owner && $0.kind == kind && $0.stream.id == id }
+            if (d["del"] as? Bool) == true {
+                if has { favorites.removeAll { $0.subID == owner && $0.kind == kind && $0.stream.id == id } }
+            } else if !has {
+                favorites.append(FavItem(subID: owner, kind: kind,
+                                         stream: MediaItem(id: id, name: jstr(d["n"]), logo: jstr(d["l"]), category: jstr(d["c"]), ext: jstr(d["x"]), year: jstr(d["y"]))))
+            }
+        }
+        for f in favorites where f.subID == owner && !remoteFav.contains(CloudCodec.favKey(f.kind, f.stream.id)) { cloudPush(fav: f, deleted: false) }
+        Storage.save("history", history)
+        Storage.save("favorites", favorites)
+        byCategoryCache = [:]
+        cloudStatus = L.t("cloudSynced")
     }
 
     func setShowMatches(_ v: Bool) { showMatches = v; Storage.setString("showMatches", v ? "1" : "0") }
