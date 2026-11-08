@@ -25,7 +25,7 @@ data class SubtitleTarget(val tmdbId: String, val season: Int = 0, val episode: 
     val isEpisode get() = season > 0 && episode > 0
 }
 
-enum class SubStep { SEARCHING, DOWNLOADING, TRANSLATING, ADDED, ADDED_TRANSLATED, NOT_FOUND, NO_KEY, LIMIT, AUTH, FAILED }
+enum class SubStep { SEARCHING, DOWNLOADING, TRANSLATING, ADDED, ADDED_TRANSLATED, NOT_FOUND, NO_TMDB, NO_KEY, LIMIT, AUTH, FAILED }
 
 data class SubStatus(val step: SubStep, val progress: Int = 0, val fromLang: String = "")
 
@@ -68,6 +68,19 @@ class SubtitleRepository @Inject constructor(
 
     fun clearCache() { dir.listFiles()?.forEach { it.delete() } }
 
+    // ---- Manual linking (provider has no / wrong TMDB id, e.g. Arabic titles) ----
+    fun linkedTmdb(subId: Long, kind: String, remoteId: String): String = prefs.getString("map|$subId|$kind|$remoteId", "").orEmpty()
+
+    fun link(subId: Long, kind: String, remoteId: String, tmdbId: String) {
+        prefs.edit().putString("map|$subId|$kind|$remoteId", tmdbId).apply()
+    }
+
+    suspend fun searchTitles(query: String, tv: Boolean): List<FeatureResult> {
+        val c = config()
+        if (c.apiKey.isBlank() || query.isBlank()) return emptyList()
+        return runCatching { client.features(c.apiKey, query, tv) }.getOrDefault(emptyList())
+    }
+
     private suspend fun tokenFor(c: SubtitleConfig): String? {
         if (c.username.isBlank() || c.password.isBlank()) return null
         if (token != null && System.currentTimeMillis() - tokenAt < 20 * 3_600_000L) return token
@@ -84,7 +97,7 @@ class SubtitleRepository @Inject constructor(
         cached(key)?.let { return@withContext it }
         val c = config()
         if (c.apiKey.isBlank()) { onStatus(SubStatus(SubStep.NO_KEY)); return@withContext null }
-        if (target.tmdbId.isBlank()) { onStatus(SubStatus(SubStep.NOT_FOUND)); return@withContext null }
+        if (target.tmdbId.isBlank()) { onStatus(SubStatus(SubStep.NO_TMDB)); return@withContext null }
         try {
             val tk = runCatching { tokenFor(c) }.getOrNull()
             val params = if (target.isEpisode) mapOf(
@@ -106,10 +119,12 @@ class SubtitleRepository @Inject constructor(
             }
             if (!c.translate) { onStatus(SubStatus(SubStep.NOT_FOUND)); return@withContext null }
 
-            // Translate from Turkish first, otherwise English
+            // Translate from Turkish first, then English, then any other language ML Kit can translate
             val source = client.search(c.apiKey, tk, params, "en,tr")
                 .sortedBy { if (it.language.startsWith("tr")) 0 else 1 }
                 .firstOrNull()
+                ?: client.search(c.apiKey, tk, params, ANY_LANGUAGES)
+                    .firstOrNull { com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(it.language.take(2)) != null }
             if (source == null) { onStatus(SubStatus(SubStep.NOT_FOUND)); return@withContext null }
             onStatus(SubStatus(SubStep.DOWNLOADING, fromLang = source.language))
             val cues = Srt.parse(client.download(c.apiKey, tk, host, source.fileId))
@@ -135,5 +150,9 @@ class SubtitleRepository @Inject constructor(
             onStatus(SubStatus(SubStep.FAILED))
             null
         }
+    }
+
+    companion object {
+        private const val ANY_LANGUAGES = "es,fr,de,it,pt-br,pt-pt,fa,el,ru,ro,bg,hu,pl,nl,id,ms,ur,he,bs,hr,sr,sq,az"
     }
 }

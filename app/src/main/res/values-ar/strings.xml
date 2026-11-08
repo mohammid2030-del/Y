@@ -148,6 +148,7 @@
     <string name="retry">إعادة المحاولة</string>
     <string name="save">حفظ</string>
     <string name="save_and_load">حفظ وتحميل</string>
+    <string name="search_action">بحث</string>
     <string name="search_hint">ابحث عن قنوات وأفلام ومسلسلات</string>
     <string name="search_prompt">اكتب حرفين على الأقل للبحث</string>
     <string name="season_n">الموسم %1$d</string>
@@ -191,9 +192,14 @@
     <string name="subs_configured">مضبوط</string>
     <string name="subs_downloading">جارٍ تنزيل الترجمة…</string>
     <string name="subs_failed">تعذّر جلب الترجمة حالياً</string>
+    <string name="subs_find_now">ابحث عن ترجمة</string>
     <string name="subs_limit">تم بلوغ الحد اليومي لتنزيل الترجمات. سجّل دخول OpenSubtitles من الإعدادات لزيادته.</string>
+    <string name="subs_link_hint">لا توجد نتيجة أو العنوان غلط؟ ابحث بالاسم التركي الأصلي أو الإنجليزي واختر العنوان الصحيح.</string>
+    <string name="subs_linked">تم الربط بـ «%1$s». جارٍ البحث عن ترجمة…</string>
     <string name="subs_no_key">أضف مفتاح OpenSubtitles من الإعدادات لجلب الترجمات</string>
-    <string name="subs_not_found">لا توجد ترجمة متاحة لهذا العنوان</string>
+    <string name="subs_no_titles">لا توجد نتائج مطابقة</string>
+    <string name="subs_no_tmdb">مزوّدك لا يعرّف هذا العنوان. اربطه باسمه الإنجليزي أو التركي من زر الترجمة.</string>
+    <string name="subs_not_found">لا توجد ترجمة لهذه الحلقة في OpenSubtitles بأي لغة</string>
     <string name="subs_optional">اختياري — يرفع حد التنزيل اليومي</string>
     <string name="subs_password">كلمة مرور OpenSubtitles</string>
     <string name="subs_searching">جارٍ البحث عن ترجمة عربية…</string>

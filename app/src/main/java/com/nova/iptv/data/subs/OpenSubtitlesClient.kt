@@ -13,6 +13,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class FeatureResult(val title: String, val year: String, val tmdbId: String, val type: String)
+
 data class FoundSubtitle(val fileId: Long, val language: String, val machine: Boolean, val downloads: Long)
 
 /** OpenSubtitles.com REST API v1 (user supplies their own free API key). */
@@ -71,6 +73,26 @@ class OpenSubtitlesClient @Inject constructor(private val http: OkHttpClient) {
                 )
             }.sortedWith(compareBy<FoundSubtitle> { it.machine }.thenByDescending { it.downloads })
         }
+
+    /** Title search (English / original / Turkish names) to find the TMDB id of a show or movie. */
+    suspend fun features(apiKey: String, query: String, tv: Boolean): List<FeatureResult> = withContext(Dispatchers.IO) {
+        val q = java.net.URLEncoder.encode(query.trim().lowercase(), "UTF-8").replace("+", "%20")
+        val url = "$BASE/features?query=$q&type=${if (tv) "tvshow" else "movie"}"
+        val o = execute(request(url, apiKey, null).get().build())
+        val data = o.getAsJsonArray("data") ?: return@withContext emptyList()
+        data.mapNotNull { el ->
+            val a = el.asJsonObject.getAsJsonObject("attributes") ?: return@mapNotNull null
+            fun str(k: String) = a.get(k)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            val tmdb = str("tmdb_id").filter { it.isDigit() }
+            if (tmdb.isEmpty()) return@mapNotNull null
+            FeatureResult(
+                title = str("title").ifBlank { str("original_title") },
+                year = str("year"),
+                tmdbId = tmdb,
+                type = str("feature_type"),
+            )
+        }.distinctBy { it.tmdbId }.take(15)
+    }
 
     /** Downloads the SRT text of a file. */
     suspend fun download(apiKey: String, token: String?, host: String, fileId: Long): String = withContext(Dispatchers.IO) {

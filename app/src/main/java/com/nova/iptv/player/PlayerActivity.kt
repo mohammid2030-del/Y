@@ -94,6 +94,11 @@ class PlayerUiState {
     var skipIsRecap by mutableStateOf(false)
     var subtitleNote by mutableStateOf<String?>(null)
     var subtitleBusy by mutableStateOf(false)
+    var subsDialog by mutableStateOf(false)
+    var subsStatus by mutableStateOf("")
+    var linkResults by mutableStateOf<List<com.nova.iptv.data.subs.FeatureResult>>(emptyList())
+    var linkSearching by mutableStateOf(false)
+    var linkedTitle by mutableStateOf("")
     var autoNext by mutableStateOf(true)
     var introAdjustVisible by mutableStateOf(false)
     var introLearned by mutableStateOf(false)
@@ -268,7 +273,10 @@ class PlayerActivity : AppCompatActivity() {
                         onSelectQuality = { selectQuality(it) },
                         onZap = { zap(it) },
                         onSkipIntro = { skipIntro() },
-                        onArabicSubs = { requestArabicSubtitles(manual = true) },
+                        onArabicSubs = { ui.subsDialog = true },
+                        onFindSubs = { requestArabicSubtitles(manual = true) },
+                        onSearchTitle = { q -> searchTitle(q) },
+                        onLinkTitle = { f -> linkTitle(f) },
                         onPlayNext = { playNext() },
                         onDismissNext = { dismissUpNext() },
                         onAdjustIntro = { adjustIntro(it) },
@@ -540,11 +548,16 @@ class PlayerActivity : AppCompatActivity() {
                     delay(3_500) // let the stream expose its own text tracks first
                     if (hasArabicTrack()) return@launch
                 }
+                val linked = subtitleRepo.linkedTmdb(req.subscriptionId, req.type, req.remoteId)
                 val target = if (req.type == ContentType.SERIES) {
                     val ctx = content.episodeContext(req.subscriptionId, req.remoteId, req.episodeId)
-                    com.nova.iptv.data.subs.SubtitleTarget(ctx?.tmdbId.orEmpty(), ctx?.current?.season ?: 0, ctx?.current?.episodeNum ?: 0)
+                    com.nova.iptv.data.subs.SubtitleTarget(
+                        linked.ifBlank { ctx?.tmdbId.orEmpty() },
+                        ctx?.current?.season ?: 0,
+                        ctx?.current?.episodeNum ?: 0,
+                    )
                 } else {
-                    com.nova.iptv.data.subs.SubtitleTarget(content.movieTmdbId(req.subscriptionId, req.remoteId))
+                    com.nova.iptv.data.subs.SubtitleTarget(linked.ifBlank { content.movieTmdbId(req.subscriptionId, req.remoteId) })
                 }
                 val file = subtitleRepo.fetchArabic(subtitleKey(req), target) { st ->
                     lifecycleScope.launch { showSubStatus(st, manual) }
@@ -557,19 +570,47 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun showSubStatus(st: com.nova.iptv.data.subs.SubStatus, manual: Boolean) {
-        val lang = if (st.fromLang.startsWith("tr")) getString(R.string.lang_turkish) else getString(R.string.lang_english_name)
-        when (st.step) {
-            com.nova.iptv.data.subs.SubStep.SEARCHING -> note(getString(R.string.subs_searching), sticky = true)
-            com.nova.iptv.data.subs.SubStep.DOWNLOADING -> note(getString(R.string.subs_downloading), sticky = true)
-            com.nova.iptv.data.subs.SubStep.TRANSLATING -> note(getString(R.string.subs_translating, lang, st.progress), sticky = true)
-            com.nova.iptv.data.subs.SubStep.ADDED -> note(getString(R.string.subs_added))
-            com.nova.iptv.data.subs.SubStep.ADDED_TRANSLATED -> note(getString(R.string.subs_added_translated, lang))
-            com.nova.iptv.data.subs.SubStep.NOT_FOUND -> if (manual) note(getString(R.string.subs_not_found)) else note(null)
-            com.nova.iptv.data.subs.SubStep.NO_KEY -> note(getString(R.string.subs_no_key))
-            com.nova.iptv.data.subs.SubStep.LIMIT -> note(getString(R.string.subs_limit))
-            com.nova.iptv.data.subs.SubStep.AUTH -> note(getString(R.string.subs_auth))
-            com.nova.iptv.data.subs.SubStep.FAILED -> if (manual) note(getString(R.string.subs_failed)) else note(null)
+        val lang = when {
+            st.fromLang.startsWith("tr") -> getString(R.string.lang_turkish)
+            st.fromLang.startsWith("en") -> getString(R.string.lang_english_name)
+            else -> java.util.Locale(st.fromLang.take(2)).getDisplayLanguage(java.util.Locale("ar"))
         }
+        val text = when (st.step) {
+            com.nova.iptv.data.subs.SubStep.SEARCHING -> getString(R.string.subs_searching)
+            com.nova.iptv.data.subs.SubStep.DOWNLOADING -> getString(R.string.subs_downloading)
+            com.nova.iptv.data.subs.SubStep.TRANSLATING -> getString(R.string.subs_translating, lang, st.progress)
+            com.nova.iptv.data.subs.SubStep.ADDED -> getString(R.string.subs_added)
+            com.nova.iptv.data.subs.SubStep.ADDED_TRANSLATED -> getString(R.string.subs_added_translated, lang)
+            com.nova.iptv.data.subs.SubStep.NOT_FOUND -> getString(R.string.subs_not_found)
+            com.nova.iptv.data.subs.SubStep.NO_TMDB -> getString(R.string.subs_no_tmdb)
+            com.nova.iptv.data.subs.SubStep.NO_KEY -> getString(R.string.subs_no_key)
+            com.nova.iptv.data.subs.SubStep.LIMIT -> getString(R.string.subs_limit)
+            com.nova.iptv.data.subs.SubStep.AUTH -> getString(R.string.subs_auth)
+            com.nova.iptv.data.subs.SubStep.FAILED -> getString(R.string.subs_failed)
+        }
+        ui.subsStatus = text
+        val busy = st.step == com.nova.iptv.data.subs.SubStep.SEARCHING ||
+            st.step == com.nova.iptv.data.subs.SubStep.DOWNLOADING ||
+            st.step == com.nova.iptv.data.subs.SubStep.TRANSLATING
+        if (st.step == com.nova.iptv.data.subs.SubStep.FAILED && !manual) note(null) else note(text, sticky = busy)
+    }
+
+    private fun searchTitle(query: String) {
+        lifecycleScope.launch {
+            ui.linkSearching = true
+            ui.linkResults = subtitleRepo.searchTitles(query, tv = request.type == ContentType.SERIES)
+            if (ui.linkResults.isEmpty()) ui.subsStatus = getString(R.string.subs_no_titles)
+            ui.linkSearching = false
+        }
+    }
+
+    private fun linkTitle(f: com.nova.iptv.data.subs.FeatureResult) {
+        val req = request
+        subtitleRepo.link(req.subscriptionId, req.type, req.remoteId, f.tmdbId)
+        ui.linkedTitle = f.title
+        ui.linkResults = emptyList()
+        ui.subsStatus = getString(R.string.subs_linked, f.title)
+        requestArabicSubtitles(manual = true)
     }
 
     private fun attachSubtitle(file: java.io.File) {

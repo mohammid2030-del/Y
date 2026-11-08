@@ -149,6 +149,7 @@
     <string name="retry">Retry</string>
     <string name="save">Save</string>
     <string name="save_and_load">Save &amp; load</string>
+    <string name="search_action">Search</string>
     <string name="search_hint">Search channels, movies, series</string>
     <string name="search_prompt">Type at least 2 characters to search</string>
     <string name="season_n">Season %1$d</string>
@@ -192,9 +193,14 @@
     <string name="subs_configured">Configured</string>
     <string name="subs_downloading">Downloading subtitles…</string>
     <string name="subs_failed">Couldn\'t load subtitles right now</string>
+    <string name="subs_find_now">Find subtitles</string>
     <string name="subs_limit">Daily subtitle download limit reached. Sign in to OpenSubtitles in Settings for more.</string>
+    <string name="subs_link_hint">Wrong or missing match? Search the original (Turkish) or English name and pick the right title.</string>
+    <string name="subs_linked">Linked to “%1$s”. Searching for subtitles…</string>
     <string name="subs_no_key">Add your OpenSubtitles API key in Settings to get subtitles</string>
-    <string name="subs_not_found">No subtitles found for this title</string>
+    <string name="subs_no_titles">No matching titles found</string>
+    <string name="subs_no_tmdb">Your provider doesn\'t identify this title. Link it by its English or Turkish name from the subtitles button.</string>
+    <string name="subs_not_found">No subtitles in any language were found for this episode on OpenSubtitles</string>
     <string name="subs_optional">Optional — raises the daily download limit</string>
     <string name="subs_password">OpenSubtitles password</string>
     <string name="subs_searching">Looking for Arabic subtitles…</string>

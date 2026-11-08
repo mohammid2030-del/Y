@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -50,6 +51,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,6 +83,9 @@ class PlayerActions(
     val onZap: (Int) -> Unit,
     val onSkipIntro: () -> Unit = {},
     val onArabicSubs: () -> Unit = {},
+    val onFindSubs: () -> Unit = {},
+    val onSearchTitle: (String) -> Unit = {},
+    val onLinkTitle: (com.nova.iptv.data.subs.FeatureResult) -> Unit = {},
     val onPlayNext: () -> Unit = {},
     val onDismissNext: () -> Unit = {},
     val onAdjustIntro: (Long) -> Unit = {},
@@ -212,6 +218,10 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
                 Spacer(Modifier.width(8.dp))
                 Text(state.subtitleNote.orEmpty(), color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
+        }
+
+        if (state.subsDialog) {
+            SubtitleDialog(state, actions)
         }
 
         if (state.qualityDialog) {
@@ -489,4 +499,64 @@ private fun UpNextCard(next: UpNextUi, seconds: Int, total: Int, autoNext: Boole
             }
         }
     }
+}
+
+
+@Composable
+private fun SubtitleDialog(state: PlayerUiState, actions: PlayerActions) {
+    var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(state.title) }
+    AlertDialog(
+        onDismissRequest = { state.subsDialog = false },
+        title = { Text(stringResource(R.string.arabic_subtitles)) },
+        text = {
+            Column {
+                if (state.subsStatus.isNotBlank()) {
+                    Text(state.subsStatus, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                }
+                Text(
+                    stringResource(R.string.subs_link_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        placeholder = { Text("Medcezir") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    if (state.linkSearching) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        TextButton(onClick = { actions.onSearchTitle(query) }) { Text(stringResource(R.string.search_action)) }
+                    }
+                }
+                if (state.linkResults.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                        items(state.linkResults, key = { it.tmdbId }) { f ->
+                            Text(
+                                f.title + if (f.year.isNotBlank()) " (${f.year})" else "",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { actions.onLinkTitle(f) }
+                                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { actions.onFindSubs(); state.subsDialog = false }, enabled = !state.subtitleBusy) {
+                Text(stringResource(R.string.subs_find_now))
+            }
+        },
+        dismissButton = { TextButton(onClick = { state.subsDialog = false }) { Text(stringResource(R.string.close)) } },
+    )
 }
