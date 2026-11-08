@@ -17,11 +17,20 @@ import javax.inject.Singleton
 
 enum class MatchState { PRE, LIVE, HALFTIME, POST, POSTPONED }
 
-data class MatchTeam(val name: String, val short: String, val logo: String, val score: String)
+data class MatchTeam(
+    val name: String,
+    val short: String,
+    val logo: String,
+    val score: String,
+    /** Club colours as ARGB (0 when unknown). */
+    val color: Long = 0,
+    val altColor: Long = 0,
+)
 
 data class Match(
     val id: String,
     val league: String,
+    val leagueSlug: String,
     val leagueLogo: String,
     val priority: Int,
     val home: MatchTeam,
@@ -120,6 +129,7 @@ class MatchesRepository @Inject constructor(private val fetcher: HttpFetcher) {
         return Match(
             id = e.str("id").ifBlank { e.str("uid") },
             league = leagueName,
+            leagueSlug = lg.slug,
             leagueLogo = leagueLogo,
             priority = lg.priority,
             home = team(home, state),
@@ -139,7 +149,15 @@ class MatchesRepository @Inject constructor(private val fetcher: HttpFetcher) {
             short = t?.str("shortDisplayName")?.ifBlank { null } ?: t?.str("abbreviation").orEmpty(),
             logo = logo,
             score = if (state == MatchState.PRE || state == MatchState.POSTPONED) "" else o.str("score"),
+            color = hex(t?.str("color").orEmpty()),
+            altColor = hex(t?.str("alternateColor").orEmpty()),
         )
+    }
+
+    private fun hex(s: String): Long {
+        val h = s.trim().removePrefix("#")
+        if (h.length != 6) return 0
+        return h.toLongOrNull(16)?.let { 0xFF000000L or it } ?: 0
     }
 
     private fun parseDate(s: String): Long {

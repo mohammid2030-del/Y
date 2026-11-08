@@ -13,6 +13,7 @@
     <string name="autoplay_next">Autoplay next episode</string>
     <string name="autoplay_next_desc">Starts the next episode when the current one ends</string>
     <string name="back">Back</string>
+    <string name="best_match">Best match</string>
     <string name="browse_live">Browse live channels</string>
     <string name="buffer_size">Buffer size</string>
     <string name="cancel">Cancel</string>
@@ -70,7 +71,9 @@
     <string name="field_server">Server URL</string>
     <string name="field_user_agent">Custom User-Agent (optional)</string>
     <string name="field_username">Username</string>
+    <string name="finding_channel">Finding the channel…</string>
     <string name="get_started">Get started</string>
+    <string name="guide_match">In the guide</string>
     <string name="hidden_categories">Hidden categories</string>
     <string name="hidden_categories_desc">Hidden categories disappear from lists, search and the guide. Protected by your PIN if set.</string>
     <string name="hide_advanced">Hide advanced options</string>
@@ -129,6 +132,7 @@
     <string name="no_subscription">No subscription yet. Add your Xtream Codes or M3U subscription to start watching.</string>
     <string name="now">Now</string>
     <string name="ok">OK</string>
+    <string name="opens_in">Channel opens in %1$s</string>
     <string name="parental_control">Parental control</string>
     <string name="passphrase">Passphrase (min. 6 characters)</string>
     <string name="perr_drm">This stream is DRM-protected and cannot be played.</string>
@@ -139,6 +143,7 @@
     <string name="perr_source">The stream could not be opened.</string>
     <string name="perr_unknown">Playback failed.</string>
     <string name="perr_unsupported">This video format is not supported by your device.</string>
+    <string name="pick_channel">Choose the channel</string>
     <string name="pick_file">Choose M3U file</string>
     <string name="pin_desc">Required to manage hidden categories</string>
     <string name="pip">Picture in picture</string>

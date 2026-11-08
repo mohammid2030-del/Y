@@ -12,6 +12,7 @@
     <string name="autoplay_next">تشغيل الحلقة التالية تلقائياً</string>
     <string name="autoplay_next_desc">يبدأ الحلقة التالية عند انتهاء الحالية</string>
     <string name="back">رجوع</string>
+    <string name="best_match">الأنسب</string>
     <string name="browse_live">تصفّح القنوات المباشرة</string>
     <string name="buffer_size">حجم التخزين المؤقت</string>
     <string name="cancel">إلغاء</string>
@@ -69,7 +70,9 @@
     <string name="field_server">رابط الخادم</string>
     <string name="field_user_agent">User-Agent مخصص (اختياري)</string>
     <string name="field_username">اسم المستخدم</string>
+    <string name="finding_channel">جارٍ البحث عن القناة…</string>
     <string name="get_started">ابدأ الآن</string>
+    <string name="guide_match">في الدليل</string>
     <string name="hidden_categories">التصنيفات المخفية</string>
     <string name="hidden_categories_desc">تختفي التصنيفات المخفية من القوائم والبحث والدليل، ومحمية برمز PIN إن وُجد.</string>
     <string name="hide_advanced">إخفاء الخيارات المتقدمة</string>
@@ -128,6 +131,7 @@
     <string name="no_subscription">لا يوجد اشتراك بعد. أضف اشتراك Xtream Codes أو M3U لبدء المشاهدة.</string>
     <string name="now">الآن</string>
     <string name="ok">موافق</string>
+    <string name="opens_in">تفتح القناة بعد %1$s</string>
     <string name="parental_control">الرقابة الأبوية</string>
     <string name="passphrase">عبارة المرور (6 أحرف على الأقل)</string>
     <string name="perr_drm">هذا البث محمي بنظام DRM ولا يمكن تشغيله.</string>
@@ -138,6 +142,7 @@
     <string name="perr_source">تعذر فتح البث.</string>
     <string name="perr_unknown">فشل التشغيل.</string>
     <string name="perr_unsupported">صيغة الفيديو هذه غير مدعومة على جهازك.</string>
+    <string name="pick_channel">اختر القناة</string>
     <string name="pick_file">اختر ملف M3U</string>
     <string name="pin_desc">مطلوب لإدارة التصنيفات المخفية</string>
     <string name="pip">صورة داخل صورة</string>
