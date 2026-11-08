@@ -15,7 +15,7 @@
     fav: [],           // [{sub,type,id,name,logo,item}]
     history: {},       // key -> {sub,type,id,ep,title,subtitle,logo,ext,pos,dur,t,item}
     hidden: {},        // "type|catId" -> true (active subscription)
-    ui: { section: 'live', cat: { live: '*all', movie: '*all', series: '*all' }, focusKey: null, search: { q: '', type: '' } }
+    ui: { section: 'home', cat: { live: '*all', movie: '*all', series: '*all' }, focusKey: null, search: { q: '', type: '' } }
   };
 
   let actions = {};
@@ -155,10 +155,11 @@
     S.subs = await Store.get('subs', []);
     S.fav = await Store.get('fav', []);
     S.history = await Store.get('history', {});
+    try { await Tmdb.init(); await Matches.init(); } catch (e) { /* optional features */ }
     document.addEventListener('visibilitychange', onVisibility);
     if (!S.settings.onboarded) return showWelcome();
     if (!S.subs.length) return showAddSub();
-    await activate(S.settings.activeSub || S.subs[0].id);
+    showProfiles();
   }
 
   async function activate(subId) {
@@ -398,11 +399,14 @@
   function continueList(type) {
     return Object.keys(S.history).map(function (k) { return S.history[k]; }).filter(function (h) {
       return h.sub === S.sub.id && h.type === type && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95);
-    }).sort(function (a, b) { return b.t - a.t; }).slice(0, 20);
+    }).sort(function (a, b) { return b.t - a.t; }).filter(function (h, i, arr) {
+      // one card per series: its most recent episode
+      return arr.findIndex(function (x) { return x.type === h.type && x.id === h.id; }) === i;
+    }).slice(0, 20);
   }
 
   /** Renders a long list incrementally: only `batch` items at a time, more when focus nears the end. */
-  function windowed(container, list, renderItem, bind, batch) {
+  function windowed(container, list, renderItem, bind, batch, after) {
     batch = batch || 60;
     let rendered = 0;
     function more() {
@@ -419,6 +423,7 @@
         n.onfocusnav = function () { if (idx >= rendered - 12) more(); if (bind) bind(n, list[idx], idx); };
       });
       rendered = end;
+      if (after) after(nodes);
     }
     more();
     return { more: more, get rendered() { return rendered; } };
@@ -426,7 +431,7 @@
 
   // ------------------------------------------------------------------ home
   const SECTIONS = [
-    { id: 'live', icon: '📺' }, { id: 'movie', icon: '🎬', label: 'movies' }, { id: 'series', icon: '🎞', label: 'series' },
+    { id: 'home', icon: '⌂' }, { id: 'live', icon: '📺' }, { id: 'movie', icon: '🎬', label: 'movies' }, { id: 'series', icon: '🎞', label: 'series' },
     { id: 'favorites', icon: '★' }, { id: 'search', icon: '🔍' }, { id: 'settings', icon: '⚙' }
   ];
 
@@ -434,16 +439,18 @@
     if (section) S.ui.section = section;
     setScreen('home', function () {
       app.innerHTML = `<div class="home">
-        <nav class="sidebar" data-group>
+        <main id="content" class="content"></main>
+        <div class="topscrim"></div>
+        <nav class="topnav" data-group>
           <div class="logo small"></div>
-          ${SECTIONS.map(function (s) {
+          <div class="pill">${SECTIONS.map(function (s) {
             return `<button data-f data-action="section" data-sec="${s.id}" class="side-item${S.ui.section === s.id ? ' active' : ''}">
               <span class="ico">${s.icon}</span><span class="txt">${esc(t(s.label || s.id))}</span></button>`;
-          }).join('')}
-          <div class="sub-name">${esc(S.sub ? S.sub.name : '')}</div>
+          }).join('')}</div>
+          <button data-f data-action="profiles" class="profile-btn" title="${esc(t('switchProfile'))}">${esc((S.sub && S.sub.name || 'N').trim().charAt(0).toUpperCase())}</button>
         </nav>
-        <main id="content" class="content"></main>
       </div>`;
+      actions.profiles = function () { showProfiles(); };
       actions.section = function (el) {
         const sec = el.getAttribute('data-sec');
         if (sec === S.ui.section) return;
@@ -454,7 +461,7 @@
       renderSection(true);
     }, {
       back: function () {
-        const inSidebar = Nav.current && Nav.current.closest('.sidebar');
+        const inSidebar = Nav.current && Nav.current.closest('.topnav');
         if (!inSidebar) { Nav.focus($('.side-item.active')); return; }
         exitApp();
       }
@@ -466,7 +473,8 @@
     c.innerHTML = '';
     c.className = 'content sec-' + S.ui.section;
     const sec = S.ui.section;
-    if (sec === 'live') renderLive(c);
+    if (sec === 'home') renderDiscover(c);
+    else if (sec === 'live') renderLive(c);
     else if (sec === 'movie' || sec === 'series') renderVod(c, sec);
     else if (sec === 'favorites') renderFavorites(c);
     else if (sec === 'search') renderSearch(c);
@@ -589,9 +597,7 @@
       <div class="vod-scroll" id="vod-scroll">
         ${cont.length ? `<h3 class="row-title">${esc(t('continueWatching'))}</h3><div class="cont-row" data-group>` + cont.map(function (h, i) {
           const pct = h.dur ? Math.round(h.pos / h.dur * 100) : 0;
-          return `<button data-f data-action="resume" data-h="${esc(hkey(h.type, h.id, h.ep))}" class="poster wide" data-key="cont:${i}">
-            ${img(h.logo)}<span class="ptitle">${esc(h.title)}</span><span class="psub">${esc(h.subtitle || '')}</span>
-            <span class="bar"><span style="width:${pct}%"></span></span></button>`;
+          return contCard(h, i);
         }).join('') + '</div>' : ''}
         <div class="grid" id="vod-grid" data-group></div>
       </div>
@@ -620,10 +626,12 @@
     windowed(grid, list, function (it, i) {
       return `<button data-f data-i="${i}" data-key="${type}:${esc(it.id)}" data-action="open" class="poster">
         <span class="pimg">${img(it.logo)}${isFav(type, it.id) ? '<span class="star">★</span>' : ''}</span>
-        <span class="ptitle">${esc(it.name)}</span>
+        <span class="ptitle">${esc(Clean.title(it.name))}</span>
         <span class="psub">${esc([it.year, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join('  '))}</span>
       </button>`;
-    }, function (el, it) { S.ui.focusKey = type + ':' + it.id; }, 48);
+    }, function (el, it) { S.ui.focusKey = type + ':' + it.id; }, 48, function (nodes) {
+      nodes.forEach(function (n) { localize(n, type, list[parseInt(n.getAttribute('data-i'), 10)]); });
+    });
   }
 
   function resumeHistory(h) {
@@ -636,44 +644,67 @@
       app.innerHTML = detailHtml(item, null);
       bindMovie(item, null);
     }, { back: function () { showHome(); } });
-    const info = await Api.vodInfo(S.sub, item.id);
-    if (screen.name === 'detail' && info) {
+    let info = await Api.vodInfo(S.sub, item.id);
+    function redraw() {
+      if (screen.name !== 'detail') return;
       const focusAction = Nav.current && Nav.current.getAttribute('data-action');
       app.innerHTML = detailHtml(item, info);
       bindMovie(item, info);
       const again = focusAction && $('[data-action="' + focusAction + '"]');
       if (again) Nav.focus(again);
     }
+    if (info) redraw();
+    const tm = await Tmdb.details('movie', info && info.tmdb, item.name, item.year);
+    if (tm) { info = Object.assign({}, info || {}, { tm: tm }); redraw(); }
   }
 
   function detailHtml(item, info) {
     const h = S.history[hkey('movie', item.id)];
     const canResume = h && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95);
-    const meta = [item.year || (info && info.year), info && info.duration, info && info.genre].filter(Boolean).join(' • ');
-    const backdrop = (info && info.backdrop) || '';
+    const tm = info && info.tm;
+    const meta = [(tm && tm.year) || item.year || (info && info.year), tm && tm.runtime ? t('minutes', tm.runtime) : info && info.duration,
+      !tm && info && info.genre].filter(Boolean).join(' • ');
+    const backdrop = (tm && tm.backdrop) || (info && info.backdrop) || '';
+    const rating = (tm && tm.rating) || item.rating || (info && info.rating);
     return `<div class="detail">
       ${backdrop ? `<div class="backdrop" style="background-image:url('${esc(backdrop)}')"></div>` : ''}
       <div class="detail-body">
-        <div class="dposter">${img((info && info.image) || item.logo)}</div>
+        <div class="dposter">${img((tm && tm.poster) || (info && info.image) || item.logo)}</div>
         <div class="dinfo">
-          <h1>${esc(item.name)}</h1>
-          <div class="meta">${item.rating || (info && info.rating) ? `<span class="badge g">★ ${esc(item.rating || info.rating)}</span>` : ''} ${esc(meta)}</div>
+          ${titleBlock(tm, item.name)}
+          <div class="meta">${rating ? `<span class="badge g">★ ${esc(rating)}</span>` : ''}${tm && tm.votes ? `<span class="muted small">TMDB · ${esc(t('votes', tm.votes))}</span>` : ''} ${esc(meta)}</div>
+          ${tm && tm.genres.length ? `<div class="genres">${tm.genres.slice(0, 4).map(function (g) { return `<span class="chip">${esc(g)}</span>`; }).join('')}</div>` : ''}
           <div class="row" data-group>
             <button data-f data-autofocus data-action="play" class="btn primary">▶ ${esc(t(canResume ? 'resume' : 'play'))}</button>
             ${canResume ? `<button data-f data-action="restart" class="btn">↺ ${esc(t('startOver'))}</button>` : ''}
+            ${tm && tm.trailer ? `<button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>` : ''}
             <button data-f data-action="fav" class="btn">${isFav('movie', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
           </div>
           ${canResume && h.dur ? `<div class="mini-progress wide"><div style="width:${Math.round(h.pos / h.dur * 100)}%"></div></div>` : ''}
-          <p class="plot">${esc((info && info.plot) || '')}</p>
-          ${info && info.cast ? `<p class="muted">${esc(info.cast)}</p>` : ''}
-          ${info && info.director ? `<p class="muted">${esc(info.director)}</p>` : ''}
+          ${tm && tm.tagline ? `<p class="tagline-q">“${esc(tm.tagline)}”</p>` : ''}
+          <p class="plot">${esc((tm && tm.overview) || (info && info.plot) || '')}</p>
+          ${tm && tm.cast.length ? castRow(tm.cast) : info && info.cast ? `<p class="muted">${esc(info.cast)}</p>` : ''}
+          ${(tm && tm.creators.length) || (info && info.director) ? `<p class="muted">${esc(t('director'))}: ${esc((tm && tm.creators.join('، ')) || info.director)}</p>` : ''}
         </div>
       </div></div>`;
+  }
+
+  function titleBlock(tm, name) {
+    const title = (tm && tm.title) || Clean.title(name);
+    if (tm && tm.logo) return `<div class="tlogo"><img src="${esc(tm.logo)}" onerror="this.parentNode.outerHTML='<h1>${esc(title).replace(/'/g, '&#39;')}</h1>'"></div><div class="muted">${esc(title)}</div>`;
+    return `<h1>${esc(title)}</h1>${tm && tm.original && tm.original !== title ? `<div class="muted">${esc(tm.original)}</div>` : ''}`;
+  }
+
+  function castRow(cast) {
+    return `<div class="cast-row">${cast.slice(0, 8).map(function (p) {
+      return `<div class="person"><div class="pphoto">${p.photo ? `<img src="${esc(p.photo)}">` : '👤'}</div><b>${esc(p.name)}</b><span class="muted">${esc(p.role)}</span></div>`;
+    }).join('')}</div>`;
   }
 
   function bindMovie(item, info) {
     actions.play = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: (info && info.image) || item.logo }); };
     actions.restart = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: item.logo, fromStart: true }); };
+    actions.trailer = function () { if (info && info.tm && info.tm.trailer) showTrailer(info.tm.trailer); };
     actions.fav = function (el) {
       const added = toggleFav('movie', item);
       el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
@@ -682,7 +713,7 @@
   }
 
   async function showSeries(item, keepSeason) {
-    let info = null, season = keepSeason || null, error = null;
+    let info = null, season = keepSeason || null, error = null, tm = null, tmEps = {}, tmSeason = null;
     function render() {
       setScreen('detail', function () {
         const seasons = info ? Object.keys(info.seasons).map(Number).sort(function (a, b) { return a - b; }) : [];
@@ -691,17 +722,27 @@
         const last = Object.keys(S.history).map(function (k) { return S.history[k]; })
           .filter(function (h) { return h.sub === S.sub.id && h.type === 'series' && h.id === item.id; })
           .sort(function (a, b) { return b.t - a.t; })[0];
+        if (tm && season != null && tmSeason !== season) {
+          tmSeason = season;
+          Tmdb.season(tm.id, season).then(function (m) { tmEps = m; if (screen.name === 'detail' && tmSeason === season) render(); });
+        }
+        const bd = (tm && tm.backdrop) || (info && info.backdrop) || '';
+        const rating = (tm && tm.rating) || item.rating || (info && info.rating);
         app.innerHTML = `<div class="detail series">
+          ${bd ? `<div class="backdrop" style="background-image:url('${esc(bd)}')"></div>` : ''}
           <div class="detail-body">
-            <div class="dposter">${img((info && info.cover) || item.logo)}</div>
+            <div class="dposter">${img((tm && tm.poster) || (info && info.cover) || item.logo)}</div>
             <div class="dinfo">
-              <h1>${esc(item.name)}</h1>
-              <div class="meta">${esc([item.year || (info && info.year), info && info.genre].filter(Boolean).join(' • '))}</div>
+              ${titleBlock(tm, item.name)}
+              <div class="meta">${rating ? `<span class="badge g">★ ${esc(rating)}</span>` : ''} ${esc([(tm && tm.year) || item.year || (info && info.year),
+                tm && tm.seasons ? t('seasonsCount', tm.seasons) : '', !tm && info && info.genre].filter(Boolean).join(' • '))}</div>
+              ${tm && tm.genres.length ? `<div class="genres">${tm.genres.slice(0, 4).map(function (g) { return `<span class="chip">${esc(g)}</span>`; }).join('')}</div>` : ''}
               <div class="row" data-group>
                 ${last ? `<button data-f data-autofocus data-action="cont" class="btn primary">▶ ${esc(t('resume'))} ${esc((last.subtitle || '').split(' —')[0])}</button>` : ''}
+                ${tm && tm.trailer ? `<button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>` : ''}
                 <button data-f data-action="fav" class="btn">${isFav('series', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
               </div>
-              <p class="plot short">${esc((info && info.plot) || item.plot || '')}</p>
+              <p class="plot short">${esc((tm && tm.overview) || (info && info.plot) || item.plot || '')}</p>
             </div>
           </div>
           ${!info && !error ? '<div class="spinner"></div>' : ''}
@@ -712,11 +753,12 @@
           <div class="episodes" data-group>${eps.length ? eps.map(function (e, i) {
             const h = S.history[hkey('series', item.id, e.id)];
             const pct = h && h.dur ? Math.round(h.pos / h.dur * 100) : 0;
+            const te = tmEps[e.num] || {};
             return `<button data-f data-action="ep" data-i="${i}" class="episode"${!last && i === 0 ? ' data-autofocus' : ''}>
-              <span class="eimg">${img(e.image || item.logo)}${pct ? `<span class="bar"><span style="width:${pct}%"></span></span>` : ''}</span>
-              <span class="etxt"><b>${e.num}. ${esc(e.title || t('episode', e.num))}</b>
+              <span class="eimg">${img(te.still || e.image || item.logo)}${pct ? `<span class="bar"><span style="width:${pct}%"></span></span>` : ''}</span>
+              <span class="etxt"><b>${e.num}. ${esc(te.name || e.title || t('episode', e.num))}</b>
               <span class="muted">${e.duration ? esc(t('minutes', Math.round(e.duration / 60))) : ''}</span>
-              <span class="edesc">${esc(e.plot)}</span></span></button>`;
+              <span class="edesc">${esc(te.overview || e.plot)}</span></span></button>`;
           }).join('') : `<div class="empty">${esc(t('noEpisodes'))}</div>`}</div>` : ''}
         </div>`;
         actions.season = function (el) { season = parseInt(el.getAttribute('data-s'), 10); render(); const s = $('.season-row .active'); if (s) Nav.focus(s); };
@@ -734,13 +776,18 @@
           el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
         };
         actions.reload = load;
+        actions.trailer = function () { if (tm && tm.trailer) showTrailer(tm.trailer); };
         Nav.focusFirst();
       }, { back: function () { showHome(); } });
     }
     function load() {
       error = null; info = null; render();
       if (S.sub.type !== 'xtream') { error = { kind: 'unknown' }; render(); return; }
-      Api.seriesInfo(S.sub, item.id).then(function (i) { info = i; if (screen.name === 'detail') render(); },
+      Api.seriesInfo(S.sub, item.id).then(function (i) {
+        info = i;
+        if (screen.name === 'detail') render();
+        Tmdb.details('series', i.tmdb, item.name, item.year).then(function (x) { if (x) { tm = x; if (screen.name === 'detail') render(); } });
+      },
         function (e) { error = e; if (screen.name === 'detail') render(); });
     }
     load();
@@ -883,6 +930,13 @@
       <h3 class="row-title">${esc(t('settings'))}</h3>
       <button data-f data-action="lang" class="set-row">${esc(t('language'))}<span>${I18n.lang === 'ar' ? 'العربية' : 'English'}</span></button>
       <button data-f data-action="buffer" class="set-row">${esc(t('buffer'))}<span>${esc(t('seconds', S.settings.bufferSec))}</span></button>
+      <h3 class="row-title">${esc(t('tmdbSection'))}</h3>
+      <button data-f data-action="tmdb" class="set-row">${esc(t('tmdbKey'))}<span class="muted">${esc(t(Tmdb.enabled() ? 'tmdbOn' : 'tmdbOff'))}</span></button>
+      ${Tmdb.enabled() ? `<button data-f data-action="tmdbRemove" class="set-row">${esc(t('remove'))} · TMDB</button>` : ''}
+      <p class="muted about">${esc(t('tmdbAttribution'))}</p>
+      <h3 class="row-title">${esc(t('matchesSection'))}</h3>
+      <button data-f data-action="matchesToggle" class="set-row">${esc(t('showMatches'))}<span>${esc(Matches.prefs().show ? t('on') : t('off'))}</span></button>
+      <button data-f data-action="matchPrefs" class="set-row">${esc(t('myTeams'))}<span class="muted">${Matches.prefs().teams.length}</span></button>
       <h3 class="row-title">${esc(t('parental'))}</h3>
       <button data-f data-action="pin" class="set-row">${esc(t(S.settings.pinHash ? 'changePin' : 'setPin'))}</button>
       ${S.settings.pinHash ? `<button data-f data-action="pinRemove" class="set-row">${esc(t('removePin'))}</button>` : ''}
@@ -931,6 +985,19 @@
       S.settings.pinHash = ''; await saveSettings(); renderSection(false); Nav.focus($('[data-action="pin"]'));
     };
     actions.hidden = async function () { if (await verifyPin()) showHiddenCats(); };
+    actions.tmdb = async function () {
+      const v = await inputBox(t('tmdbKey'), t('tmdbOff'));
+      if (!v) return;
+      toast(t('tmdbChecking'));
+      const ok = await Tmdb.setKey(v);
+      toast(t(ok ? 'tmdbSaved' : 'tmdbInvalid'));
+      if (ok) { renderSection(false); Nav.focus($('[data-action="tmdb"]')); }
+    };
+    actions.tmdbRemove = async function () { await Tmdb.remove(); renderSection(false); Nav.focus($('[data-action="tmdb"]')); };
+    actions.matchesToggle = async function () {
+      Matches.prefs().show = !Matches.prefs().show; await Matches.save(); renderSection(false); Nav.focus($('[data-action="matchesToggle"]'));
+    };
+    actions.matchPrefs = function () { showMatchPrefs(); };
     actions.clearHistory = async function () {
       Object.keys(S.history).forEach(function (k) { if (S.history[k].sub === S.sub.id) delete S.history[k]; });
       await Store.set('history', S.history);
@@ -966,6 +1033,328 @@
       Player.stop();
       try { tizen.application.getCurrentApplication().exit(); } catch (e) { window.close(); }
     }
+  }
+
+
+  // ------------------------------------------------------------------ profiles ("Who's watching?")
+  const PALETTES = [['#4F7BFF', '#9B6CFF'], ['#FF5E8A', '#FF9F5A'], ['#16C7A8', '#2D8CFF'], ['#FFB648', '#FF5E5E'], ['#B45CFF', '#FF5CC8'], ['#3DDC84', '#0FA3B1']];
+  function showProfiles() {
+    setScreen('profiles', function () {
+      app.innerHTML = `<div class="profiles">
+        <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+        <div class="pf-brand"><div class="logo small"></div><span>NOVA</span></div>
+        <h1>${esc(t('whoWatching'))}</h1>
+        <p class="muted">${esc(t('whoHint'))}</p>
+        <div class="pf-row" data-group>
+          ${S.subs.map(function (s, i) {
+            const pal = PALETTES[i % PALETTES.length];
+            const days = s.expires ? Math.floor((s.expires - Date.now()) / 86400000) : null;
+            const status = days == null ? '' : days < 0 ? `<span class="pf-st bad">${esc(t('expired'))}</span>`
+              : `<span class="pf-st${days <= 7 ? ' warn' : ''}">${esc(t('daysLeft', days))}</span>`;
+            const act = s.id === S.settings.activeSub;
+            return `<button data-f data-action="pick" data-id="${s.id}" class="pf"${act ? ' data-autofocus' : ''} style="animation-delay:${0.15 + i * 0.08}s">
+              <span class="pf-tile" style="background:linear-gradient(135deg,${pal[0]},${pal[1]})">
+                <span class="pf-init">${esc((s.name || 'N').trim().charAt(0).toUpperCase())}</span>
+                <span class="pf-type">${s.type === 'xtream' ? 'XTREAM' : 'M3U'}</span>
+                ${act ? '<span class="pf-check">✓</span>' : ''}
+              </span>
+              <b>${esc(s.name)}</b>${status}</button>`;
+          }).join('')}
+          <button data-f data-action="addProfile" class="pf add"><span class="pf-tile dashed">＋</span><b>${esc(t('addSubscription'))}</b></button>
+        </div>
+        <button data-f data-action="manage" class="btn ghost">⚙ ${esc(t('manageSubs'))}</button>
+      </div>`;
+      actions.pick = function (el) { activate(el.getAttribute('data-id')); };
+      actions.addProfile = function () { showAddSub(); };
+      actions.manage = async function () { await activate(S.settings.activeSub || S.subs[0].id); S.ui.section = 'settings'; showHome(); };
+      Nav.focusFirst();
+    }, { back: function () { exitApp(); } });
+  }
+
+  // ------------------------------------------------------------------ discover (home)
+  let heroTimer = null, matchTimer = null, matchDay = 0, matchList = null;
+  function featuredItems() {
+    function recent(type) {
+      return ((S.data && S.data[type]) || []).filter(function (x) { return x.logo && !S.hidden[type + '|' + x.cat]; })
+        .slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0); }).slice(0, 6).map(function (x) { return { type: type, item: x }; });
+    }
+    const m = recent('movie'), se = recent('series'), out = [];
+    for (let i = 0; i < 6 && out.length < 8; i++) { if (m[i]) out.push(m[i]); if (se[i]) out.push(se[i]); }
+    return out.slice(0, 8);
+  }
+  function latest(type, n) {
+    return ((S.data && S.data[type]) || []).filter(function (x) { return !S.hidden[type + '|' + x.cat]; })
+      .slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0); }).slice(0, n);
+  }
+
+  function contCard(h, i) {
+    const pct = h.dur ? Math.max(1, Math.min(99, Math.round(h.pos / h.dur * 100))) : 0;
+    const se = h.type === 'series' ? Clean.se(h.subtitle) : null;
+    return `<button data-f data-action="resume" data-h="${esc(hkey(h.type, h.id, h.ep))}" class="wcard" data-key="cont:${i}">
+      <span class="wbg">${img(h.logo)}</span><span class="wshade"></span>
+      <span class="wchip">${esc(t('watchedPct', pct))}</span><span class="wplay">▶</span>
+      <span class="wtxt">${se ? `<span class="wse">${esc(t('seasonEpisode', se.s, se.e))}</span>` : ''}<b>${esc(Clean.title(h.title))}</b>
+      <span class="bar"><span style="width:${pct}%"></span></span></span></button>`;
+  }
+
+  function posterBtn(type, it, i, action) {
+    return `<button data-f data-action="${action}" data-i="${i}" data-type="${type}" data-key="d:${action}:${type}:${esc(it.id)}" class="poster">
+      <span class="pimg">${img(it.logo)}${it.rating && it.rating !== '0' ? `<span class="rate">★ ${esc(String(it.rating).slice(0, 3))}</span>` : ''}</span>
+      <span class="ptitle">${esc(Clean.title(it.name))}</span><span class="psub">${esc(it.year || '')}</span></button>`;
+  }
+
+  /** Swaps a card's artwork/title for the TMDB version in the app language. */
+  function localize(node, type, it) {
+    if (!node || !it || !Tmdb.enabled()) return;
+    Tmdb.card(type, it.name, it.year).then(function (r) {
+      if (!r || !document.body.contains(node)) return;
+      if (r.poster) { const im = node.querySelector('.pimg img'); if (im) im.src = r.poster; else { const b = node.querySelector('.pimg'); if (b) b.insertAdjacentHTML('afterbegin', `<img src="${esc(r.poster)}">`); } }
+      if (r.title) { const tt = node.querySelector('.ptitle'); if (tt) tt.textContent = r.title; }
+    });
+  }
+
+  function renderDiscover(c) {
+    clearInterval(heroTimer);
+    const feat = featuredItems();
+    const cont = continueList('movie').concat(continueList('series')).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
+    const chans = Object.keys(S.history).map(function (k) { return S.history[k]; })
+      .filter(function (h) { return h.sub === S.sub.id && h.type === 'live' && h.item; }).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
+    const mov = latest('movie', 20), ser = latest('series', 20);
+    const favs = S.fav.filter(function (f) { return f.sub === S.sub.id && f.type !== 'live' && f.item; });
+    c.innerHTML = `<div class="disc" id="disc">
+      ${feat.length ? `<section class="hero" id="hero"></section>` : '<div style="height:120px"></div>'}
+      ${Matches.prefs().show ? `<section class="rowsec"><div class="rowhead"><span class="ball">⚽</span><h3>${esc(t('matches'))}</h3>
+        <div class="row" data-group><button data-f data-action="mday" data-d="0" class="chip${matchDay === 0 ? ' active' : ''}">${esc(t('today'))}</button>
+        <button data-f data-action="mday" data-d="1" class="chip${matchDay === 1 ? ' active' : ''}">${esc(t('tomorrow'))}</button>
+        <button data-f data-action="matchPrefs" class="chip">⚙</button></div></div>
+        <div class="hrow" id="matches" data-group><div class="mcard sk"></div><div class="mcard sk"></div><div class="mcard sk"></div></div></section>` : ''}
+      ${cont.length ? `<section class="rowsec"><h3 class="row-title">${esc(t('continueWatching'))}</h3><div class="hrow" data-group>${cont.map(contCard).join('')}</div></section>` : ''}
+      ${chans.length ? `<section class="rowsec"><h3 class="row-title">${esc(t('recentChannels'))}</h3><div class="hrow" data-group>${chans.map(function (h, i) {
+        return `<button data-f data-action="dchan" data-i="${i}" class="lcard"><span class="lbadge">● ${esc(t('liveBadge'))}</span><span class="limg">${img(h.item.logo)}</span><b>${esc(Clean.title(h.item.name))}</b></button>`;
+      }).join('')}</div></section>` : ''}
+      ${mov.length ? `<section class="rowsec"><h3 class="row-title">${esc(t('latestMovies'))}</h3><div class="hrow posters" data-group data-type="movie">${mov.map(function (it, i) { return posterBtn('movie', it, i, 'dopen'); }).join('')}</div></section>` : ''}
+      ${ser.length ? `<section class="rowsec"><h3 class="row-title">${esc(t('latestSeries'))}</h3><div class="hrow posters" data-group data-type="series">${ser.map(function (it, i) { return posterBtn('series', it, i, 'dopen'); }).join('')}</div></section>` : ''}
+      ${favs.length ? `<section class="rowsec"><h3 class="row-title">${esc(t('favorites'))}</h3><div class="hrow posters" data-group data-type="fav">${favs.map(function (f, i) { return posterBtn(f.type, f.item, i, 'dfav'); }).join('')}</div></section>` : ''}
+    </div>`;
+    const lists = { movie: mov, series: ser };
+    actions.resume = function (el) { S.ui.focusKey = el.getAttribute('data-key'); const h = S.history[el.getAttribute('data-h')]; if (h) resumeHistory(h); };
+    actions.dchan = function (el) { const h = chans[parseInt(el.getAttribute('data-i'), 10)]; playLive(h.item, chans.map(function (x) { return x.item; })); };
+    actions.dopen = function (el) {
+      S.ui.focusKey = el.getAttribute('data-key');
+      const type = el.getAttribute('data-type'), it = lists[type][parseInt(el.getAttribute('data-i'), 10)];
+      if (type === 'movie') showMovie(it); else showSeries(it);
+    };
+    actions.dfav = function (el) { S.ui.focusKey = el.getAttribute('data-key'); const f = favs[parseInt(el.getAttribute('data-i'), 10)]; if (f.type === 'movie') showMovie(f.item); else showSeries(f.item); };
+    actions.mday = function (el) {
+      matchDay = parseInt(el.getAttribute('data-d'), 10); matchList = null;
+      document.querySelectorAll('[data-action="mday"]').forEach(function (b) { b.classList.toggle('active', b === el); });
+      loadMatches(true);
+    };
+    actions.matchPrefs = function () { showMatchPrefs(); };
+    actions.mwatch = function (el) { const m = (matchList || [])[parseInt(el.getAttribute('data-i'), 10)]; if (m) watchMatch(m); };
+    c.querySelectorAll('.hrow.posters .poster').forEach(function (n) {
+      const type = n.getAttribute('data-type');
+      const row = n.parentNode.getAttribute('data-type');
+      const it = row === 'fav' ? favs[parseInt(n.getAttribute('data-i'), 10)].item : lists[type][parseInt(n.getAttribute('data-i'), 10)];
+      localize(n, type, it);
+    });
+    if (feat.length) renderHero(feat, 0);
+    if (Matches.prefs().show) loadMatches(false);
+  }
+
+  function renderHero(feat, idx) {
+    const box = $('#hero');
+    if (!box) return;
+    const f = feat[idx], it = f.item, isMovie = f.type === 'movie';
+    const focusedIn = Nav.current && box.contains(Nav.current) ? Nav.current.getAttribute('data-action') : null;
+    box.innerHTML = `<div class="hbg" style="background-image:url('${esc(it.logo)}')"></div><div class="hshade"></div>
+      <div class="hbody">
+        <span class="hbadge">● ${esc(t('newBadge'))} · ${esc(t(isMovie ? 'typeMovie' : 'typeSeries'))}</span>
+        <div id="htitle"><h1>${esc(Clean.title(it.name))}</h1></div>
+        <div class="hmeta" id="hmeta">${it.rating && it.rating !== '0' ? `<span class="star-inline">★ ${esc(String(it.rating).slice(0, 3))}</span>` : ''}${esc(it.year || '')}</div>
+        <p class="hplot" id="hplot">${esc(it.plot || '')}</p>
+        <div class="row" data-group>
+          <button data-f data-action="hplay" class="btn white">${isMovie ? '▶ ' + esc(t('play')) : 'ℹ ' + esc(t('watchNow'))}</button>
+          ${isMovie ? `<button data-f data-action="hinfo" class="btn glass">ℹ ${esc(t('details'))}</button>` : ''}
+          <button data-f data-action="hfav" class="btn glass round">${isFav(f.type, it.id) ? '✓' : '＋'}</button>
+        </div>
+      </div>
+      <div class="dots">${feat.map(function (_, i) { return `<span class="${i === idx ? 'on' : ''}"></span>`; }).join('')}</div>`;
+    actions.hplay = function () { if (isMovie) playVod({ kind: 'movie', item: it, title: it.name, logo: it.logo }); else showSeries(it); };
+    actions.hinfo = function () { showMovie(it); };
+    actions.hfav = function (el) { const added = toggleFav(f.type, it); el.textContent = added ? '✓' : '＋'; };
+    if (focusedIn) { const again = box.querySelector('[data-action="' + focusedIn + '"]') || box.querySelector('[data-f]'); Nav.focus(again, { noScroll: true }); }
+    // Artwork + Arabic text from the provider / TMDB.
+    const info = f.type === 'movie' ? Api.vodInfo(S.sub, it.id) : (S.sub.type === 'xtream' ? Api.seriesInfo(S.sub, it.id).catch(function () { return null; }) : Promise.resolve(null));
+    info.then(function (pi) {
+      if (!$('#hero') || feat[idx] !== f) return;
+      if (pi && pi.backdrop) $('.hbg').style.backgroundImage = "url('" + pi.backdrop + "')";
+      if (pi && pi.plot && !it.plot) $('#hplot').textContent = pi.plot;
+      return Tmdb.details(f.type, pi && pi.tmdb, it.name, it.year).then(function (tm) {
+        if (!tm || !$('#hero') || feat[idx] !== f) return;
+        if (tm.backdrop) $('.hbg').style.backgroundImage = "url('" + tm.backdrop + "')";
+        $('#htitle').innerHTML = tm.logo ? `<img class="hlogo" src="${esc(tm.logo)}">` : `<h1>${esc(tm.title || Clean.title(it.name))}</h1>`;
+        $('#hmeta').innerHTML = (tm.rating ? `<span class="star-inline">★ ${esc(tm.rating)}</span>` : '') + esc([tm.year, tm.genres.slice(0, 2).join(' · ')].filter(Boolean).join('   •   '));
+        if (tm.overview) $('#hplot').textContent = tm.overview;
+      });
+    }).catch(function () {});
+    clearInterval(heroTimer);
+    heroTimer = setInterval(function () {
+      if (screen.name !== 'home' || S.ui.section !== 'home' || !$('#hero')) { clearInterval(heroTimer); return; }
+      if (Nav.current && $('#hero').contains(Nav.current)) return; // don't rotate under the user's focus
+      renderHero(feat, (idx + 1) % feat.length);
+    }, 8000);
+  }
+
+  // ---- matches strip
+  function countdown(ms) { const m = Math.max(0, Math.floor(ms / 60000)), h = Math.floor(m / 60); return h ? h + 'h ' + (m % 60) + 'm' : m + 'm'; }
+  function loadMatches(showLoading) {
+    clearTimeout(matchTimer);
+    const box = $('#matches');
+    if (!box) return;
+    if (showLoading) box.innerHTML = '<div class="mcard sk"></div><div class="mcard sk"></div><div class="mcard sk"></div>';
+    const day = matchDay;
+    Matches.forDay(day).then(function (list) {
+      if (day !== matchDay || !$('#matches')) return;
+      matchList = list;
+      drawMatches();
+      matchTimer = setTimeout(function () { if ($('#matches')) loadMatches(false); }, list.some(Matches.isLive) ? 45000 : 600000);
+    }, function () { const b = $('#matches'); if (b) b.innerHTML = `<div class="empty small">${esc(t('noMatches'))}</div>`; });
+  }
+  function drawMatches() {
+    const box = $('#matches');
+    if (!box) return;
+    const list = matchList || [];
+    if (!list.length) { box.innerHTML = `<div class="empty small">${esc(t('noMatches'))}</div>`; return; }
+    const focusedId = Nav.current && box.contains(Nav.current) ? Nav.current.getAttribute('data-mid') : null;
+    box.innerHTML = list.map(function (m, i) {
+      const open = Matches.canOpen(m), net = Matches.network(m.slug);
+      const hc = m.home.color || '#2a2f5a';
+      const ac = (m.away.color && m.away.color !== m.home.color ? m.away.color : m.away.alt) || '#4a2a5a';
+      const status = Matches.isLive(m) ? `<span class="mst live">● ${esc(m.state === 'ht' ? t('matchHt') : t('matchLive') + ' ' + m.clock)}</span>`
+        : m.state === 'post' ? `<span class="mst">${esc(t('matchFt'))}</span>` : m.state === 'postponed' ? `<span class="mst warn">${esc(t('matchPostponed'))}</span>` : '';
+      const center = m.state === 'pre' || m.state === 'postponed'
+        ? `<b class="mtime">${fmtTime(m.start)}</b><span class="muted">VS</span>` : `<b class="mscore">${esc(m.home.score)} - ${esc(m.away.score)}</b>`;
+      const foot = open ? `▶ ${esc(t('watchNow'))}${net ? ' · ' + esc(net) : ''}`
+        : m.state === 'pre' ? `🔒 ${esc(t('opensIn', countdown(m.start - 30 * 60000 - Date.now())))}${net ? ' · ' + esc(net) : ''}` : esc(net);
+      return `<button data-f data-action="mwatch" data-i="${i}" data-mid="${esc(m.id)}" class="mcard${Matches.isLive(m) ? ' live' : ''}${open ? '' : ' locked'}"
+          style="background:linear-gradient(120deg,${hc} 0%,#0b0b14 50%,${ac} 100%)">
+        <span class="mwm l">${img(m.home.logo)}</span><span class="mwm r">${img(m.away.logo)}</span><span class="mpitch"></span><span class="mshade"></span>
+        <span class="mtop">${m.leagueLogo ? `<span class="mlg">${img(m.leagueLogo)}</span>` : ''}<span class="mleague">${esc(m.league)}</span>${m.fav ? '<span class="mfav">★</span>' : ''}${status}</span>
+        <span class="mteams"><span class="mteam"><span class="mlogo">${img(m.home.logo)}</span>${esc(m.home.short)}</span>
+          <span class="mcenter">${center}</span>
+          <span class="mteam"><span class="mlogo">${img(m.away.logo)}</span>${esc(m.away.short)}</span></span>
+        <span class="mfoot${open ? ' on' : ''}">${foot}</span></button>`;
+    }).join('');
+    if (focusedId) { const again = box.querySelector('[data-mid="' + cssEsc(focusedId) + '"]'); if (again) Nav.focus(again, { noScroll: true }); }
+  }
+  async function watchMatch(m) {
+    if (!Matches.canOpen(m)) { toast(t('opensIn', countdown(m.start - 30 * 60000 - Date.now()))); return; }
+    const ranked = Matches.rankChannels(m, (S.data && S.data.live) || [], S.sub.id);
+    if (!ranked.length) { toast(t('noChannel')); return; }
+    let pick = ranked[0];
+    const sure = pick.score >= 500 || (ranked.length === 1) || (pick.score - (ranked[1] ? ranked[1].score : 0) >= 60);
+    if (!sure) {
+      const v = await chooseBox(t('pickChannel') + ' — ' + m.home.short + ' × ' + m.away.short,
+        ranked.map(function (r, i) { return { value: i, label: r.ch.name }; }), 0);
+      if (v === undefined) return;
+      pick = ranked[v];
+    }
+    await Matches.remember(m, S.sub.id, pick.ch);
+    playLive(pick.ch, ranked.map(function (r) { return r.ch; }));
+  }
+
+  // ---- teams & competitions
+  function showMatchPrefs() {
+    let slug = 'ksa.1', teams = null, failed = false;
+    function draw() {
+      const pr = Matches.prefs();
+      const favIds = pr.teams.map(function (x) { return x.id; });
+      const pickable = Matches.COMPETITIONS.filter(function (c) { return ['uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'afc.champions', 'eng.fa', 'esp.copa_del_rey'].indexOf(c.slug) < 0; });
+      const focusKey = Nav.current && Nav.current.getAttribute('data-k');
+      app.innerHTML = `<div class="settings page mprefs">
+        <h1>${esc(t('myTeams'))}</h1>
+        <button data-f data-action="only" data-k="only" class="set-row">${esc(t('onlyMyTeams'))}<span>${esc(pr.only ? t('on') : t('off'))}</span></button>
+        <h3 class="row-title">${esc(t('favTeams'))}</h3>
+        <div class="row" data-group>${pr.teams.map(function (tm) {
+          return `<button data-f data-action="unfav" data-id="${esc(tm.id)}" data-k="u${esc(tm.id)}" class="chip team"><span class="tl">${img(tm.logo)}</span>${esc(tm.name)} ✕</button>`;
+        }).join('') || `<span class="muted">—</span>`}</div>
+        <h3 class="row-title">${esc(t('addTeam'))}</h3>
+        <div class="row comp-pick" data-group>${pickable.map(function (c) {
+          return `<button data-f data-action="tslug" data-s="${c.slug}" data-k="s${c.slug}" class="chip${c.slug === slug ? ' active' : ''}">${esc(Matches.label(c))}</button>`;
+        }).join('')}</div>
+        <div class="team-grid" data-group>${teams == null ? (failed ? `<p class="error">${esc(t('teamsError'))}</p>` : '<div class="spinner"></div>') : teams.map(function (tm, i) {
+          const on = favIds.indexOf(tm.id) >= 0;
+          return `<button data-f data-action="tpick" data-i="${i}" data-k="t${esc(tm.id)}" class="tcard${on ? ' on' : ''}"><span class="tl big">${img(tm.logo)}</span><b>${esc(tm.name)}</b>${on ? '<span class="tchk">✓</span>' : ''}</button>`;
+        }).join('')}</div>
+        <h3 class="row-title">${esc(t('clubComps'))}</h3>
+        <div class="row" data-group>${Matches.COMPETITIONS.filter(function (c) { return !c.nat; }).map(compChip).join('')}</div>
+        <h3 class="row-title">${esc(t('natComps'))}</h3>
+        <div class="row" data-group>${Matches.COMPETITIONS.filter(function (c) { return c.nat; }).map(compChip).join('')}</div>
+      </div>`;
+      function compChip(c) {
+        const on = pr.comps.indexOf(c.slug) >= 0;
+        return `<button data-f data-action="comp" data-s="${c.slug}" data-k="c${c.slug}" class="chip${on ? ' active' : ''}">${on ? '✓ ' : ''}${esc(Matches.label(c))}</button>`;
+      }
+      const again = focusKey && $('[data-k="' + cssEsc(focusKey) + '"]');
+      if (again) Nav.focus(again); else Nav.focusFirst();
+    }
+    function load() {
+      teams = null; failed = false; draw();
+      const want = slug;
+      Matches.teams(slug).then(function (l) { if (want === slug && screen.name === 'mprefs') { teams = l; draw(); } },
+        function () { if (want === slug && screen.name === 'mprefs') { failed = true; teams = null; draw(); } });
+    }
+    setScreen('mprefs', function () {
+      actions.only = async function () { Matches.prefs().only = !Matches.prefs().only; await Matches.save(); draw(); };
+      actions.unfav = async function (el) {
+        const tm = Matches.prefs().teams.filter(function (x) { return x.id === el.getAttribute('data-id'); })[0];
+        if (tm) { await Matches.toggleTeam(tm); draw(); }
+      };
+      actions.tslug = function (el) { slug = el.getAttribute('data-s'); load(); };
+      actions.tpick = async function (el) { await Matches.toggleTeam(teams[parseInt(el.getAttribute('data-i'), 10)]); draw(); };
+      actions.comp = async function (el) { await Matches.toggleComp(el.getAttribute('data-s')); draw(); };
+      load();
+    }, { back: function () { matchList = null; showHome(); } });
+  }
+
+  // ---- trailer (YouTube embedded player, inside the app)
+  function showTrailer(key) {
+    const k = String(key).replace(/[^A-Za-z0-9_-]/g, '');
+    if (!k) return;
+    const prev = screen;
+    const box = document.createElement('div');
+    box.className = 'trailer';
+    box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${k}?autoplay=1&rel=0&modestbranding=1&controls=1&playsinline=1"
+      allow="autoplay; encrypted-media; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      <div class="trailer-hint">${esc(t('back'))} ↩</div>`;
+    document.body.appendChild(box);
+    const prevBack = screen.back;
+    // Keep the remote's BACK key with the app even if the embedded player grabs focus.
+    function refocus() { setTimeout(function () { try { window.focus(); } catch (e) { /* */ } }, 50); }
+    window.addEventListener('blur', refocus);
+    screen.back = function () {
+      window.removeEventListener('blur', refocus);
+      box.remove();
+      if (screen === prev) screen.back = prevBack;
+    };
+  }
+
+  /** Text entry dialog (TV keyboard). */
+  function inputBox(title, hint) {
+    return new Promise(function (resolve) {
+      const html = `<h2>${esc(title)}</h2><p class="muted">${esc(hint || '')}</p>
+        <input data-f id="inbox" class="input big" autocomplete="off">
+        <div class="row center"><button data-f data-m="ok" class="btn primary">${esc(t('save'))}</button><button data-f data-m="cancel" class="btn">${esc(t('cancel'))}</button></div>`;
+      const md = modal(html, function (a, close) {
+        const v = $('#inbox') ? $('#inbox').value : '';
+        close(); resolve(a === 'ok' ? v.trim() : '');
+      }, { onCancel: function () { resolve(''); } });
+      const input = md.el.querySelector('#inbox');
+      input.addEventListener('keydown', function (e) {
+        if (e.keyCode === 13 || e.keyCode === 65376) { e.preventDefault(); input.blur(); const ok = md.el.querySelector('[data-m="ok"]'); if (ok) Nav.focus(ok); }
+      });
+    });
   }
 
   // ------------------------------------------------------------------ player

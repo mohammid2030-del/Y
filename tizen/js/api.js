@@ -278,7 +278,9 @@
       Object.keys(seasons).forEach(function (k) { seasons[k].sort(function (a, b) { return a.num - b.num; }); });
       return {
         name: str(info.name), plot: str(info.plot), cover: str(info.cover), genre: str(info.genre),
-        rating: str(info.rating), year: (str(info.releaseDate) || str(info.release_date)).slice(0, 4), seasons: seasons
+        rating: str(info.rating), year: (str(info.releaseDate) || str(info.release_date)).slice(0, 4), seasons: seasons,
+        tmdb: (str(info.tmdb) || str(info.tmdb_id)).replace(/\D/g, ''),
+        backdrop: str(Array.isArray(info.backdrop_path) ? info.backdrop_path[0] : info.backdrop_path)
       };
     });
   }
@@ -291,7 +293,8 @@
       return {
         plot: str(i.plot || i.description), genre: str(i.genre), duration: str(i.duration),
         year: str(i.releasedate || i.release_date).slice(0, 4), rating: str(i.rating), cast: str(i.cast || i.actors),
-        director: str(i.director), image: str(i.movie_image || i.cover_big), backdrop: str(bd)
+        director: str(i.director), image: str(i.movie_image || i.cover_big), backdrop: str(bd),
+        tmdb: (str(i.tmdb_id) || str(i.tmdb)).replace(/\D/g, '')
       };
     }).catch(function () { return null; });
   }
@@ -313,7 +316,19 @@
     return base + '/series/' + u + '/' + p + '/' + opts.episodeId + '.' + (opts.ext || 'mp4');
   }
 
+  /** Plain JSON GET for third-party services (TMDB, ESPN). */
+  function json(url, timeoutMs, headers) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 15000);
+    return fetch(url, { signal: ctrl ? ctrl.signal : undefined, headers: headers || {} }).then(function (res) {
+      clearTimeout(timer);
+      if (!res.ok) throw new ApiError(res.status === 401 ? 'auth' : 'http', res.status);
+      return res.json();
+    }, function (e) { clearTimeout(timer); throw new ApiError('network'); });
+  }
+
   global.Api = {
+    json: json,
     ApiError: ApiError, normalizeServer: normalizeServer, parseAuth: parseAuth, parseM3u: parseM3u,
     auth: auth, loadXtream: loadXtream, loadM3u: loadM3u, shortEpg: shortEpg, dayEpg: dayEpg,
     seriesInfo: seriesInfo, vodInfo: vodInfo, streamUrl: streamUrl, b64utf8: b64utf8,

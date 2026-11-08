@@ -73,6 +73,8 @@ jobs:
             cp app/build/outputs/apk/debug/app-debug.apk dist/NOVA-IPTV.apk
           fi
           (cd tizen && zip -qr ../dist/NOVA-IPTV-Tizen.zip . -x '*.wgt')
+          # Ready-to-install widget for Samsung TVs (Apps2Samsung signs it with your own certificate).
+          (cd tizen && zip -qr -X ../dist/NOVA-IPTV.wgt config.xml index.html icon.png css js)
           ls -la dist
 
       - name: Upload build artifact
@@ -92,12 +94,16 @@ jobs:
             Android (always the latest build):
             https://github.com/${{ github.repository }}/releases/latest/download/NOVA-IPTV.apk
 
-            Samsung TV (Tizen project, open in Tizen Studio — see tizen/README.md):
+            Samsung TV — install from your phone with Apps2Samsung (see tizen/README.md):
+            https://github.com/${{ github.repository }}/releases/latest/download/NOVA-IPTV.wgt
+
+            Samsung TV source project (Tizen Studio):
             https://github.com/${{ github.repository }}/releases/latest/download/NOVA-IPTV-Tizen.zip
           files: |
             dist/NOVA-IPTV.apk
             dist/NOVA-IPTV-debug.apk
             dist/NOVA-IPTV-Tizen.zip
+            dist/NOVA-IPTV.wgt
 
       - name: Report build errors on the commit
         if: failure()

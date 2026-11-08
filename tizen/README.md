@@ -3,7 +3,20 @@
 Tizen web app for Samsung TVs from 2020 onward (Tizen 5.5+). Same subscriptions as the Android app
 (Xtream Codes, M3U URL), playback through Samsung's native AVPlay engine (HLS, MPEG-TS, MP4, MKV).
 
-## Install on your TV (no store needed)
+## Install from your phone (no computer)
+
+1. **TV — developer mode**: on the TV open *Apps*, press `1 2 3 4 5` on the remote, switch *Developer mode* **On**,
+   and in *Host PC IP* enter **your phone's IP address** (phone Wi‑Fi settings). Restart the TV.
+   Phone and TV must be on the same Wi‑Fi.
+2. **Phone**: install **Apps2Samsung** for Android — download the `-android.apk` from
+   <https://github.com/Apps2Samsung/Apps2Samsung/releases> and open it.
+3. Download **NOVA-IPTV.wgt** to the phone:
+   <https://github.com/mohammid2030-del/Y/releases/latest/download/NOVA-IPTV.wgt>
+4. In Apps2Samsung: let it find your TV → choose *Custom .wgt* → pick `NOVA-IPTV.wgt` → **Install**.
+   On 2023+ TVs it asks you to sign in with a Samsung account once to create the certificate.
+5. NOVA IPTV appears in the TV's app list. To update, install the newer `.wgt` the same way.
+
+## Install with a computer (Tizen Studio)
 
 1. **TV — developer mode**: open *Apps*, press `1 2 3 4 5` on the remote, switch *Developer mode* **On**,
    enter your computer's IP address, then restart the TV.
