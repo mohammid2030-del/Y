@@ -94,6 +94,7 @@
     <string name="live_format">Live stream format</string>
     <string name="low_end_desc">Fewer animations, smaller buffers and max 720p for weaker devices</string>
     <string name="low_end_mode">Low-end device mode</string>
+    <string name="manage_subscriptions">Manage subscriptions</string>
     <string name="max_connections">Max connections: %1$d</string>
     <string name="menu_account">Account and settings</string>
     <string name="minutes_left">%1$d min left</string>
@@ -137,6 +138,8 @@
     <string name="play_now">Play now</string>
     <string name="playback">Playback</string>
     <string name="previous_channel">Previous channel</string>
+    <string name="profile_days_left">%1$d days left</string>
+    <string name="profile_expired">Expired</string>
     <string name="quality_track">Track %1$d</string>
     <string name="recent_channels">Recently watched channels</string>
     <string name="reconnecting">Reconnecting… (%1$d)</string>
@@ -153,6 +156,7 @@
     <string name="save_and_load">Save &amp; load</string>
     <string name="search_hint">Search channels, movies, series</string>
     <string name="search_prompt">Type at least 2 characters to search</string>
+    <string name="season_episode">Season %1$d · Episode %2$d</string>
     <string name="season_n">Season %1$d</string>
     <string name="seconds_n">%1$d seconds</string>
     <string name="seconds_short">%1$s s</string>
@@ -186,6 +190,7 @@
     <string name="subscriptions">Subscriptions</string>
     <string name="subscriptions_title">Subscriptions</string>
     <string name="subtitles_section">Subtitles</string>
+    <string name="switch_profile">Switch profile</string>
     <string name="sync_failed">Could not load the subscription</string>
     <string name="tab_favorites">Favorites</string>
     <string name="tab_home">Home</string>
@@ -214,5 +219,7 @@
     <string name="watch_now">Watch now</string>
     <string name="watched_pct">%1$d%% watched</string>
     <string name="welcome_tagline">Your IPTV, beautifully organised. Live TV, movies and series in one premium player.</string>
+    <string name="who_is_watching">Who\'s watching?</string>
+    <string name="who_is_watching_hint">Each subscription keeps its own favorites and history</string>
     <string name="wrong_pin">Wrong PIN</string>
 </resources>

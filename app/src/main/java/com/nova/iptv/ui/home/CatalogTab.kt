@@ -152,7 +152,7 @@ private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, onO
             item(key = "continue") {
                 RowSection(stringResource(R.string.continue_watching), accent = true) {
                     LazyRow(contentPadding = PaddingValues(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(continueList, key = { it.historyKey }) { h -> WideContinueCard(h) { PlayerLauncher.play(context, resumeRequest(h)) } }
+                        items(continueList, key = { it.historyKey }) { h -> WideContinueCard(h, artwork = { vm.backdropOf(h) }) { PlayerLauncher.play(context, resumeRequest(h)) } }
                     }
                 }
             }

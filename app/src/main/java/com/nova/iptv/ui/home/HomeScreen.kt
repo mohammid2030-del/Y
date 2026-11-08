@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -99,6 +100,7 @@ fun HomeScreen(
     onOpenEpg: () -> Unit,
     onOpenSettings: () -> Unit,
     onAddSubscription: () -> Unit,
+    onSwitchProfile: () -> Unit = {},
     vm: HomeViewModel = hiltViewModel(),
 ) {
     var tabIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -134,6 +136,17 @@ fun HomeScreen(
             }
         }
 
+        // Soft scrim so the floating navigation stays readable over scrolled content.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(homeTopInset() + 12.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(MaterialTheme.colorScheme.background.copy(alpha = 0.92f), MaterialTheme.colorScheme.background.copy(alpha = 0f))
+                    )
+                )
+        )
         // Floating glass navigation.
         Row(
             Modifier
@@ -157,6 +170,7 @@ fun HomeScreen(
                 onEpg = onOpenEpg,
                 onSettings = onOpenSettings,
                 onAdd = onAddSubscription,
+                onSwitchProfile = onSwitchProfile,
             )
         }
     }
@@ -220,6 +234,7 @@ private fun AccountButton(
     onEpg: () -> Unit,
     onSettings: () -> Unit,
     onAdd: () -> Unit,
+    onSwitchProfile: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -265,6 +280,11 @@ private fun AccountButton(
                 )
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
             }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.switch_profile)) },
+                leadingIcon = { Icon(Icons.Filled.Person, null) },
+                onClick = { open = false; onSwitchProfile() },
+            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.tab_favorites)) },
                 leadingIcon = { Icon(Icons.Filled.Favorite, null) },

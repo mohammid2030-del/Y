@@ -13,6 +13,7 @@ import com.nova.iptv.ui.epg.EpgScreen
 import com.nova.iptv.ui.home.HomeScreen
 import com.nova.iptv.ui.onboarding.AddSubscriptionScreen
 import com.nova.iptv.ui.onboarding.LanguageScreen
+import com.nova.iptv.ui.onboarding.ProfilesScreen
 import com.nova.iptv.ui.onboarding.SyncScreen
 import com.nova.iptv.ui.onboarding.WelcomeScreen
 import com.nova.iptv.ui.settings.HiddenCategoriesScreen
@@ -26,6 +27,7 @@ object Routes {
     const val ADD = "add?id={id}"
     const val SYNC = "sync/{id}"
     const val HOME = "home"
+    const val PROFILES = "profiles"
     const val MOVIE = "movie/{id}"
     const val SERIES = "series/{id}"
     const val EPG = "epg"
@@ -77,6 +79,13 @@ fun NovaNavHost(startDestination: String) {
                 onEdit = { id -> nav.navigate(Routes.add(id)) },
             )
         }
+        composable(Routes.PROFILES) {
+            ProfilesScreen(
+                onChosen = { nav.goHomeClearing() },
+                onAdd = { nav.navigate(Routes.add()) },
+                onManage = { nav.navigate(Routes.SETTINGS) },
+            )
+        }
         composable(Routes.HOME) {
             HomeScreen(
                 onOpenMovie = { nav.navigate(Routes.movie(it)) },
@@ -84,6 +93,12 @@ fun NovaNavHost(startDestination: String) {
                 onOpenEpg = { nav.navigate(Routes.EPG) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 onAddSubscription = { nav.navigate(Routes.add()) },
+                onSwitchProfile = {
+                    nav.navigate(Routes.PROFILES) {
+                        popUpTo(nav.graph.id) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
             )
         }
         composable(Routes.MOVIE, arguments = listOf(navArgument("id") { type = NavType.LongType })) {

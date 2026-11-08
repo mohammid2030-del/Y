@@ -161,6 +161,7 @@ abstract class VodViewModel(
     val continueWatching: StateFlow<List<HistoryEntity>> = subId
         .flatMapLatest { content.continueWatching(it) }
         .map { l -> l.filter { it.type == type } }
+        .map { l -> l.distinctBy { "${it.subscriptionId}|${it.type}|${it.remoteId}" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** Hero carousel: newest titles that have artwork. */
@@ -174,6 +175,8 @@ abstract class VodViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     suspend fun heroInfo(c: ContentEntity) = content.heroInfo(c)
+
+    suspend fun backdropOf(h: HistoryEntity): String? = content.heroInfo(h.asContent())?.backdrop?.takeIf { it.isNotBlank() }
 
     /** Items of one category row (collected only while the row is on screen). */
     fun row(categoryId: String): Flow<List<ContentEntity>> =
@@ -306,6 +309,7 @@ class DiscoverViewModel @Inject constructor(
 
     val continueWatching: StateFlow<List<HistoryEntity>> = subId
         .flatMapLatest { content.continueWatching(it) }
+        .map { l -> l.distinctBy { "${it.subscriptionId}|${it.type}|${it.remoteId}" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentChannels: StateFlow<List<ContentEntity>> = subId
@@ -330,6 +334,8 @@ class DiscoverViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     suspend fun heroInfo(c: ContentEntity) = content.heroInfo(c)
+
+    suspend fun backdropOf(h: HistoryEntity): String? = content.heroInfo(h.asContent())?.backdrop?.takeIf { it.isNotBlank() }
 
     fun open(item: ContentEntity, onId: (Long) -> Unit) {
         if (item.id != 0L) { onId(item.id); return }

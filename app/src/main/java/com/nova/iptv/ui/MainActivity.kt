@@ -67,7 +67,7 @@ class MainViewModel @Inject constructor(
             _start.value = when {
                 !s.onboardingDone -> Routes.WELCOME
                 !hasSubs -> Routes.ADD
-                else -> Routes.HOME
+                else -> Routes.PROFILES
             }
         }
     }

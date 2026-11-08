@@ -93,6 +93,7 @@
     <string name="live_format">صيغة البث المباشر</string>
     <string name="low_end_desc">حركات أقل وتخزين مؤقت أصغر ودقة حتى 720p للأجهزة الضعيفة</string>
     <string name="low_end_mode">وضع الأجهزة الضعيفة</string>
+    <string name="manage_subscriptions">إدارة الاشتراكات</string>
     <string name="max_connections">الحد الأقصى للاتصالات: %1$d</string>
     <string name="menu_account">الحساب والإعدادات</string>
     <string name="minutes_left">باقي %1$d د</string>
@@ -136,6 +137,8 @@
     <string name="play_now">شغّل الآن</string>
     <string name="playback">التشغيل</string>
     <string name="previous_channel">القناة السابقة</string>
+    <string name="profile_days_left">باقي %1$d يوم</string>
+    <string name="profile_expired">منتهي</string>
     <string name="quality_track">مسار %1$d</string>
     <string name="recent_channels">قنوات شاهدتها مؤخراً</string>
     <string name="reconnecting">جارٍ إعادة الاتصال… (%1$d)</string>
@@ -152,6 +155,7 @@
     <string name="save_and_load">حفظ وتحميل</string>
     <string name="search_hint">ابحث عن قنوات وأفلام ومسلسلات</string>
     <string name="search_prompt">اكتب حرفين على الأقل للبحث</string>
+    <string name="season_episode">الموسم %1$d · الحلقة %2$d</string>
     <string name="season_n">الموسم %1$d</string>
     <string name="seconds_n">%1$d ثانية</string>
     <string name="seconds_short">%1$s ث</string>
@@ -185,6 +189,7 @@
     <string name="subscriptions">الاشتراكات</string>
     <string name="subscriptions_title">الاشتراكات</string>
     <string name="subtitles_section">الترجمة</string>
+    <string name="switch_profile">تبديل الملف</string>
     <string name="sync_failed">تعذر تحميل الاشتراك</string>
     <string name="tab_favorites">المفضلة</string>
     <string name="tab_home">الرئيسية</string>
@@ -213,5 +218,7 @@
     <string name="watch_now">شاهد الآن</string>
     <string name="watched_pct">تمت مشاهدة %1$d٪</string>
     <string name="welcome_tagline">اشتراكك بتنظيم أنيق. بث مباشر وأفلام ومسلسلات في مشغل واحد فاخر.</string>
+    <string name="who_is_watching">من يشاهد؟</string>
+    <string name="who_is_watching_hint">لكل اشتراك مفضلته وسجل مشاهدته الخاص</string>
     <string name="wrong_pin">رمز PIN غير صحيح</string>
 </resources>

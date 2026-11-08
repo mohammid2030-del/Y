@@ -79,6 +79,8 @@ import com.nova.iptv.data.repo.PlaybackRequest
 import com.nova.iptv.player.PlayerLauncher
 import com.nova.iptv.ui.components.EmptyView
 import com.nova.iptv.ui.components.NetImage
+import com.nova.iptv.ui.components.cleanTitle
+import com.nova.iptv.ui.components.seasonEpisodeOf
 import com.nova.iptv.ui.components.novaFocus
 import com.nova.iptv.ui.theme.LocalNovaFlags
 import com.nova.iptv.ui.theme.NovaGradient
@@ -147,7 +149,7 @@ fun DiscoverHome(
                 RowSection(stringResource(R.string.continue_watching), accent = true) {
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         items(continueList, key = { it.historyKey }) { h ->
-                            WideContinueCard(h) { PlayerLauncher.play(context, resumeRequest(h)) }
+                            WideContinueCard(h, artwork = { vm.backdropOf(h) }) { PlayerLauncher.play(context, resumeRequest(h)) }
                         }
                     }
                 }
@@ -343,7 +345,7 @@ private fun HeroPage(
             }
             Spacer(Modifier.height(10.dp))
             Text(
-                c.name,
+                c.name.cleanTitle(),
                 color = Color.White,
                 style = MaterialTheme.typography.displaySmall.copy(fontSize = if (wide) 44.sp else 34.sp, lineHeight = if (wide) 48.sp else 38.sp),
                 fontWeight = FontWeight.ExtraBold,
@@ -445,7 +447,7 @@ private fun HomeActionPill(label: String, icon: ImageVector, onClick: () -> Unit
 
 /** Wide 16:9 continue-watching card with a "45% watched" chip and gradient progress. */
 @Composable
-fun WideContinueCard(h: HistoryEntity, onClick: () -> Unit) {
+fun WideContinueCard(h: HistoryEntity, artwork: (suspend () -> String?)? = null, onClick: () -> Unit) {
     val shape = RoundedCornerShape(22.dp)
     val tv = LocalNovaFlags.current.isTv
     val p = if (h.durationMs > 0) (h.positionMs.toFloat() / h.durationMs).coerceIn(0f, 1f) else 0f
@@ -460,14 +462,22 @@ fun WideContinueCard(h: HistoryEntity, onClick: () -> Unit) {
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
     ) {
-        Box(Modifier.fillMaxSize()) {
-            // Portrait posters look poor stretched: blur them as a backdrop and show sharp art inside.
-            NetImage(h.logo, Modifier.fillMaxSize().blur(18.dp))
-            NetImage(
-                h.logo,
-                Modifier.align(Alignment.CenterEnd).fillMaxHeight().aspectRatio(2f / 3f),
-                contentScale = ContentScale.Crop,
-            )
+        val backdrop by produceState<String?>(null, h.historyKey) {
+            value = artwork?.let { runCatching { it() }.getOrNull() }
+        }
+        val bd = backdrop
+        if (!bd.isNullOrBlank()) {
+            NetImage(bd, Modifier.fillMaxSize())
+        } else {
+            Box(Modifier.fillMaxSize()) {
+                // Portrait posters look poor stretched: blur them as a backdrop and show sharp art inside.
+                NetImage(h.logo, Modifier.fillMaxSize().blur(18.dp))
+                NetImage(
+                    h.logo,
+                    Modifier.align(Alignment.CenterEnd).fillMaxHeight().aspectRatio(2f / 3f),
+                    contentScale = ContentScale.Crop,
+                )
+            }
         }
         Box(
             Modifier.fillMaxSize().background(
@@ -496,14 +506,16 @@ fun WideContinueCard(h: HistoryEntity, onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
         Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 14.dp, vertical = 12.dp)) {
-            if (h.subtitle.isNotBlank()) {
+            val se = if (h.type == ContentType.SERIES) seasonEpisodeOf(h.subtitle) else null
+            if (se != null) {
                 Text(
-                    h.subtitle, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    stringResource(R.string.season_episode, se.first, se.second),
+                    color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1,
                 )
             }
             Text(
-                h.title, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                h.title.cleanTitle(), color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(8.dp))
@@ -552,7 +564,7 @@ private fun LiveChannelCard(c: ContentEntity, onClick: () -> Unit) {
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            c.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+            c.name.cleanTitle(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp).heightIn(min = 18.dp),
         )
     }
