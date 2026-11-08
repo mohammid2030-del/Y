@@ -1,0 +1,22 @@
+name: Probe OpenSubtitles
+on:
+  push:
+    branches: [ probe ]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          B=https://api.opensubtitles.com/api/v1
+          {
+          echo "== formats, fake key, our UA"; curl -s -i -H "Api-Key: abc123fake" -H "User-Agent: NOVA IPTV v1.0" -H "Accept: application/json" "$B/infos/formats" | head -c 900; echo
+          echo "== features no key"; curl -s -i -H "User-Agent: NOVA IPTV v1.0" "$B/features?query=medcezir&type=tvshow" | head -c 1500; echo
+          echo "== features fake key"; curl -s -i -H "Api-Key: abc123fake" -H "User-Agent: NOVA IPTV v1.0" "$B/features?query=medcezir&type=tvshow" | head -c 900; echo
+          echo "== subtitles no key"; curl -s -i -H "User-Agent: NOVA IPTV v1.0" "$B/subtitles?languages=ar&parent_tmdb_id=64252&season_number=1&episode_number=1" | head -c 1500; echo
+          } > out.txt 2>&1
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$(cat out.txt)"
