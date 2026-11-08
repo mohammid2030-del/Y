@@ -87,11 +87,15 @@
       var el = els[i];
       if (el === current) continue;
       var r = el.getBoundingClientRect(), p = center(r), primary, secondary;
-      if (dir === 'left') { if (r.right > from.left + 1) continue; primary = from.left - r.right; secondary = Math.abs(p.y - c.y); }
-      else if (dir === 'right') { if (r.left < from.right - 1) continue; primary = r.left - from.right; secondary = Math.abs(p.y - c.y); }
-      else if (dir === 'up') { if (r.bottom > from.top + 1) continue; primary = from.top - r.bottom; secondary = Math.abs(p.x - c.x); }
-      else { if (r.top < from.bottom - 1) continue; primary = r.top - from.bottom; secondary = Math.abs(p.x - c.x); }
-      var score = Math.max(primary, 0) + secondary * 2.2;
+      // secondary = gap between the rectangles on the other axis (0 when they overlap), so a wide field
+      // directly above/below always beats a smaller element further away.
+      var gapX = Math.max(0, Math.max(r.left, from.left) - Math.min(r.right, from.right));
+      var gapY = Math.max(0, Math.max(r.top, from.top) - Math.min(r.bottom, from.bottom));
+      if (dir === 'left') { if (r.right > from.left + 1) continue; primary = from.left - r.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
+      else if (dir === 'right') { if (r.left < from.right - 1) continue; primary = r.left - from.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
+      else if (dir === 'up') { if (r.bottom > from.top + 1) continue; primary = from.top - r.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
+      else { if (r.top < from.bottom - 1) continue; primary = r.top - from.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
+      var score = Math.max(primary, 0) + secondary;
       if (score < bestScore) { bestScore = score; best = el; }
     }
     if (best) {
