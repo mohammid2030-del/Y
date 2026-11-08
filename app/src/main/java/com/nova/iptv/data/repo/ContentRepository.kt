@@ -46,6 +46,12 @@ data class PlaybackRequest(
     val catchupDurationMin: Int = 0,
 )
 
+data class EpisodeContext(
+    val tmdbId: String,
+    val current: com.nova.iptv.data.network.XEpisode,
+    val next: com.nova.iptv.data.network.XEpisode?,
+)
+
 data class ResolvedStream(val url: String, val userAgent: String, val isLive: Boolean)
 
 const val RECENT_ADDED = "\u0001recent_added"
@@ -157,14 +163,15 @@ class ContentRepository @Inject constructor(
         return info
     }
 
-    /** The episode after [episodeId] across seasons, or null at the end of the series. */
-    suspend fun nextEpisode(subId: Long, seriesId: String, episodeId: String): com.nova.iptv.data.network.XEpisode? {
+    /** Current + next episode (across seasons) and the series' TMDB id, for skip/up-next features. */
+    suspend fun episodeContext(subId: Long, seriesId: String, episodeId: String): EpisodeContext? {
         val sub = subs.get(subId) ?: return null
         if (sub.type != SourceType.XTREAM || episodeId.isEmpty()) return null
         val info = runCatching { seriesInfo(sub, seriesId) }.getOrNull() ?: return null
         val all = info.seasons.toSortedMap().values.flatten()
         val i = all.indexOfFirst { it.id == episodeId }
-        return if (i >= 0) all.getOrNull(i + 1) else null
+        if (i < 0) return null
+        return EpisodeContext(info.tmdbId, all[i], all.getOrNull(i + 1))
     }
 
     suspend fun vodInfo(sub: SubscriptionEntity, streamId: String): XVodInfo? {

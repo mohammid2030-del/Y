@@ -75,9 +75,10 @@
     <string name="import_settings">استيراد الإعدادات</string>
     <string name="intro_adjust_hint">غير دقيق؟ اضبطه مرة وسيُحفظ لهذا المسلسل</string>
     <string name="intro_adjust_title">تم تخطي المقدمة</string>
-    <string name="intro_length">مدة المقدمة الافتراضية</string>
+    <string name="intro_length">التخطي الاحتياطي (عند عدم توفر بيانات المقدمة)</string>
     <string name="intro_off">إيقاف</string>
     <string name="intro_saved">تم حفظ توقيت المقدمة لهذا المسلسل</string>
+    <string name="intro_source">أوقات دقيقة من TheIntroDB، أو يتعلّمها التطبيق عند تقديمك اليدوي</string>
     <string name="items_loaded">%1$s عنصر</string>
     <string name="lang_arabic">العربية</string>
     <string name="lang_english">English</string>
@@ -157,6 +158,7 @@
     <string name="show_epg_list">إظهار البرنامج الحالي في قائمة القنوات</string>
     <string name="single_quality">هذا البث يوفر جودة واحدة فقط.</string>
     <string name="skip_intro">تخطي المقدمة</string>
+    <string name="skip_recap">تخطي الملخص</string>
     <string name="stage_categories">جارٍ تحميل التصنيفات…</string>
     <string name="stage_connecting">جارٍ التحقق من الاشتراك…</string>
     <string name="stage_content">جارٍ تحميل القنوات والأفلام والمسلسلات…</string>

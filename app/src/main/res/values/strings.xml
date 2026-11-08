@@ -76,9 +76,10 @@
     <string name="import_settings">Import settings</string>
     <string name="intro_adjust_hint">Not exact? Adjust once — it\'s remembered for this series</string>
     <string name="intro_adjust_title">Intro skipped</string>
-    <string name="intro_length">Default intro length</string>
+    <string name="intro_length">Fallback skip (when no intro data)</string>
     <string name="intro_off">Off</string>
     <string name="intro_saved">Intro timing saved for this series</string>
+    <string name="intro_source">Exact times from TheIntroDB, or learned when you skip manually</string>
     <string name="items_loaded">%1$s items</string>
     <string name="lang_arabic">العربية</string>
     <string name="lang_english">English</string>
@@ -158,6 +159,7 @@
     <string name="show_epg_list">Show current programme in channel list</string>
     <string name="single_quality">This stream offers a single quality.</string>
     <string name="skip_intro">Skip intro</string>
+    <string name="skip_recap">Skip recap</string>
     <string name="stage_categories">Loading categories…</string>
     <string name="stage_connecting">Verifying subscription…</string>
     <string name="stage_content">Loading channels, movies and series…</string>

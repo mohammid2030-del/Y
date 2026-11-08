@@ -328,7 +328,8 @@ fun SettingsScreen(
             item {
                 SettingRow(
                     stringResource(R.string.intro_length),
-                    if (s.introSeconds == 0) stringResource(R.string.intro_off) else stringResource(R.string.seconds_n, s.introSeconds),
+                    stringResource(R.string.intro_source) + " · " +
+                        if (s.introSeconds == 0) stringResource(R.string.intro_off) else stringResource(R.string.seconds_n, s.introSeconds),
                     onClick = { introDialog = true },
                 )
             }

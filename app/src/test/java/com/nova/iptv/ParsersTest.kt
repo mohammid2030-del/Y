@@ -184,3 +184,31 @@ class XtreamTest {
         assertEquals("01:40:00", info.duration)
     }
 }
+
+class SegmentsParserTest {
+    @Test
+    fun parsesIntroRecapCredits() {
+        val s = com.nova.iptv.data.network.SegmentsParser.parse(
+            StringReader("""{"type":"tv","season":1,"episode":2,"intro":[{"start_ms":31000,"end_ms":92500}],"recap":[{"start_ms":0,"end_ms":28000}],"credits":[{"start_ms":2580000,"end_ms":null}],"preview":[]}""")
+        )
+        assertEquals(31000L, s.intro!!.startMs)
+        assertEquals(92500L, s.intro!!.endMs)
+        assertEquals(28000L, s.recap!!.endMs)
+        assertEquals(2580000L, s.credits!!.startMs)
+        assertEquals(-1L, s.credits!!.endMs)
+    }
+
+    @Test
+    fun handlesMissingOrInvalid() {
+        val s = com.nova.iptv.data.network.SegmentsParser.parse(StringReader("""{"intro":[{"start_ms":null,"end_ms":null}],"credits":[]}"""))
+        assertNull(s.intro)
+        assertNull(s.credits)
+        assertNull(com.nova.iptv.data.network.SegmentsParser.parse(StringReader("[]")).intro)
+    }
+
+    @Test
+    fun seriesTmdbId() {
+        val info = XtreamParser.parseSeriesInfo(StringReader("""{"info":{"name":"X","tmdb":"1396"},"episodes":{}}"""))
+        assertEquals("1396", info.tmdbId)
+    }
+}

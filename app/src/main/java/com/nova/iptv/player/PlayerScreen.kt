@@ -170,7 +170,7 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             exit = fadeOut() + slideOutHorizontally { it / 2 },
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = if (state.controlsVisible) 120.dp else 48.dp),
         ) {
-            SkipIntroButton(actions.onSkipIntro)
+            SkipIntroButton(if (state.skipIsRecap) stringResource(R.string.skip_recap) else stringResource(R.string.skip_intro), actions.onSkipIntro)
         }
 
         AnimatedVisibility(
@@ -189,7 +189,7 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = if (state.controlsVisible) 120.dp else 40.dp),
         ) {
             val next = state.upNext
-            if (next != null) UpNextCard(next, state.upNextSeconds, state.autoNext, actions)
+            if (next != null) UpNextCard(next, state.upNextSeconds, state.upNextTotal, state.autoNext, actions)
         }
 
         if (state.qualityDialog) {
@@ -331,7 +331,7 @@ private fun ChannelBanner(state: PlayerUiState) {
 
 
 @Composable
-private fun SkipIntroButton(onClick: () -> Unit) {
+private fun SkipIntroButton(label: String, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
     Row(
         Modifier
@@ -343,7 +343,7 @@ private fun SkipIntroButton(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            stringResource(R.string.skip_intro),
+            label,
             color = Color.White,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
@@ -385,7 +385,7 @@ private fun IntroAdjustBar(onAdjust: (Long) -> Unit) {
 }
 
 @Composable
-private fun UpNextCard(next: UpNextUi, seconds: Int, autoNext: Boolean, actions: PlayerActions) {
+private fun UpNextCard(next: UpNextUi, seconds: Int, total: Int, autoNext: Boolean, actions: PlayerActions) {
     val shape = RoundedCornerShape(22.dp)
     Column(
         Modifier
@@ -406,7 +406,7 @@ private fun UpNextCard(next: UpNextUi, seconds: Int, autoNext: Boolean, actions:
                 Box(contentAlignment = Alignment.Center) {
                     if (autoNext) {
                         CircularProgressIndicator(
-                            progress = { (seconds / 25f).coerceIn(0f, 1f) },
+                            progress = { (seconds.toFloat() / total.coerceAtLeast(1)).coerceIn(0f, 1f) },
                             modifier = Modifier.size(46.dp),
                             color = Color.White,
                             trackColor = Color.White.copy(alpha = 0.25f),

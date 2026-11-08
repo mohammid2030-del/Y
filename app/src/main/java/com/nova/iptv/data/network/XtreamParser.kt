@@ -31,6 +31,7 @@ data class XEpisode(
 
 data class XSeriesInfo(
     val name: String,
+    val tmdbId: String = "",
     val plot: String,
     val cover: String,
     val genre: String,
@@ -170,6 +171,7 @@ object XtreamParser {
         seasons.values.forEach { list -> list.sortBy { it.episodeNum } }
         return XSeriesInfo(
             name = info.str("name"),
+            tmdbId = info.str("tmdb").ifBlank { info.str("tmdb_id") }.filter { it.isDigit() },
             plot = info.str("plot"),
             cover = info.str("cover"),
             genre = info.str("genre"),

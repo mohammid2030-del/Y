@@ -32,7 +32,7 @@ data class AppSettings(
     val parentalPinSet: Boolean = false,
     val lastChannel: String = "",
     val showEpgInList: Boolean = true,
-    val introSeconds: Int = 85,
+    val introSeconds: Int = 0,
     val autoNext: Boolean = true,
 )
 
@@ -67,7 +67,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             parentalPinSet = !p[Keys.PIN_HASH].isNullOrEmpty(),
             lastChannel = p[Keys.LAST_CHANNEL] ?: "",
             showEpgInList = p[Keys.SHOW_EPG] ?: true,
-            introSeconds = p[Keys.INTRO] ?: 85,
+            introSeconds = p[Keys.INTRO] ?: 0,
             autoNext = p[Keys.AUTO_NEXT] ?: true,
         )
     }.distinctUntilChanged()
