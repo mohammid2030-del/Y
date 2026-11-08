@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 
 enum Phase: Equatable {
+    case signIn
     case profiles
     case viewers
     case addSubscription(String?)
@@ -21,6 +22,8 @@ final class AppState: ObservableObject {
     @Published var viewers: [Viewer] = []
     @Published var viewerID = "main"
     @Published var cloudStatus = ""
+    /// Google account the subscriptions are saved to (nil = not signed in).
+    @Published var account: String? = Cloud.shared.accountUID == nil ? nil : Cloud.shared.accountEmail
     @Published var catalog = Catalog() { didSet { rebuildIndex() } }
     /// Shelves, duplicate groups and quality, rebuilt in the background whenever the catalog changes.
     @Published var index: CatalogIndex?
@@ -45,7 +48,12 @@ final class AppState: ObservableObject {
         favorites = Storage.load("favorites", as: [FavItem].self) ?? []
         history = Storage.load("history", as: [String: HistoryItem].self) ?? [:]
         activeID = Storage.string("activeSub") ?? subs.first?.id ?? ""
-        phase = subs.isEmpty ? .addSubscription(nil) : .profiles
+        if subs.isEmpty {
+            phase = Cloud.shared.googleAvailable && account == nil ? .signIn : .addSubscription(nil)
+        } else {
+            phase = .profiles
+        }
+        if account != nil { Task { await pullAccount() } }
     }
 
     var active: Subscription? { subs.first { $0.id == activeID } }
@@ -71,17 +79,23 @@ final class AppState: ObservableObject {
         let sid = id ?? UUID().uuidString
         let srv = kind == .xtream ? Xtream.normalize(server) : ""
         let host = URL(string: kind == .xtream ? srv : m3u)?.host ?? "NOVA"
-        let sub = Subscription(id: sid, name: name.isEmpty ? host : name, kind: kind, server: srv, username: user)
-        if let i = subs.firstIndex(where: { $0.id == sid }) { subs[i] = sub } else { subs.append(sub) }
+        var sub = Subscription(id: sid, name: name.isEmpty ? host : name, kind: kind, server: srv, username: user)
+        sub.updated = Date().timeIntervalSince1970
+        if let i = subs.firstIndex(where: { $0.id == sid }) { sub.expires = subs[i].expires; subs[i] = sub } else { subs.append(sub) }
         Keychain.set(pass, for: "pass|\(sid)")
         Keychain.set(m3u, for: "m3u|\(sid)")
         Storage.save("subs", subs)
+        pushAccountSub(sub)
         activeID = sid
         Storage.setString("activeSub", sid)
         phase = .syncing(sid)
     }
 
     func delete(_ id: String) {
+        if let uid = Cloud.shared.accountUID {
+            let tomb: [String: Any] = ["x": true, "up": Date().timeIntervalSince1970]
+            Task { await Cloud.shared.put("users/\(uid)/subs/\(Cloud.safe(id))", tomb) }
+        }
         subs.removeAll { $0.id == id }
         favorites.removeAll { $0.subID == id || $0.subID.hasPrefix(id + "#") }
         history = history.filter { $0.value.subID != id && !$0.value.subID.hasPrefix(id + "#") }
@@ -399,6 +413,73 @@ final class AppState: ObservableObject {
         updateMatchPrefs { p in
             if let i = p.comps.firstIndex(of: slug) { p.comps.remove(at: i) } else { p.comps.append(slug) }
         }
+    }
+
+    // MARK: Google account: subscriptions (and the TMDB key) follow the account to every device
+
+    private func pushAccountSub(_ sub: Subscription) {
+        guard let uid = Cloud.shared.accountUID else { return }
+        let d: [String: Any] = ["n": sub.name, "t": sub.kind == .xtream ? "xtream" : "m3u", "s": sub.server, "u": sub.username,
+                                "p": Keychain.get("pass|\(sub.id)") ?? "", "m": Keychain.get("m3u|\(sub.id)") ?? "",
+                                "up": sub.updated ?? Date().timeIntervalSince1970]
+        Task { await Cloud.shared.put("users/\(uid)/subs/\(Cloud.safe(sub.id))", d) }
+    }
+
+    func pushAccountSettings(tmdbKey: String?) {
+        guard let uid = Cloud.shared.accountUID else { return }
+        Task { await Cloud.shared.put("users/\(uid)/settings/tmdb", tmdbKey ?? "") }
+    }
+
+    /// Merges the account's subscriptions with this device's (newest wins, deletions travel), then the TMDB key.
+    func pullAccount() async {
+        guard let uid = Cloud.shared.accountUID else { return }
+        let remote = (await Cloud.shared.get("users/\(uid)") as? [String: Any]) ?? [:]
+        let rs = remote["subs"] as? [String: Any] ?? [:]
+        var changed = false
+        for (id, raw) in rs {
+            guard let d = raw as? [String: Any] else { continue }
+            let up = Double(jstr(d["up"])) ?? 0
+            if (d["x"] as? Bool) == true {
+                if let local = subs.first(where: { Cloud.safe($0.id) == id }), (local.updated ?? 0) <= up {
+                    subs.removeAll { $0.id == local.id }; changed = true
+                }
+                continue
+            }
+            let kind: SourceKind = jstr(d["t"]) == "m3u" ? .m3u : .xtream
+            var sub = Subscription(id: id, name: jstr(d["n"]), kind: kind, server: jstr(d["s"]), username: jstr(d["u"]))
+            sub.updated = up
+            if let i = subs.firstIndex(where: { Cloud.safe($0.id) == id }) {
+                if (subs[i].updated ?? 0) < up {
+                    sub.id = subs[i].id; sub.lastSync = subs[i].lastSync; sub.expires = subs[i].expires
+                    subs[i] = sub; changed = true
+                    Keychain.set(jstr(d["p"]), for: "pass|\(sub.id)"); Keychain.set(jstr(d["m"]), for: "m3u|\(sub.id)")
+                } else if (subs[i].updated ?? 0) > up { pushAccountSub(subs[i]) }
+            } else {
+                subs.append(sub); changed = true
+                Keychain.set(jstr(d["p"]), for: "pass|\(id)"); Keychain.set(jstr(d["m"]), for: "m3u|\(id)")
+            }
+        }
+        for s in subs where rs[Cloud.safe(s.id)] == nil { pushAccountSub(s) }
+        if changed { Storage.save("subs", subs) }
+        if let key = (remote["settings"] as? [String: Any])?["tmdb"] as? String, !key.isEmpty, !tmdbOn {
+            if await TMDB.shared.setKey(key) { tmdbOn = true }
+        } else if tmdbOn, ((remote["settings"] as? [String: Any])?["tmdb"] as? String ?? "").isEmpty,
+                  let mine = Keychain.get("tmdbKey") {
+            pushAccountSettings(tmdbKey: mine)
+        }
+    }
+
+    /// After Google sign-in: bring the account's subscriptions here and continue.
+    func didSignIn(_ email: String) async {
+        account = email
+        await pullAccount()
+        if subs.isEmpty { phase = .addSubscription(nil) }
+        else if phase == .signIn || phase == .addSubscription(nil) { phase = .profiles }
+    }
+
+    func signOut() {
+        Task { await Cloud.shared.signOutGoogle() }
+        account = nil
     }
 
     // MARK: viewers

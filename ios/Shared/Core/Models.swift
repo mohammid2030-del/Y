@@ -12,6 +12,8 @@ struct Subscription: Codable, Identifiable, Hashable {
     var username: String = ""
     var lastSync: Date?
     var expires: Date?
+    /// Last change (for Google-account sync of subscriptions).
+    var updated: Double? = nil
 }
 
 struct Category: Codable, Identifiable, Hashable {

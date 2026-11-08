@@ -28,9 +28,84 @@ actor Cloud {
     private var idToken = ""
     private var expiry = Date.distantPast
 
+    // MARK: Google account (device sign-in: code on the TV, google.com/device on the phone)
+
+    nonisolated var googleAvailable: Bool { enabled && !CloudConfig.googleClientID.isEmpty && !CloudConfig.googleClientSecret.isEmpty }
+    nonisolated var accountEmail: String? { UserDefaults.standard.string(forKey: "fbEmail") }
+    nonisolated var accountUID: String? { Keychain.get("fbUserRefresh") == nil ? nil : UserDefaults.standard.string(forKey: "fbUID") }
+
+    struct DeviceCode { let device: String; let user: String; let url: String; let interval: Int; let expires: Date }
+    enum LoginResult { case ok(String), pending, denied, expired, failed }
+
+    func startGoogle() async -> DeviceCode? {
+        guard googleAvailable else { return nil }
+        let body = "client_id=\(form(CloudConfig.googleClientID))&scope=\(form("openid email profile"))"
+        guard let j = await post("https://oauth2.googleapis.com/device/code", body: body, form: true),
+              let dc = j["device_code"] as? String, let uc = j["user_code"] as? String else { return nil }
+        let url = jstr(j["verification_url"]).isEmpty ? "https://www.google.com/device" : jstr(j["verification_url"])
+        return DeviceCode(device: dc, user: uc, url: url, interval: max(5, jint(j["interval"])),
+                          expires: Date().addingTimeInterval(Double(max(60, jint(j["expires_in"])))))
+    }
+
+    /** One poll of Google's token endpoint; on success signs in to Firebase with the Google identity. */
+    func pollGoogle(_ code: DeviceCode) async -> LoginResult {
+        if Date() > code.expires { return .expired }
+        let body = "client_id=\(form(CloudConfig.googleClientID))&client_secret=\(form(CloudConfig.googleClientSecret))" +
+            "&device_code=\(form(code.device))&grant_type=\(form("urn:ietf:params:oauth:grant-type:device_code"))"
+        guard let u = URL(string: "https://oauth2.googleapis.com/token") else { return .failed }
+        var r = URLRequest(url: u)
+        r.httpMethod = "POST"; r.timeoutInterval = 15
+        r.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        r.httpBody = body.data(using: .utf8)
+        guard let (d, _) = try? await URLSession.shared.data(for: r),
+              let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return .pending }
+        if let err = j["error"] as? String {
+            switch err {
+            case "authorization_pending", "slow_down": return .pending
+            case "access_denied": return .denied
+            case "expired_token": return .expired
+            default: return .failed
+            }
+        }
+        guard let googleID = j["id_token"] as? String else { return .failed }
+        let payload: [String: Any] = ["postBody": "id_token=\(googleID)&providerId=google.com", "requestUri": "http://localhost",
+                                      "returnSecureToken": true, "returnIdpCredential": true]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload), let bodyStr = String(data: data, encoding: .utf8),
+              let f = await post("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=\(CloudConfig.apiKey)", body: bodyStr, form: false),
+              let t = f["idToken"] as? String, let refresh = f["refreshToken"] as? String else { return .failed }
+        idToken = t
+        expiry = Date().addingTimeInterval(Double(jint(f["expiresIn"])) - 120)
+        Keychain.set(refresh, for: "fbUserRefresh")
+        UserDefaults.standard.set(jstr(f["localId"]), forKey: "fbUID")
+        let email = jstr(f["email"])
+        UserDefaults.standard.set(email, forKey: "fbEmail")
+        return .ok(email)
+    }
+
+    func signOutGoogle() {
+        Keychain.set(nil, for: "fbUserRefresh")
+        UserDefaults.standard.removeObject(forKey: "fbUID")
+        UserDefaults.standard.removeObject(forKey: "fbEmail")
+        idToken = ""
+    }
+
+    private func form(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? s
+    }
+
     private func token() async -> String? {
         if !idToken.isEmpty && Date() < expiry { return idToken }
         let key = CloudConfig.apiKey
+        // Signed in with Google: that identity (it can read users/<uid> as well as the subscription folders).
+        if let userRefresh = Keychain.get("fbUserRefresh"),
+           let j = await post("https://securetoken.googleapis.com/v1/token?key=\(key)",
+                              body: "grant_type=refresh_token&refresh_token=\(userRefresh)", form: true),
+           let t = j["id_token"] as? String {
+            idToken = t
+            expiry = Date().addingTimeInterval(Double(jint(j["expires_in"])) - 120)
+            if let r = j["refresh_token"] as? String { Keychain.set(r, for: "fbUserRefresh") }
+            return t
+        }
         if let refresh = Keychain.get("fbRefresh"),
            let j = await post("https://securetoken.googleapis.com/v1/token?key=\(key)",
                               body: "grant_type=refresh_token&refresh_token=\(refresh)", form: true),
@@ -81,6 +156,7 @@ actor Cloud {
     func get(_ path: String) async -> Any? { await call("GET", path) }
     func put(_ path: String, _ value: Any) async { _ = await call("PUT", path, value) }
     func patch(_ path: String, _ value: [String: Any]) async { _ = await call("PATCH", path, value) }
+    func delete(_ path: String) async { _ = await call("DELETE", path) }
 
     /// Firebase keys can't contain . $ # [ ] /
     nonisolated static func safe(_ s: String) -> String {

@@ -20,6 +20,7 @@ struct RootView: View {
         ZStack {
             Theme.bg.ignoresSafeArea()
             switch state.phase {
+            case .signIn: GoogleSignInView()
             case .profiles: ProfilesView()
             case .viewers: ViewersView()
             case .addSubscription(let id): AddSubscriptionView(editingID: id)

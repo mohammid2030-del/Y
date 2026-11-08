@@ -282,6 +282,18 @@ struct SettingsView: View {
                 Button(L.t("addSub")) { state.phase = .addSubscription(nil) }
                 Button(L.t("switchProfile")) { state.phase = .profiles }
             }
+            if Cloud.shared.googleAvailable {
+                Section(L.t("googleAccount")) {
+                    if let email = state.account {
+                        Text(L.t("signedInAs", email))
+                        Button(L.t("syncNow")) { Task { await state.pullAccount() } }
+                        Button(L.t("signOut"), role: .destructive) { state.signOut() }
+                    } else {
+                        Text(L.t("googleHint")).font(.footnote).foregroundStyle(.secondary)
+                        Button(L.t("signInGoogle")) { state.phase = .signIn }
+                    }
+                }
+            }
             Section(L.t("viewers")) {
                 Button(L.t("switchViewer") + " (" + (state.currentViewer?.name ?? "") + ")") { state.phase = .viewers }
                 Text(Cloud.shared.enabled ? L.t("cloudOnHint") : L.t("cloudOffHint")).font(.footnote).foregroundStyle(.secondary)
@@ -305,10 +317,11 @@ struct SettingsView: View {
                     Button(checking ? "…" : L.t("save")) {
                         checking = true
                         Task {
-                            let ok = await TMDB.shared.setKey(tmdbKey)
+                            let entered = tmdbKey
+                            let ok = await TMDB.shared.setKey(entered)
                             checking = false
                             tmdbMessage = L.t(ok ? "tmdbSaved" : "tmdbInvalid")
-                            if ok { state.tmdbOn = true; tmdbKey = "" }
+                            if ok { state.tmdbOn = true; tmdbKey = ""; state.pushAccountSettings(tmdbKey: entered.trimmingCharacters(in: .whitespacesAndNewlines)) }
                         }
                     }.disabled(tmdbKey.count < 16 || checking)
                 }
