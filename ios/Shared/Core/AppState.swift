@@ -24,6 +24,8 @@ final class AppState: ObservableObject {
     @Published var syncError: String?
     @Published var tmdbOn = TMDB.enabledNow
     @Published var showMatches = Storage.string("showMatches") != "0"
+    /// A search started from elsewhere (e.g. a cast member's known titles).
+    @Published var pendingSearch: String?
     @Published var matchPrefs: MatchPrefs = Storage.load("matchPrefs", as: MatchPrefs.self) ?? MatchPrefs()
 
     private var byCategoryCache: [String: [MediaItem]] = [:]
@@ -216,6 +218,11 @@ final class AppState: ObservableObject {
     func clearHistory() {
         history = history.filter { $0.value.subID != activeID }
         Storage.save("history", history)
+    }
+
+    func searchFor(_ text: String) {
+        pendingSearch = Clean.title(text)
+        tab = .search
     }
 
     func updateMatchPrefs(_ change: (inout MatchPrefs) -> Void) {

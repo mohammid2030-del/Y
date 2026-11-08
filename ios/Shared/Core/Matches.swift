@@ -200,7 +200,13 @@ enum Matches {
             if ch.id == learnedMatch { score += 500 }
             if score > 0 { scored.append((ch, score)) }
         }
-        return scored.sorted { $0.1 > $1.1 }.prefix(12).map { $0 }
+        return scored.sorted { $0.1 > $1.1 }
+    }
+
+    /// The channel carries the competition's regional rights holder (beIN for the Premier League, Thmanyah for the SPL …).
+    static func isRightsHolder(_ m: Match, _ name: String) -> Bool {
+        let text = name.lowercased()
+        return (hints[m.slug] ?? []).contains { text.contains($0) }
     }
 
     /// Arabic spellings for clubs that EPGs in Arabic use.
@@ -237,25 +243,29 @@ enum Matches {
         let home = tokens(m.home), away = tokens(m.away)
         let t0 = Int(m.start.timeIntervalSince1970)
         var hits: [String: Bool] = [:]
-        await withTaskGroup(of: (String, Bool).self) { group in
-            for (ch, _) in candidates {
-                group.addTask {
-                    let progs = await withTaskGroup(of: [(start: Int, stop: Int, text: String)]?.self) { g -> [(start: Int, stop: Int, text: String)] in
-                        g.addTask { await xtream.shortEPG(ch.id) }
-                        g.addTask { try? await Task.sleep(nanoseconds: 5_000_000_000); return nil }
-                        let first = await g.next() ?? nil
-                        g.cancelAll()
-                        return first ?? []
+        // Eight guide requests at a time, each capped at 5 s.
+        for chunkStart in stride(from: 0, to: candidates.count, by: 8) {
+            let chunk = Array(candidates[chunkStart..<min(candidates.count, chunkStart + 8)])
+            await withTaskGroup(of: (String, Bool).self) { group in
+                for (ch, _) in chunk {
+                    group.addTask {
+                        let progs = await withTaskGroup(of: [(start: Int, stop: Int, text: String)]?.self) { g -> [(start: Int, stop: Int, text: String)] in
+                            g.addTask { await xtream.shortEPG(ch.id) }
+                            g.addTask { try? await Task.sleep(nanoseconds: 5_000_000_000); return nil }
+                            let first = await g.next() ?? nil
+                            g.cancelAll()
+                            return first ?? []
+                        }
+                        let hit = progs.contains { p in
+                            let near = p.start == 0 || (p.start <= t0 + 2 * 3600 && (p.stop == 0 || p.stop >= t0 - 30 * 60))
+                            let txt = p.text.lowercased()
+                            return near && (home.contains { txt.contains($0) } || away.contains { txt.contains($0) })
+                        }
+                        return (ch.id, hit)
                     }
-                    let hit = progs.contains { p in
-                        let near = p.start == 0 || (p.start <= t0 + 2 * 3600 && (p.stop == 0 || p.stop >= t0 - 30 * 60))
-                        let txt = p.text.lowercased()
-                        return near && (home.contains { txt.contains($0) } || away.contains { txt.contains($0) })
-                    }
-                    return (ch.id, hit)
                 }
+                for await (id, hit) in group { hits[id] = hit }
             }
-            for await (id, hit) in group { hits[id] = hit }
         }
         return candidates.map { ($0.0, $0.1 + (hits[$0.0.id] == true ? 400 : 0), hits[$0.0.id] == true) }.sorted { $0.1 > $1.1 }
     }

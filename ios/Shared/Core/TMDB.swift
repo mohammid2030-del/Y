@@ -2,7 +2,9 @@ import Foundation
 
 struct TMDBCard: Codable, Hashable { var poster: String; var title: String; var id: Int; var backdrop: String? = nil }
 
-struct TMDBPerson: Hashable { var name: String; var role: String; var photo: String }
+struct TMDBPerson: Hashable { var name: String; var role: String; var photo: String; var id: Int = 0 }
+
+struct TMDBPersonInfo { var bio = ""; var born = ""; var place = ""; var knownFor: [TMDBCard] = [] }
 
 struct TMDBInfo {
     var id: Int
@@ -83,17 +85,23 @@ actor TMDB {
         let y = year.prefix(4).allSatisfy(\.isNumber) && year.count >= 4 ? String(year.prefix(4)) : c.year
         let ck = "\(kind.rawValue)|\(lang)|\(c.title)|\(y)"
         if let hit = cards[ck] { return hit.id == 0 && hit.poster.isEmpty ? nil : hit }
-        while running >= 4 { try? await Task.sleep(nanoseconds: 80_000_000) }
+        while running >= 6 {
+            if Task.isCancelled { return nil }          // card scrolled away: don't spin
+            try? await Task.sleep(nanoseconds: 60_000_000)
+        }
+        if Task.isCancelled { return nil }
         running += 1
         defer { running -= 1 }
         let tv = kind == .series
         var params = ["query": c.title, "language": lang, "include_adult": "false"]
         if !y.isEmpty { params[tv ? "first_air_date_year" : "year"] = y }
         let path = tv ? "search/tv" : "search/movie"
-        var results = ((try? await get(path, params))?["results"] as? [[String: Any]]) ?? []
+        // A failed request (offline, rate limit) is not cached as "no poster", so it is retried next time.
+        guard var results = (try? await get(path, params))?["results"] as? [[String: Any]] else { return nil }
         if results.isEmpty && !y.isEmpty {
             params.removeValue(forKey: tv ? "first_air_date_year" : "year")
-            results = ((try? await get(path, params))?["results"] as? [[String: Any]]) ?? []
+            guard let r2 = (try? await get(path, params))?["results"] as? [[String: Any]] else { return nil }
+            results = r2
         }
         let f = results.first
         var title = jstr(f?[tv ? "name" : "title"])
@@ -157,7 +165,7 @@ actor TMDB {
         info.logo = img(pick("logos", [lang, "en", nil]), "w500")
         let credits = o["credits"] as? [String: Any] ?? [:]
         info.cast = ((credits["cast"] as? [[String: Any]]) ?? []).prefix(15).map {
-            TMDBPerson(name: jstr($0["name"]), role: jstr($0["character"]), photo: img(jstr($0["profile_path"]), "w185"))
+            TMDBPerson(name: jstr($0["name"]), role: jstr($0["character"]), photo: img(jstr($0["profile_path"]), "w185"), id: jint($0["id"]))
         }
         info.creators = tv ? ((o["created_by"] as? [[String: Any]]) ?? []).map { jstr($0["name"]) }
             : ((credits["crew"] as? [[String: Any]]) ?? []).filter { jstr($0["job"]) == "Director" }.map { jstr($0["name"]) }
@@ -174,6 +182,24 @@ actor TMDB {
         }
         infos[ik] = info
         return info
+    }
+
+    /// Biography and best-known titles of a cast member.
+    func person(_ id: Int) async -> TMDBPersonInfo? {
+        guard !key.isEmpty, id > 0,
+              let o = try? await get("person/\(id)", ["language": lang, "append_to_response": "combined_credits"]) else { return nil }
+        var p = TMDBPersonInfo()
+        p.bio = jstr(o["biography"])
+        if p.bio.isEmpty && lang != "en", let en = try? await get("person/\(id)", ["language": "en-US"]) { p.bio = jstr(en["biography"]) }
+        p.born = jstr(o["birthday"])
+        p.place = jstr(o["place_of_birth"])
+        let cast = ((o["combined_credits"] as? [String: Any])?["cast"] as? [[String: Any]]) ?? []
+        var seen = Set<Int>()
+        p.knownFor = cast.sorted { (Double(jstr($0["vote_count"])) ?? 0) > (Double(jstr($1["vote_count"])) ?? 0) }
+            .filter { !jstr($0["poster_path"]).isEmpty && seen.insert(jint($0["id"])).inserted }
+            .prefix(12)
+            .map { TMDBCard(poster: img(jstr($0["poster_path"]), "w342"), title: jstr($0["title"]).isEmpty ? jstr($0["name"]) : jstr($0["title"]), id: jint($0["id"])) }
+        return p
     }
 
     func season(tvID: Int, season: Int) async -> [Int: TMDBEpisode] {

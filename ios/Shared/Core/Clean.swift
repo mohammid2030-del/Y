@@ -4,7 +4,7 @@ import Foundation
 enum Clean {
     private static let prefixCodes: Set<String> = ["AR", "EN", "TR", "FR", "DE", "ES", "IT", "IN", "US", "UK", "KSA", "SA", "EG", "AE", "KW", "QA",
                                                    "NF", "OSN", "AS", "KR", "CN", "JP", "HI", "4K", "8K", "FHD", "UHD", "HD", "VIP", "MULTI"]
-    private static let tags: Set<String> = ["4K", "8K", "UHD", "FHD", "HD", "SD", "HEVC", "H265", "H264", "HDR", "AR", "EN", "TR", "DO", "DB",
+    private static let tags: Set<String> = ["TOP", "NEW", "4K", "8K", "UHD", "FHD", "HD", "SD", "HEVC", "H265", "H264", "HDR", "AR", "EN", "TR", "DO", "DB",
                                             "SUB", "SUBS", "DUB", "DUBBED", "MULTI", "ARSUB", "VIP", "NF", "ULTRA", "ULTRAHD", "RAW", "AMZ", "ATV",
                                             "DSNP", "HMAX", "MAX", "HULU", "PRIME", "US", "UK", "GB", "CA", "AU", "KR", "JP", "FR", "DE", "ES", "IT",
                                             "MX", "BR", "SUIBS", "DV", "DOLBY", "ATMOS", "REMUX", "WEB", "WEBDL", "BLURAY", "1080P", "720P", "2160P"]
@@ -26,15 +26,33 @@ enum Clean {
         return (r, groups)
     }
 
+    /// "4K-TOP", "TOP", "NF-AR", "VIP+" — an all-caps provider tag, never a real title word.
+    private static func isProviderTag(_ g: String) -> Bool {
+        if isTagGroup(g) { return true }
+        let letters = g.filter { $0.isLetter }
+        return g.count <= 12 && !letters.isEmpty && letters.allSatisfy { $0.isUppercase && $0.isASCII } && g.contains(where: { $0.isNumber || "-_+.".contains($0) || g.count <= 4 })
+    }
+
     static func full(_ raw: String) -> (title: String, year: String) {
         var t = raw.trimmingCharacters(in: .whitespaces)
-        if let m = firstMatch(#"^\s*[|\[(]?\s*([A-Za-z0-9]{2,5})\s*[|\])]?\s*[:|]\s*"#, t),
+        // "[4K]", "|AR|", "(NF)" at the start
+        for _ in 0..<2 {
+            if let m = firstMatch(#"^\s*[\[(|▎]\s*([^\])|▎]{1,12})\s*[\])|▎]\s*[:\-–—]?\s*"#, t),
+               isProviderTag(m.groups.first ?? ""), t[m.range.upperBound...].count > 1 {
+                t = String(t[m.range.upperBound...])
+            }
+        }
+        // "AR: ", "EN | "
+        if let m = firstMatch(#"^\s*([A-Za-z0-9]{2,5})\s*[:|]\s*"#, t),
            prefixCodes.contains(m.groups.first?.uppercased() ?? ""), t[m.range.upperBound...].count > 0 {
             t = String(t[m.range.upperBound...])
         }
-        if let m = firstMatch(#"^\s*([A-Za-z0-9][A-Za-z0-9_\-]{0,14})\s+[-|–—]\s+"#, t),
-           isTagGroup(m.groups.first ?? ""), t[m.range.upperBound...].count > 0 {
-            t = String(t[m.range.upperBound...])
+        // "4K-TOP - ", "NF - ", "TOP | "
+        for _ in 0..<2 {
+            if let m = firstMatch(#"^\s*([A-Za-z0-9][A-Za-z0-9_\-+.]{0,14})\s*[-|–—:▎]\s+"#, t),
+               isProviderTag(m.groups.first ?? ""), t[m.range.upperBound...].count > 1 {
+                t = String(t[m.range.upperBound...])
+            }
         }
         var year = ""
         if let m = firstMatch(#"[(\[]((?:19|20)\d{2})[)\]]"#, t) {
@@ -42,12 +60,20 @@ enum Clean {
             if m.range.lowerBound > t.startIndex { t = String(t[..<m.range.lowerBound]) }
         }
         t = t.replacingOccurrences(of: #"[(\[][^)\]]*[)\]]"#, with: " ", options: .regularExpression)
+        // "Title S01", "Title S01E05", "Title - Season 2", "… الموسم 2"
+        t = t.replacingOccurrences(of: #"\s[-–]?\s*(S\d{1,2}(\s*E\d{1,3})?|Season\s*\d+|الموسم\s*\S+)\b.*$"#, with: "",
+                                   options: [.regularExpression, .caseInsensitive])
+        // trailing bare year: "Drive 2025", "Drive - 2025"
+        if year.isEmpty, let m = firstMatch(#"\s[-–]?\s*((?:19|20)\d{2})\s*$"#, t), m.range.lowerBound > t.startIndex {
+            year = m.groups.first ?? ""
+            t = String(t[..<m.range.lowerBound])
+        }
         var words = t.split(separator: " ").map(String.init)
         while words.count > 1, let last = words.last,
-              tags.contains(last.trimmingCharacters(in: CharacterSet(charactersIn: "-|")).uppercased()) || last == "-" || last == "|" {
+              tags.contains(last.trimmingCharacters(in: CharacterSet(charactersIn: "-|")).uppercased()) || last == "-" || last == "|" || last == "–" {
             words.removeLast()
         }
-        let out = words.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        let out = words.joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: " -|–:"))
         return (out.isEmpty ? raw.trimmingCharacters(in: .whitespaces) : out, year)
     }
 

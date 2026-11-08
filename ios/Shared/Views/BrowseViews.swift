@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Movies / Series: category chips, then rows per category (or a grid for one category).
-struct CatalogView: View {
+struct CatalogViewPhone: View {
     let kind: MediaKind
     @EnvironmentObject var state: AppState
 
@@ -104,7 +104,7 @@ struct CategoryGridView: View {
 }
 
 /// Live TV: categories as chips, channels as a grid of logo tiles. Tapping plays with the category as the zapping list.
-struct LiveView: View {
+struct LiveViewPhone: View {
     @EnvironmentObject var state: AppState
     @State private var selected: String?
 
@@ -153,7 +153,7 @@ struct LiveView: View {
     }
 }
 
-private struct SearchHit: Identifiable {
+private struct SearchHit: Identifiable, Sendable {
     let kind: MediaKind
     let item: MediaItem
     var id: String { kind.rawValue + item.id }
@@ -197,20 +197,31 @@ struct SearchView: View {
             .padding(.vertical, 20)
         }
         .navigationTitle(L.t("search"))
+        .onAppear { takePending() }
+        .onChange(of: state.pendingSearch) { _ in takePending() }
         .task(id: query) {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+            let q = query.trimmingCharacters(in: .whitespaces)
             guard q.count >= 2 else { results = []; return }
-            var out: [SearchHit] = []
             let groups: [(MediaKind, [MediaItem])] = [(.live, state.catalog.live), (.movie, state.catalog.movies), (.series, state.catalog.series)]
-            for (k, list) in groups {
-                for m in list where m.name.lowercased().contains(q) {
-                    out.append(SearchHit(kind: k, item: m))
-                    if out.count >= 240 { break }
+            // Scan the catalog off the main thread so typing stays smooth.
+            let out = await Task.detached(priority: .userInitiated) { () -> [SearchHit] in
+                var out: [SearchHit] = []
+                for (k, list) in groups {
+                    var n = 0
+                    for m in list where m.name.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+                        out.append(SearchHit(kind: k, item: m)); n += 1
+                        if n >= 120 { break }
+                    }
                 }
-            }
-            results = out
+                return out
+            }.value
+            if !Task.isCancelled { results = out }
         }
+    }
+
+    private func takePending() {
+        if let p = state.pendingSearch, !p.isEmpty { query = p; state.pendingSearch = nil }
     }
 }
 
@@ -311,3 +322,164 @@ struct SettingsView: View {
         .navigationTitle(L.t("settings"))
     }
 }
+
+
+// MARK: - Platform switch
+
+struct CatalogView: View {
+    let kind: MediaKind
+    var body: some View {
+        #if os(tvOS)
+        CatalogViewTV(kind: kind)
+        #else
+        CatalogViewPhone(kind: kind)
+        #endif
+    }
+}
+
+struct LiveView: View {
+    var body: some View {
+        #if os(tvOS)
+        LiveViewTV()
+        #else
+        LiveViewPhone()
+        #endif
+    }
+}
+
+#if os(tvOS)
+/// One row of the left-hand category list on Apple TV.
+private struct SideRow: View {
+    let title: String
+    var icon: String? = nil
+    var count: Int? = nil
+    let selected: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                if let icon { Image(systemName: icon).frame(width: 30) }
+                Text(title).lineLimit(1)
+                Spacer(minLength: 8)
+                if let count { Text("\(count)").font(.caption).foregroundStyle(.secondary) }
+                if selected { Image(systemName: "checkmark").foregroundStyle(Theme.blue) }
+            }
+            .font(.system(size: 26, weight: selected ? .bold : .medium))
+        }
+    }
+}
+
+/// Movies / Series on Apple TV: categories on the left, a poster grid on the right.
+/// Lists stay small and fast, and the remote always moves predictably (left = categories, right = posters).
+struct CatalogViewTV: View {
+    let kind: MediaKind
+    @EnvironmentObject var state: AppState
+    @State private var selected = "__recent"
+
+    private var items: [MediaItem] {
+        switch selected {
+        case "__recent": return state.latest(kind, 60)
+        case "__fav": return state.favorites.filter { $0.subID == state.activeID && $0.kind == kind }.map(\.stream)
+        case "__cont": return state.continueWatching.filter { $0.kind == kind }.map(\.stream)
+        default: return state.items(kind, category: selected)
+        }
+    }
+
+    private var title: String {
+        switch selected {
+        case "__recent": return L.t("recentlyAdded")
+        case "__fav": return L.t("favorites")
+        case "__cont": return L.t("continueWatching")
+        default: return state.catalog.categories(kind).first { $0.id == selected }?.name ?? ""
+        }
+    }
+
+    var body: some View {
+        let cats = state.catalog.categories(kind)
+        let list = items
+        HStack(alignment: .top, spacing: 30) {
+            List {
+                SideRow(title: L.t("recentlyAdded"), icon: "sparkles", selected: selected == "__recent") { selected = "__recent" }
+                if state.continueWatching.contains(where: { $0.kind == kind }) {
+                    SideRow(title: L.t("continueWatching"), icon: "play.circle", selected: selected == "__cont") { selected = "__cont" }
+                }
+                SideRow(title: L.t("favorites"), icon: "heart", selected: selected == "__fav") { selected = "__fav" }
+                ForEach(cats) { c in
+                    SideRow(title: c.name, selected: selected == c.id) { selected = c.id }
+                }
+            }
+            .frame(width: 480)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(title).font(.title3.bold())
+                    Text("\(list.count)").foregroundStyle(.secondary)
+                }
+                if list.isEmpty {
+                    EmptyState(text: L.t(selected == "__fav" ? "emptyFav" : "empty"))
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(Theme.posterW), spacing: 44), count: 5), spacing: 56) {
+                            ForEach(list) { m in
+                                NavigationLink(value: kind == .movie ? Route.movie(m) : Route.series(m)) { PosterCard(item: m, kind: kind) }
+                                    .buttonStyle(.card)
+                            }
+                        }
+                        .padding(.vertical, 30).padding(.horizontal, 20)
+                    }
+                    .id(selected)
+                }
+            }
+        }
+        .padding(.leading, 40)
+    }
+}
+
+/// Live TV on Apple TV: categories on the left, a fast channel list on the right.
+struct LiveViewTV: View {
+    @EnvironmentObject var state: AppState
+    @State private var selected: String?
+    @State private var didPick = false
+
+    var body: some View {
+        let cats = state.catalog.liveCats
+        let items = state.items(.live, category: selected)
+        HStack(alignment: .top, spacing: 30) {
+            List {
+                SideRow(title: L.t("all"), icon: "square.grid.2x2", count: state.catalog.live.count, selected: selected == nil) { selected = nil }
+                ForEach(cats) { c in
+                    SideRow(title: c.name, selected: selected == c.id) { selected = c.id }
+                }
+            }
+            .frame(width: 520)
+            if items.isEmpty {
+                EmptyState(text: L.t("empty"))
+            } else {
+                List {
+                    ForEach(items) { ch in
+                        Button { state.playLive(ch, list: items) } label: {
+                            HStack(spacing: 20) {
+                                RemoteImage(url: ch.logo, contentMode: .fit, placeholderIcon: "tv", maxPixel: 200)
+                                    .frame(width: 110, height: 64)
+                                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 10))
+                                if ch.num > 0 { Text("\(ch.num)").font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 70, alignment: .leading) }
+                                Text(ch.name).font(.system(size: 26, weight: .semibold)).lineLimit(1)
+                                Spacer()
+                                if state.isFavorite(.live, ch) { Image(systemName: "heart.fill").foregroundStyle(Theme.live) }
+                            }
+                        }
+                        .contextMenu {
+                            Button(state.isFavorite(.live, ch) ? L.t("removeFav") : L.t("addFav")) { state.toggleFavorite(.live, ch) }
+                        }
+                    }
+                }
+                .id(selected ?? "all")
+            }
+        }
+        .padding(.leading, 40)
+        .onAppear {
+            // Start on the first category instead of thousands of channels.
+            if !didPick { didPick = true; if selected == nil, let first = cats.first { selected = first.id } }
+        }
+    }
+}
+#endif

@@ -5,7 +5,8 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.isTV ? 40 : 26) {
+            // Not lazy: on Apple TV a lazy stack drops the rows above, and the remote can no longer move back up.
+            VStack(alignment: .leading, spacing: Theme.isTV ? 40 : 26) {
                 let feat = state.featured
                 if !feat.isEmpty { HeroView(items: feat) }
                 if state.showMatches { MatchesStrip() }
@@ -187,6 +188,7 @@ struct MatchesStrip: View {
     @State private var showChooser = false
     @State private var message: String?
     @State private var finding: String?
+    @State private var chooserNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -242,7 +244,7 @@ struct MatchesStrip: View {
                 try? await Task.sleep(nanoseconds: list.contains { $0.isLive } ? 45_000_000_000 : 600_000_000_000)
             }
         }
-        .confirmationDialog(L.t("pickChannel"), isPresented: $showChooser, titleVisibility: .visible) {
+        .confirmationDialog(chooserNote ?? L.t("pickChannel"), isPresented: $showChooser, titleVisibility: .visible) {
             if let c = choose {
                 ForEach(c.1) { ch in
                     Button(ch.name) {
@@ -265,28 +267,39 @@ struct MatchesStrip: View {
         let ranked = Matches.rank(m, channels: state.catalog.live, subID: state.activeID)
         guard !ranked.isEmpty else { message = L.t("noChannel"); return }
         let learned = Storage.string("pick|\(state.activeID)|m|\(m.id)")
-        if let first = ranked.first, first.0.id == learned || ranked.count == 1 {
-            state.playLive(first.0, list: ranked.map { $0.0 })
+        if let first = ranked.first, first.0.id == learned {
+            state.playLive(first.0, list: ranked.prefix(10).map { $0.0 })
             return
         }
-        guard let sub = state.active, sub.kind == .xtream else { ask(m, ranked.map { $0.0 }); return }
+        // Only the competition's rights holder (Arabic first), not every sports channel.
+        let holders = ranked.filter { Matches.isRightsHolder(m, $0.0.name) }
+        let pool = Array((holders.isEmpty ? ranked : holders).prefix(40))
+        guard let sub = state.active, sub.kind == .xtream else {
+            if pool.count == 1 { state.playLive(pool[0].0, list: [pool[0].0]) } else { ask(m, pool.prefix(8).map { $0.0 }, note: nil) }
+            return
+        }
         finding = L.t("findingChannel")
         Task {
-            let boosted = await Matches.epgBoost(m, candidates: ranked, xtream: state.xtream(for: sub))
+            let boosted = await Matches.epgBoost(m, candidates: pool, xtream: state.xtream(for: sub))
             finding = nil
-            let list = boosted.map { $0.0 }
-            if let top = boosted.first, top.2, !(boosted.count > 1 && boosted[1].2 && boosted[1].1 == top.1) {
-                // The guide says this channel is showing the match.
-                Matches.remember(m, subID: state.activeID, channel: top.0)
-                state.playLive(top.0, list: list)
+            let showing = boosted.filter { $0.2 }.map { $0.0 }
+            if showing.count == 1 {
+                // The programme guide says this channel is showing the match.
+                Matches.remember(m, subID: state.activeID, channel: showing[0])
+                state.playLive(showing[0], list: showing)
+            } else if showing.count > 1 {
+                ask(m, showing, note: nil)
+            } else if pool.count == 1 {
+                state.playLive(pool[0].0, list: [pool[0].0])
             } else {
-                ask(m, list)
+                ask(m, pool.prefix(8).map { $0.0 }, note: L.t("notInGuide"))
             }
         }
     }
 
-    private func ask(_ m: Match, _ list: [MediaItem]) {
+    private func ask(_ m: Match, _ list: [MediaItem], note: String?) {
         choose = (m, list)
+        chooserNote = note
         showChooser = true
     }
 }

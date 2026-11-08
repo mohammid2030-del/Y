@@ -62,23 +62,111 @@ private struct DetailHeader<Actions: View>: View {
 
 struct CastRow: View {
     let cast: [TMDBPerson]
+    @EnvironmentObject var state: AppState
+    @State private var person: TMDBPerson?
     var body: some View {
         if !cast.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(title: L.t("cast"))
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 16) {
+                    LazyHStack(alignment: .top, spacing: Theme.isTV ? 24 : 16) {
                         ForEach(cast, id: \.self) { p in
-                            VStack(spacing: 6) {
-                                RemoteImage(url: p.photo, placeholderIcon: "person.fill").frame(width: Theme.isTV ? 130 : 76, height: Theme.isTV ? 130 : 76).clipShape(Circle())
-                                Text(p.name).font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center)
-                                Text(p.role).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            }.frame(width: Theme.isTV ? 160 : 90)
-                            .tvFocusable(radius: 18)
+                            Button { person = p } label: {
+                                VStack(spacing: 6) {
+                                    RemoteImage(url: p.photo, placeholderIcon: "person.fill", maxPixel: 300)
+                                        .frame(width: Theme.isTV ? 130 : 76, height: Theme.isTV ? 130 : 76).clipShape(Circle())
+                                    Text(p.name).font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center)
+                                    Text(p.role).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                .frame(width: Theme.isTV ? 160 : 90)
+                                .foregroundStyle(.white)
+                            }
+                            .buttonStyle(LiftButtonStyle(radius: 20))
                         }
-                    }.padding(.horizontal, Theme.pad)
+                    }
+                    .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 24 : 4)
                 }
             }
+            .sheet(item: $person) { p in PersonSheet(person: p).environmentObject(state) }
+        }
+    }
+}
+
+extension TMDBPerson: Identifiable {}
+
+/// Cast member: photo, role, biography and best-known titles.
+struct PersonSheet: View {
+    let person: TMDBPerson
+    @State private var info: TMDBPersonInfo?
+    @State private var bioOpen = false
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .top, spacing: 30) {
+                    RemoteImage(url: person.photo, placeholderIcon: "person.fill", maxPixel: 500)
+                        .frame(width: Theme.isTV ? 260 : 120, height: Theme.isTV ? 260 : 120).clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(person.name).font(Theme.isTV ? .largeTitle.bold() : .title2.bold())
+                        if !person.role.isEmpty { Text(person.role).foregroundStyle(Theme.blue) }
+                        if let i = info, !(i.born + i.place).isEmpty {
+                            Text([i.born, i.place].filter { !$0.isEmpty }.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        #if os(iOS)
+                        Button(L.t("close")) { dismiss() }.buttonStyle(.bordered).padding(.top, 6)
+                        #endif
+                    }
+                    Spacer(minLength: 0)
+                }
+                if info == nil { ProgressView().frame(maxWidth: .infinity) }
+                if let bio = info?.bio, !bio.isEmpty {
+                    Button { bioOpen.toggle() } label: {
+                        Text(bio).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(bioOpen ? nil : 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(LiftButtonStyle(radius: 14))
+                }
+                if let known = info?.knownFor, !known.isEmpty {
+                    Text(L.t("knownFor")).font(.title3.bold())
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: Theme.isTV ? 30 : 12) {
+                            ForEach(known, id: \.id) { c in
+                                Button { dismiss(); state.searchFor(c.title) } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        RemoteImage(url: c.poster).frame(width: Theme.posterW * 0.8, height: Theme.posterW * 1.2)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        Text(c.title).font(.caption).lineLimit(1).frame(width: Theme.posterW * 0.8, alignment: .leading)
+                                    }.foregroundStyle(.white)
+                                }.buttonStyle(LiftButtonStyle(radius: 14))
+                            }
+                        }.padding(.vertical, 20)
+                    }
+                }
+            }
+            .padding(Theme.isTV ? 80 : 20)
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .task { info = await TMDB.shared.person(person.id) ?? TMDBPersonInfo() }
+    }
+}
+
+/// Overview as a focusable block; selecting it shows the full text.
+struct PlotBlock: View {
+    let text: String
+    var lines = 4
+    @State private var full = false
+    var body: some View {
+        Button { full = true } label: {
+            Text(text).font(.body).foregroundStyle(.white.opacity(0.85)).lineLimit(lines)
+                .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(LiftButtonStyle(radius: 14))
+        .padding(.horizontal, Theme.pad - (Theme.isTV ? 10 : 0))
+        .sheet(isPresented: $full) {
+            ScrollView {
+                Text(text).font(Theme.isTV ? .title3 : .body).padding(Theme.isTV ? 80 : 24).frame(maxWidth: .infinity, alignment: .leading)
+            }.background(Theme.bg.ignoresSafeArea())
         }
     }
 }
@@ -107,16 +195,12 @@ struct MovieDetailView: View {
                 }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : item.plot)
                 if !plot.isEmpty {
-                    Text(plot).font(.body).foregroundStyle(.white.opacity(0.85)).frame(maxWidth: .infinity, alignment: .leading)
-                        .tvFocusable(radius: 14).padding(.horizontal, Theme.pad - (Theme.isTV ? 8 : 0))
+                    PlotBlock(text: plot)
                 }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
                 else if let c = info?.cast, !c.isEmpty { Text(L.t("cast") + ": " + c).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.pad) }
                 let crew = tmdb?.creators.joined(separator: "، ") ?? info?.director ?? ""
-                if !crew.isEmpty {
-                    Text(L.t("director") + ": " + crew).font(.footnote).foregroundStyle(.secondary)
-                        .tvFocusable(radius: 12).padding(.horizontal, Theme.pad - (Theme.isTV ? 8 : 0))
-                }
+                if !crew.isEmpty { Text(L.t("director") + ": " + crew).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.pad) }
             }
             .padding(.bottom, 40)
         }
@@ -166,7 +250,7 @@ struct SeriesDetailView: View {
         let last = state.history.values.filter { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == item.id }
             .max { $0.updated < $1.updated }
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 18) {
                 DetailHeader(item: item, backdrop: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? ""),
                              poster: tmdb?.poster.isEmpty == false ? tmdb!.poster : (info?.cover.isEmpty == false ? info!.cover : item.logo),
                              tmdb: tmdb,
@@ -189,10 +273,7 @@ struct SeriesDetailView: View {
                     }
                 }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : item.plot)
-                if !plot.isEmpty {
-                    Text(plot).foregroundStyle(.white.opacity(0.85)).lineLimit(5).frame(maxWidth: .infinity, alignment: .leading)
-                        .tvFocusable(radius: 14).padding(.horizontal, Theme.pad - (Theme.isTV ? 8 : 0))
-                }
+                if !plot.isEmpty { PlotBlock(text: plot) }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
                 if let error {
                     Text(error).foregroundStyle(Theme.live).padding(.horizontal, Theme.pad)

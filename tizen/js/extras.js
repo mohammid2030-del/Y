@@ -4,7 +4,7 @@
 
   // ------------------------------------------------------------------ titles
   var PREFIX = ['AR', 'EN', 'TR', 'FR', 'DE', 'ES', 'IT', 'IN', 'US', 'UK', 'KSA', 'SA', 'EG', 'AE', 'KW', 'QA', 'NF', 'OSN', 'AS', 'KR', 'CN', 'JP', 'HI', '4K', '8K', 'FHD', 'UHD', 'HD', 'VIP', 'MULTI'];
-  var TAGS = ['4K', '8K', 'UHD', 'FHD', 'HD', 'SD', 'HEVC', 'H265', 'H264', 'HDR', 'AR', 'EN', 'TR', 'DO', 'DB', 'SUB', 'SUBS', 'DUB', 'DUBBED',
+  var TAGS = ['TOP', 'NEW', '4K', '8K', 'UHD', 'FHD', 'HD', 'SD', 'HEVC', 'H265', 'H264', 'HDR', 'AR', 'EN', 'TR', 'DO', 'DB', 'SUB', 'SUBS', 'DUB', 'DUBBED',
     'MULTI', 'ARSUB', 'VIP', 'NF', 'ULTRA', 'ULTRAHD', 'RAW', 'AMZ', 'ATV', 'DSNP', 'HMAX', 'MAX', 'HULU', 'PRIME', 'US', 'UK', 'GB', 'CA', 'AU',
     'KR', 'JP', 'FR', 'DE', 'ES', 'IT', 'MX', 'BR', 'SUIBS', 'DV', 'DOLBY', 'ATMOS', 'REMUX', 'WEB', 'WEBDL', 'BLURAY', '1080P', '720P', '2160P'];
   function isTagGroup(s) {
@@ -13,19 +13,32 @@
   }
 
   /** "AR: Title - 4K-AR" → "Title"; "4K-AMZ - Drive (2025) (US) HEVC" → {title:"Drive", year:"2025"}. */
+  function providerTag(g) {
+    if (isTagGroup(g)) return true;
+    var letters = g.replace(/[^A-Za-z]/g, '');
+    return g.length <= 12 && letters.length > 0 && letters === letters.toUpperCase() && /^[\x00-\x7F]+$/.test(g) && (/[0-9\-_+.]/.test(g) || g.length <= 4);
+  }
   function cleanFull(raw) {
-    var t = String(raw || '').trim();
-    var m = /^\s*[|\[(]?\s*([A-Za-z0-9]{2,5})\s*[|\])]?\s*[:|]\s*/.exec(t);
+    var t = String(raw || '').trim(), m, i;
+    for (i = 0; i < 2; i++) {
+      m = /^\s*[\[(|▎]\s*([^\])|▎]{1,12})\s*[\])|▎]\s*[:\-–—]?\s*/.exec(t);
+      if (m && providerTag(m[1]) && t.length - m[0].length > 1) t = t.slice(m[0].length);
+    }
+    m = /^\s*([A-Za-z0-9]{2,5})\s*[:|]\s*/.exec(t);
     if (m && PREFIX.indexOf(m[1].toUpperCase()) >= 0 && t.length > m[0].length) t = t.slice(m[0].length);
-    m = /^\s*([A-Za-z0-9][A-Za-z0-9_\-]{0,14})\s+[-|–—]\s+/.exec(t);
-    if (m && isTagGroup(m[1]) && t.length > m[0].length) t = t.slice(m[0].length);
+    for (i = 0; i < 2; i++) {
+      m = /^\s*([A-Za-z0-9][A-Za-z0-9_\-+.]{0,14})\s*[-|–—:▎]\s+/.exec(t);
+      if (m && providerTag(m[1]) && t.length - m[0].length > 1) t = t.slice(m[0].length);
+    }
     var year = '';
     m = /[(\[]((?:19|20)\d{2})[)\]]/.exec(t);
     if (m) { year = m[1]; if (m.index > 0) t = t.slice(0, m.index); }
     t = t.replace(/[(\[][^)\]]*[)\]]/g, ' ');
+    t = t.replace(/\s[-–]?\s*(S\d{1,2}(\s*E\d{1,3})?|Season\s*\d+|الموسم\s*\S+)(\s.*)?$/i, '');
+    if (!year) { m = /\s[-–]?\s*((?:19|20)\d{2})\s*$/.exec(t); if (m && m.index > 0) { year = m[1]; t = t.slice(0, m.index); } }
     var words = t.split(/\s+/).filter(function (w) { return w; });
-    while (words.length > 1 && (TAGS.indexOf(words[words.length - 1].replace(/^[-|]+|[-|]+$/g, '').toUpperCase()) >= 0 || /^[-|]$/.test(words[words.length - 1]))) words.pop();
-    var out = words.join(' ').trim();
+    while (words.length > 1 && (TAGS.indexOf(words[words.length - 1].replace(/^[-|]+|[-|]+$/g, '').toUpperCase()) >= 0 || /^[-|–]$/.test(words[words.length - 1]))) words.pop();
+    var out = words.join(' ').replace(/^[\s\-|–:]+|[\s\-|–:]+$/g, '');
     return { title: out || String(raw || '').trim(), year: year };
   }
   function seasonEpisode(text) {

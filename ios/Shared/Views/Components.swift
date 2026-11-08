@@ -134,31 +134,31 @@ struct RemoteImage: View {
     }
 }
 
-#if os(tvOS)
-/// Visible focus for non-button content on Apple TV (cast, plot): lift + glow, so the user always sees where focus is.
-private struct FocusLift: ViewModifier {
-    @Environment(\.isFocused) private var focused
-    var radius: CGFloat
-    func body(content: Content) -> some View {
-        content
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(focused ? Color.white.opacity(0.14) : .clear))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(focused ? Theme.blue : .clear, lineWidth: 3))
-            .scaleEffect(focused ? 1.06 : 1)
-            .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 14, y: 8)
-            .animation(.easeOut(duration: 0.15), value: focused)
+/// Button style for content tiles (cast, plot, list rows): on Apple TV it lifts and glows when focused,
+/// so the user always sees where the remote is. Buttons are the most reliable focus targets on tvOS.
+struct LiftButtonStyle: ButtonStyle {
+    var radius: CGFloat = 16
+    func makeBody(configuration: Configuration) -> some View {
+        LiftBody(configuration: configuration, radius: radius)
     }
-}
-#endif
-
-extension View {
-    /// Makes static content reachable with the Apple TV remote and shows clearly when it has focus.
-    @ViewBuilder func tvFocusable(radius: CGFloat = 16) -> some View {
+    private struct LiftBody: View {
+        let configuration: ButtonStyleConfiguration
+        let radius: CGFloat
         #if os(tvOS)
-        self.modifier(FocusLift(radius: radius)).focusable()
+        @Environment(\.isFocused) private var focused
         #else
-        self
+        private let focused = false
         #endif
+        var body: some View {
+            configuration.label
+                .padding(Theme.isTV ? 10 : 0)
+                .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(focused ? Color.white.opacity(0.14) : .clear))
+                .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(focused ? Theme.blue : .clear, lineWidth: 3))
+                .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.06 : 1)
+                .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 16, y: 8)
+                .animation(.easeOut(duration: 0.15), value: focused)
+                .contentShape(Rectangle())
+        }
     }
 }
 
