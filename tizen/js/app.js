@@ -156,10 +156,12 @@
     S.fav = await Store.get('fav', []);
     S.history = await Store.get('history', {});
     try { await Tmdb.init(); await Matches.init(); } catch (e) { /* optional features */ }
+    try { await Cloud.loadAccount(); } catch (e) { /* sync is optional */ }
     document.addEventListener('visibilitychange', onVisibility);
     if (!S.settings.onboarded) return showWelcome();
-    if (!S.subs.length) return showAddSub();
+    if (!S.subs.length) return Cloud.googleAvailable() && !Cloud.account() ? showGoogle() : showAddSub();
     showProfiles();
+    if (Cloud.account()) pullAccount().then(function (changed) { if (changed && screen && screen.name === 'profiles') showProfiles(); });
   }
 
   async function activate(subId) {
@@ -209,7 +211,10 @@
         await saveSettings();
         showLanguage();
       };
-      actions.next = async function () { S.settings.onboarded = true; await saveSettings(); showAddSub(); };
+      actions.next = async function () {
+        S.settings.onboarded = true; await saveSettings();
+        if (Cloud.googleAvailable() && !Cloud.account()) showGoogle(); else showAddSub();
+      };
       Nav.focusFirst();
     }, { back: showWelcome });
   }
@@ -295,8 +300,10 @@
           passEnc: await Store.encrypt(sub.pass), m3uEnc: await Store.encrypt(sub.m3uUrl),
           ua: form.ua, liveFormat: form.liveFormat
         });
+        record.updated = Date.now() / 1000;
         if (!existing) S.subs.push(record);
         await saveSubs();
+        pushAccountSub(record, sub.pass, sub.m3uUrl);
         S.settings.activeSub = record.id;
         S.settings.onboarded = true;
         await saveSettings();
@@ -1059,6 +1066,10 @@
         </div>`;
       }).join('')}
       <button data-f data-action="subAdd" class="set-row">＋ ${esc(t('addSubscription'))}</button>
+      ${Cloud.googleAvailable() ? `<h3 class="row-title">${esc(t('googleAccount'))}</h3>
+      ${Cloud.account() ? `<button data-f data-action="accSync" class="set-row">${esc(t('syncNow'))}<span class="muted">${esc(Cloud.account().email)}</span></button>
+        <button data-f data-action="accOut" class="set-row">${esc(t('signOut'))}</button>`
+        : `<button data-f data-action="accIn" class="set-row">${esc(t('signInGoogle'))}</button><p class="muted about">${esc(t('googleHint'))}</p>`}` : ''}
       <h3 class="row-title">${esc(t('viewers'))}</h3>
       <button data-f data-action="switchViewer" class="set-row">${esc(t('switchViewer'))}<span>${esc(currentViewer() ? currentViewer().name : '')}</span></button>
       ${Cloud.enabled() ? `<button data-f data-action="syncNow" class="set-row">${esc(t('syncNow'))}<span class="muted">${esc(S.cloudStatus || '')}</span></button>` : ''}
@@ -1087,11 +1098,15 @@
     actions.subEdit = function (el) { showAddSub(sid(el)); };
     actions.subAdd = function () { showAddSub(); };
     actions.switchViewer = function () { showViewers(); };
+    actions.accIn = function () { showGoogle(); };
+    actions.accOut = async function () { await Cloud.signOut(); renderSection(false); toast(t('signedOut')); };
+    actions.accSync = async function () { await pullAccount(); renderSection(false); toast(t('cloudSynced')); };
     actions.syncNow = async function () { await cloudPullViewers(); await cloudPullData(); renderSection(false); toast(t('cloudSynced')); };
     actions.subDel = async function (el) {
       const id = sid(el);
       if (!(await confirmBox(t('confirmDelete'), t('remove')))) return;
       S.subs = S.subs.filter(function (s) { return s.id !== id; });
+      if (Cloud.account()) Cloud.put('users/' + Cloud.account().uid + '/subs/' + Cloud.safe(id), { x: true, up: Date.now() / 1000 });
       function mine(o) { return o === id || String(o).indexOf(id + '#') === 0; }
       S.fav = S.fav.filter(function (f) { return !mine(f.sub); });
       Object.keys(S.history).forEach(function (k) { if (mine(S.history[k].sub)) delete S.history[k]; });
@@ -1131,7 +1146,10 @@
       toast(t('tmdbChecking'));
       const ok = await Tmdb.setKey(v);
       toast(t(ok ? 'tmdbSaved' : 'tmdbInvalid'));
-      if (ok) { renderSection(false); Nav.focus($('[data-action="tmdb"]')); }
+      if (ok) {
+        if (Cloud.account()) Cloud.put('users/' + Cloud.account().uid + '/settings/tmdb', v.trim());
+        renderSection(false); Nav.focus($('[data-action="tmdb"]'));
+      }
     };
     actions.tmdbRemove = async function () { await Tmdb.remove(); renderSection(false); Nav.focus($('[data-action="tmdb"]')); };
     actions.matchesToggle = async function () {
@@ -1177,6 +1195,86 @@
   }
 
 
+  // ------------------------------------------------------------------ Google account: subscriptions follow the account
+  async function pushAccountSub(rec, pass, m3u) {
+    const acc = Cloud.account(); if (!acc) return;
+    if (pass == null) pass = await Store.decrypt(rec.passEnc);
+    if (m3u == null) m3u = await Store.decrypt(rec.m3uEnc);
+    Cloud.put('users/' + acc.uid + '/subs/' + Cloud.safe(rec.id), {
+      n: rec.name || '', t: rec.type, s: rec.server || '', u: rec.user || '', p: pass || '', m: m3u || '', up: rec.updated || Date.now() / 1000
+    });
+  }
+
+  /** Merges the account's subscriptions with this TV's (newest wins, deletions travel), then the TMDB key. */
+  async function pullAccount() {
+    const acc = Cloud.account(); if (!acc) return false;
+    const remote = await Cloud.get('users/' + acc.uid) || {};
+    const rs = remote.subs || {};
+    let changed = false;
+    for (const id of Object.keys(rs)) {
+      const d = rs[id] || {}, up = Number(d.up) || 0;
+      const i = S.subs.findIndex(function (x) { return Cloud.safe(x.id) === id; });
+      if (d.x) { if (i >= 0 && (S.subs[i].updated || 0) <= up) { S.subs.splice(i, 1); changed = true; } continue; }
+      const rec = { id: i >= 0 ? S.subs[i].id : id, name: d.n || '', type: d.t === 'm3u' ? 'm3u' : 'xtream', server: d.s || '', user: d.u || '',
+        passEnc: await Store.encrypt(d.p || ''), m3uEnc: await Store.encrypt(d.m || ''), updated: up };
+      if (i < 0) { S.subs.push(rec); changed = true; }
+      else if ((S.subs[i].updated || 0) < up) { S.subs[i] = Object.assign({}, S.subs[i], rec); changed = true; }
+      else if ((S.subs[i].updated || 0) > up) pushAccountSub(S.subs[i]);
+    }
+    for (const x of S.subs) if (!rs[Cloud.safe(x.id)]) pushAccountSub(x);
+    if (changed) await saveSubs();
+    const key = remote.settings && remote.settings.tmdb;
+    if (key && !Tmdb.enabled()) { try { await Tmdb.setKey(key); } catch (e) { /* invalid key */ } }
+    else if (!key && Tmdb.enabled()) { const enc = await Store.get('tmdbKey', ''); const mine = enc ? await Store.decrypt(enc) : ''; if (mine) Cloud.put('users/' + acc.uid + '/settings/tmdb', mine); }
+    return changed;
+  }
+
+  /** Google sign-in for TVs: a short code on screen, entered on the phone at google.com/device. */
+  function showGoogle() {
+    let alive = true, code = null;
+    setScreen('google', function () {
+      app.innerHTML = `<div class="profiles">
+        <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+        <div class="pf-brand"><div class="logo small"></div><span>NOVA</span></div>
+        <h1>${esc(t('signInGoogle'))}</h1>
+        <p class="muted" style="max-width:1000px">${esc(t('googleWhy'))}</p>
+        <div id="g-box" class="center-col" style="min-height:300px"><div class="spinner"></div></div>
+        <div class="row center">
+          <button data-f data-action="gNew" class="btn">${esc(t('newCode'))}</button>
+          <button data-f data-autofocus data-action="gSkip" class="btn ghost">${esc(t(S.subs.length ? 'later' : 'addManually'))}</button>
+        </div>
+      </div>`;
+      actions.gSkip = function () { alive = false; if (S.subs.length) showProfiles(); else showAddSub(); };
+      actions.gNew = function () { alive = false; showGoogle(); };
+      Nav.focusFirst();
+    }, { back: function () { alive = false; if (S.subs.length) showProfiles(); else showAddSub(); } });
+    (async function () {
+      code = await Cloud.startGoogle();
+      const box = $('#g-box');
+      if (!alive || !box) return;
+      if (!code) { box.innerHTML = `<p class="error">${esc(t('googleFailed'))}</p>`; return; }
+      box.innerHTML = `<p style="font-size:30px">1. ${esc(t('googleStep1'))} <b style="color:var(--primary)">${esc(code.url.replace('https://', ''))}</b></p>
+        <p style="font-size:30px">2. ${esc(t('googleStep2'))}</p>
+        <div style="font-size:72px;font-weight:900;letter-spacing:10px;background:var(--s2);padding:14px 40px;border-radius:18px;direction:ltr">${esc(code.user)}</div>
+        <p class="muted" id="g-wait">${esc(t('googleWaiting'))}</p>`;
+      while (alive) {
+        await new Promise(function (r) { setTimeout(r, code.interval * 1000); });
+        if (!alive) return;
+        const r = await Cloud.pollGoogle(code);
+        if (!alive) return;
+        if (r && r.ok) {
+          alive = false;
+          toast(t('signedInAs', r.email));
+          await pullAccount();
+          if (S.subs.length) showProfiles(); else showAddSub();
+          return;
+        }
+        if (r === 'expired') { alive = false; showGoogle(); return; }
+        if (r === 'denied' || r === 'failed') { const w = $('#g-wait'); if (w) w.textContent = t(r === 'denied' ? 'googleDenied' : 'googleFailed'); alive = false; return; }
+      }
+    })();
+  }
+
   // ------------------------------------------------------------------ viewers (up to 5 per subscription) + sync
   function owner() { return !S.viewerId || S.viewerId === 'main' ? S.sub.id : S.sub.id + '#' + S.viewerId; }
   function currentViewer() { return (S.viewers || []).find(function (v) { return v.id === S.viewerId; }); }
@@ -1200,7 +1298,7 @@
   function favPath(f) { return 'data/' + Cloud.safe(S.viewerId || 'main') + '/f/' + Cloud.Codec.favKey(f.type, f.id); }
   function pushHistory(h) { if (h) cloudPut('data/' + Cloud.safe(S.viewerId || 'main') + '/h/' + Cloud.Codec.historyKey(h), Cloud.Codec.history(h)); }
   function pushViewer(v) { cloudPut('profiles/' + Cloud.safe(v.id), Cloud.Codec.viewer(v)); }
-  function pinHashOf(pin) { return Store.sha256((cloudKey || S.sub.id) + ':' + pin); }
+  function pinHashOf(pin) { return Promise.resolve(Cloud.sha256hex((cloudKey || S.sub.id) + ':' + pin)); }
 
   async function enterAfterSub() {
     await loadViewers();
