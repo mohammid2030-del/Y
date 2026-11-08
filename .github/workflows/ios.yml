@@ -84,7 +84,16 @@ jobs:
               -destination "generic/platform=$PLAT" -archivePath build/$SCHEME.xcarchive \
               DEVELOPMENT_TEAM=$APPLE_TEAM_ID CURRENT_PROJECT_VERSION=$((BUILD_NUMBER + 100)) \
               $AUTH archive 2>&1 | tee ../archive-$SCHEME.log | grep -E "error:|ARCHIVE" || true
-            grep -q "ARCHIVE SUCCEEDED" ../archive-$SCHEME.log
+            if ! grep -q "ARCHIVE SUCCEEDED" ../archive-$SCHEME.log; then
+              # No registered devices means no development profile; archive unsigned and let the export sign it for distribution.
+              echo "Signed archive failed, retrying unsigned (export will sign for App Store)"
+              xcodebuild -workspace NovaIPTV.xcworkspace -scheme $SCHEME -configuration Release \
+                -destination "generic/platform=$PLAT" -archivePath build/$SCHEME.xcarchive \
+                DEVELOPMENT_TEAM=$APPLE_TEAM_ID CURRENT_PROJECT_VERSION=$((BUILD_NUMBER + 100)) \
+                CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+                archive 2>&1 | tee ../archive-$SCHEME.log | grep -E "error:|ARCHIVE" || true
+              grep -q "ARCHIVE SUCCEEDED" ../archive-$SCHEME.log
+            fi
             echo "::endgroup::"
             echo "::group::Upload $SCHEME"
             xcodebuild -exportArchive -archivePath build/$SCHEME.xcarchive -exportOptionsPlist ExportOptions.plist \
