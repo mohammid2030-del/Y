@@ -445,7 +445,7 @@ fun SettingsScreen(
             listOf(R.string.size_small, R.string.size_medium, R.string.size_large, R.string.size_xlarge)
                 .mapIndexed { i, r -> Choice(i, stringResource(r)) },
             vm.subtitleSize,
-            onPick = { v -> vm.setSubtitleSize(v) },
+            onPick = { v -> vm.changeSubtitleSize(v) },
             onDismiss = { subsSizeDialog = false },
         )
     }

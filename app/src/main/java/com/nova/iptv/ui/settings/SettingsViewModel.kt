@@ -46,7 +46,7 @@ class SettingsViewModel @Inject constructor(
     var subtitleSize by mutableStateOf(subtitlePrefs.size)
         private set
 
-    fun setSubtitleSize(v: Int) {
+    fun changeSubtitleSize(v: Int) {
         subtitlePrefs.size = v
         subtitleSize = v
     }
