@@ -180,6 +180,9 @@ fun SettingsScreen(
     var introDialog by remember { mutableStateOf(false) }
     var subsSizeDialog by remember { mutableStateOf(false) }
     var pinDialog by remember { mutableStateOf(false) }
+    var tmdbDialog by remember { mutableStateOf(false) }
+    val tmdbOn by vm.tmdbEnabled.collectAsStateWithLifecycle()
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     var removePinDialog by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SubscriptionEntity?>(null) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
@@ -203,6 +206,7 @@ fun SettingsScreen(
         SettingsMessage.PIN_SAVED -> stringResource(R.string.msg_pin_saved)
         SettingsMessage.PIN_REMOVED -> stringResource(R.string.msg_pin_removed)
         SettingsMessage.WRONG_PIN -> stringResource(R.string.wrong_pin)
+        SettingsMessage.TMDB_SAVED -> stringResource(R.string.tmdb_saved)
         null -> null
     }
     LaunchedEffect(messageText) {
@@ -343,6 +347,42 @@ fun SettingsScreen(
                 )
             }
 
+            item { SectionHeader(stringResource(R.string.tmdb_section)) }
+            item {
+                SettingRow(
+                    stringResource(R.string.tmdb_key),
+                    stringResource(if (tmdbOn) R.string.tmdb_key_on else R.string.tmdb_key_off),
+                    onClick = { vm.resetTmdbError(); tmdbDialog = true },
+                    trailing = if (tmdbOn) { { TextButton(onClick = vm::removeTmdbKey) { Text(stringResource(R.string.remove)) } } } else null,
+                )
+            }
+            if (!tmdbOn) {
+                item {
+                    SettingRow(
+                        stringResource(R.string.tmdb_get_key),
+                        "themoviedb.org/settings/api",
+                        onClick = { runCatching { uriHandler.openUri("https://www.themoviedb.org/settings/api") } },
+                    )
+                }
+            }
+            item {
+                Text(
+                    stringResource(R.string.tmdb_attribution),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            item { SectionHeader(stringResource(R.string.matches_section)) }
+            item {
+                SettingRow(
+                    stringResource(R.string.show_matches), stringResource(R.string.show_matches_desc),
+                    onClick = { vm.setShowMatches(!s.showMatches) },
+                    trailing = { Switch(checked = s.showMatches, onCheckedChange = { vm.setShowMatches(it) }) },
+                )
+            }
+
             item { SectionHeader(stringResource(R.string.subtitles_section)) }
             item {
                 SettingRow(
@@ -408,6 +448,18 @@ fun SettingsScreen(
         }
     }
 
+    if (tmdbDialog) {
+        SecretDialog(
+            title = stringResource(R.string.tmdb_key),
+            label = stringResource(R.string.tmdb_key_hint),
+            numeric = false,
+            confirm = stringResource(if (vm.tmdbChecking) R.string.tmdb_checking else R.string.save),
+            onConfirm = { if (!vm.tmdbChecking) vm.saveTmdbKey(it) { tmdbDialog = false } },
+            onDismiss = { tmdbDialog = false },
+            minLength = 16,
+            error = if (vm.tmdbRejected) stringResource(R.string.tmdb_invalid) else null,
+        )
+    }
     if (themeDialog) {
         ChoiceDialog(
             stringResource(R.string.theme),

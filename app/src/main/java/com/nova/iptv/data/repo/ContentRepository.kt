@@ -47,7 +47,14 @@ data class PlaybackRequest(
 )
 
 /** Extra artwork / metadata for hero banners. */
-data class HeroInfo(val backdrop: String, val genre: String, val plot: String)
+data class HeroInfo(
+    val backdrop: String,
+    val genre: String,
+    val plot: String,
+    val logo: String = "",
+    val rating: String = "",
+    val title: String = "",
+)
 
 data class EpisodeContext(
     val tmdbId: String,
@@ -68,6 +75,7 @@ class ContentRepository @Inject constructor(
     private val subs: SubscriptionRepository,
     private val fetcher: HttpFetcher,
     private val crypto: CryptoManager,
+    private val tmdb: com.nova.iptv.data.tmdb.TmdbRepository,
 ) {
     private val seriesCache = LruCache<String, XSeriesInfo>(20)
     private val vodCache = LruCache<String, XVodInfo>(50)
@@ -180,18 +188,41 @@ class ContentRepository @Inject constructor(
 
     /** Backdrop + genre for a featured movie/series (cached; Xtream only). */
     suspend fun heroInfo(c: ContentEntity): HeroInfo? {
-        val key = "${c.subscriptionId}|${c.type}|${c.remoteId}"
+        val useTmdb = tmdb.enabled.value
+        val key = "${c.subscriptionId}|${c.type}|${c.remoteId}|$useTmdb"
         heroCache.get(key)?.let { return it }
         val sub = subs.get(c.subscriptionId) ?: return null
-        if (sub.type != SourceType.XTREAM) return null
-        val info = when (c.type) {
-            ContentType.MOVIE -> vodInfo(sub, c.remoteId)?.let { HeroInfo(it.backdrop, it.genre, it.plot) }
-            ContentType.SERIES -> runCatching { seriesInfo(sub, c.remoteId) }.getOrNull()?.let { HeroInfo(it.backdrop, it.genre, it.plot) }
+        val isXtream = sub.type == SourceType.XTREAM
+        var tmdbId = ""
+        val provider = if (!isXtream) null else when (c.type) {
+            ContentType.MOVIE -> vodInfo(sub, c.remoteId)?.let { tmdbId = it.tmdbId; HeroInfo(it.backdrop, it.genre, it.plot) }
+            ContentType.SERIES -> runCatching { seriesInfo(sub, c.remoteId) }.getOrNull()
+                ?.let { tmdbId = it.tmdbId; HeroInfo(it.backdrop, it.genre, it.plot) }
             else -> null
+        }
+        val t = if (useTmdb && c.type != ContentType.LIVE) tmdb.lookup(c.type == ContentType.SERIES, tmdbId, c.name, c.year) else null
+        val info = when {
+            t != null -> HeroInfo(
+                backdrop = t.backdrop.ifBlank { provider?.backdrop.orEmpty() },
+                genre = t.genres.take(3).joinToString(", ").ifBlank { provider?.genre.orEmpty() },
+                plot = t.overview.ifBlank { provider?.plot.orEmpty() },
+                logo = t.logo,
+                rating = t.ratingText,
+                title = t.title,
+            )
+            else -> provider
         } ?: return null
         heroCache.put(key, info)
         return info
     }
+
+    /** TMDB details for a movie / series (null when no key is set or nothing matched). */
+    suspend fun tmdbFor(c: ContentEntity, providerTmdbId: String = ""): com.nova.iptv.data.tmdb.TmdbInfo? {
+        if (!tmdb.enabled.value || c.type == ContentType.LIVE) return null
+        return tmdb.lookup(c.type == ContentType.SERIES, providerTmdbId, c.name, c.year)
+    }
+
+    suspend fun tmdbSeason(tvId: Int, season: Int) = tmdb.season(tvId, season)
 
     suspend fun movieTmdbId(subId: Long, movieId: String): String {
         val sub = subs.get(subId) ?: return ""

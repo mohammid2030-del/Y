@@ -80,6 +80,7 @@ import com.nova.iptv.data.repo.PlaybackRequest
 import com.nova.iptv.player.PlayerLauncher
 import com.nova.iptv.ui.components.EmptyView
 import com.nova.iptv.ui.components.NetImage
+import com.nova.iptv.ui.components.TitleLogo
 import com.nova.iptv.ui.components.cleanTitle
 import com.nova.iptv.ui.components.seasonEpisodeOf
 import com.nova.iptv.ui.components.novaFocus
@@ -147,6 +148,7 @@ fun DiscoverHome(
                 Spacer(Modifier.height(homeTopInset()))
             }
         }
+        item(key = "matches") { MatchesStrip() }
         if (continueList.isNotEmpty()) {
             item(key = "continue") {
                 RowSection(stringResource(R.string.continue_watching), accent = true) {
@@ -347,26 +349,36 @@ private fun HeroPage(
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Text(
-                c.name.cleanTitle(),
-                color = Color.White,
-                style = MaterialTheme.typography.displaySmall.copy(fontSize = if (wide) 44.sp else 34.sp, lineHeight = if (wide) 48.sp else 38.sp),
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = textAlign,
-            )
+            val displayTitle = info?.title?.takeIf { it.isNotBlank() } ?: c.name.cleanTitle()
+            TitleLogo(
+                logo = info?.logo.orEmpty(),
+                alignment = if (wide) Alignment.CenterStart else Alignment.Center,
+                modifier = Modifier
+                    .height(if (wide) 120.dp else 96.dp)
+                    .fillMaxWidth(if (wide) 0.9f else 0.8f),
+            ) {
+                Text(
+                    displayTitle,
+                    color = Color.White,
+                    style = MaterialTheme.typography.displaySmall.copy(fontSize = if (wide) 44.sp else 34.sp, lineHeight = if (wide) 48.sp else 38.sp),
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = textAlign,
+                )
+            }
             val meta = listOf(
                 c.year,
                 info?.genre.orEmpty().split(',', '/').map { it.trim() }.filter { it.isNotEmpty() }.take(2).joinToString(" · "),
             ).filter { it.isNotBlank() }
-            if (meta.isNotEmpty() || c.rating.isNotBlank()) {
+            val rating = info?.rating?.takeIf { it.isNotBlank() } ?: c.rating
+            if (meta.isNotEmpty() || rating.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (c.rating.isNotBlank() && c.rating != "0") {
+                    if (rating.isNotBlank() && rating != "0") {
                         Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC94D), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(3.dp))
-                        Text(c.rating.take(3), color = Color.White, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Text(rating.take(3), color = Color.White, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                         if (meta.isNotEmpty()) Text("   •   ", color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.labelLarge)
                     }
                     Text(

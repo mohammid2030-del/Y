@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-enum class SettingsMessage { INTRO_RESET, EXPORTED, IMPORTED, BAD_PASSPHRASE, FILE_ERROR, HISTORY_CLEARED, CACHE_CLEARED, PIN_SAVED, PIN_REMOVED, WRONG_PIN }
+enum class SettingsMessage { INTRO_RESET, EXPORTED, IMPORTED, BAD_PASSPHRASE, FILE_ERROR, HISTORY_CLEARED, CACHE_CLEARED, PIN_SAVED, PIN_REMOVED, WRONG_PIN, TMDB_SAVED }
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -42,7 +42,27 @@ class SettingsViewModel @Inject constructor(
     private val backup: BackupRepository,
     private val introStore: com.nova.iptv.data.repo.IntroStore,
     private val subtitlePrefs: com.nova.iptv.data.subs.SubtitlePrefs,
+    private val tmdb: com.nova.iptv.data.tmdb.TmdbRepository,
 ) : ViewModel() {
+    val tmdbEnabled: StateFlow<Boolean> = tmdb.enabled
+    var tmdbChecking by mutableStateOf(false)
+        private set
+    var tmdbRejected by mutableStateOf(false)
+        private set
+
+    /** Validates the key with TMDB before saving; [onDone] runs only on success. */
+    fun saveTmdbKey(key: String, onDone: () -> Unit) = viewModelScope.launch {
+        tmdbChecking = true
+        tmdbRejected = false
+        val ok = tmdb.saveKey(key)
+        tmdbChecking = false
+        if (ok) { message = SettingsMessage.TMDB_SAVED; onDone() } else tmdbRejected = true
+    }
+
+    fun resetTmdbError() { tmdbRejected = false }
+    fun removeTmdbKey() { tmdb.removeKey() }
+    fun setShowMatches(v: Boolean) = viewModelScope.launch { settingsRepo.setShowMatches(v) }
+
     var subtitleSize by mutableStateOf(subtitlePrefs.size)
         private set
 

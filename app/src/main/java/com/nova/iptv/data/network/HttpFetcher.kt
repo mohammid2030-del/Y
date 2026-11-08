@@ -16,12 +16,13 @@ import javax.inject.Singleton
 @Singleton
 class HttpFetcher @Inject constructor(private val api: RemoteApi) {
 
-    private suspend fun open(url: String, userAgent: String): okhttp3.ResponseBody {
+    private suspend fun open(url: String, userAgent: String, authorization: String? = null): okhttp3.ResponseBody {
         if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
             throw NovaException(ErrorKind.INVALID_URL)
         }
         val resp = try {
-            api.get(url, userAgent.ifBlank { DEFAULT_USER_AGENT })
+            if (authorization != null) api.getAuth(url, userAgent.ifBlank { DEFAULT_USER_AGENT }, authorization)
+            else api.get(url, userAgent.ifBlank { DEFAULT_USER_AGENT })
         } catch (e: Exception) {
             throw e.toNovaException()
         }
@@ -32,6 +33,11 @@ class HttpFetcher @Inject constructor(private val api: RemoteApi) {
             else NovaException(ErrorKind.HTTP, code)
         }
         return resp.body() ?: throw NovaException(ErrorKind.PARSE)
+    }
+
+    /** Fetches a small text document (optionally with an Authorization header). */
+    suspend fun string(url: String, userAgent: String, authorization: String? = null): String = withContext(Dispatchers.IO) {
+        open(url, userAgent, authorization).use { it.string() }
     }
 
     /** Fetches a URL and hands a streaming character reader to [block]. */

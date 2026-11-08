@@ -2,7 +2,20 @@
 
 package com.nova.iptv.ui.vod
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
+import com.nova.iptv.data.tmdb.TmdbEpisode
+import com.nova.iptv.data.tmdb.TmdbInfo
+import com.nova.iptv.data.tmdb.TmdbPerson
+import com.nova.iptv.ui.components.TitleLogo
+import com.nova.iptv.ui.components.cleanTitle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +87,7 @@ import com.nova.iptv.ui.components.PosterCard
 import com.nova.iptv.ui.components.novaFocus
 import com.nova.iptv.ui.theme.NovaGradient
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailHeader(
     backdrop: String,
@@ -82,16 +96,21 @@ private fun DetailHeader(
     meta: List<String>,
     rating: String,
     onBack: () -> Unit,
+    tmdb: TmdbInfo? = null,
     actions: @Composable () -> Unit,
 ) {
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     val bg = MaterialTheme.colorScheme.background
+    val bd = tmdb?.backdrop?.ifBlank { null } ?: backdrop
+    val ps = tmdb?.poster?.ifBlank { null } ?: poster
+    val shownTitle = tmdb?.title?.ifBlank { null } ?: title.cleanTitle()
+    val shownRating = tmdb?.ratingText?.ifBlank { null } ?: rating
     Column(Modifier.fillMaxWidth()) {
     Box(Modifier.fillMaxWidth()) {
         NetImage(
-            backdrop.ifBlank { poster },
-            Modifier.fillMaxWidth().aspectRatio(if (wide) 2.6f else 1.5f)
-                .then(if (backdrop.isBlank()) Modifier.blur(26.dp) else Modifier),
+            bd.ifBlank { ps },
+            Modifier.fillMaxWidth().aspectRatio(if (wide) 2.4f else 1.4f)
+                .then(if (bd.isBlank()) Modifier.blur(26.dp) else Modifier),
         )
         Box(
             Modifier
@@ -105,20 +124,55 @@ private fun DetailHeader(
     }
     Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
         NetImage(
-            poster,
+            ps,
             Modifier
-                .width(if (wide) 160.dp else 110.dp)
+                .width(if (wide) 170.dp else 115.dp)
                 .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(12.dp)),
+                .shadow(16.dp, RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp)),
         )
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (rating.isNotBlank()) {
-                    GradientBadge("★ $rating")
-                    Spacer(Modifier.width(8.dp))
+            TitleLogo(
+                logo = tmdb?.logo.orEmpty(),
+                modifier = Modifier.height(if (wide) 90.dp else 64.dp).fillMaxWidth(),
+            ) {
+                Text(shownTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            }
+            val original = tmdb?.originalTitle.orEmpty()
+            if (tmdb?.logo.orEmpty().isNotBlank() || (original.isNotBlank() && original != shownTitle)) {
+                Text(
+                    if (tmdb?.logo.orEmpty().isNotBlank()) shownTitle else original,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            FlowRow(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (shownRating.isNotBlank() && shownRating != "0") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GradientBadge("★ $shownRating")
+                        if (tmdb != null && tmdb.votes > 0) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "TMDB · " + stringResource(R.string.tmdb_votes, tmdb.votes),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                tmdb?.certification?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
                 }
                 Text(
                     meta.filter { it.isNotBlank() }.joinToString(" • "),
@@ -128,10 +182,89 @@ private fun DetailHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (tmdb != null && tmdb.genres.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    tmdb.genres.take(4).forEach { g ->
+                        Text(
+                            g,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(14.dp))
             actions()
         }
     }
+    tmdb?.tagline?.takeIf { it.isNotBlank() }?.let {
+        Text(
+            "“$it”",
+            style = MaterialTheme.typography.bodyMedium,
+            fontStyle = FontStyle.Italic,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
+        )
+    }
+    }
+}
+
+/** Cast with photos from TMDB. */
+@Composable
+private fun CastRow(cast: List<TmdbPerson>) {
+    if (cast.isEmpty()) return
+    Column(Modifier.padding(top = 12.dp)) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(4.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(NovaGradient))
+            Spacer(Modifier.width(10.dp))
+            Text(stringResource(R.string.cast), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(cast, key = { it.name + it.role }) { p ->
+                Column(Modifier.width(88.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    NetImage(
+                        p.photo,
+                        Modifier.size(80.dp).clip(CircleShape),
+                        fallback = Icons.Filled.Person,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        p.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                    )
+                    if (p.role.isNotBlank()) {
+                        Text(
+                            p.role, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrailerButton(key: String) {
+    if (key.isBlank()) return
+    val context = LocalContext.current
+    OutlinedButton(
+        onClick = {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        },
+        modifier = Modifier.novaFocus(),
+    ) {
+        Icon(Icons.Filled.Movie, null)
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.trailer))
     }
 }
 
@@ -149,6 +282,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
         return
     }
     val info = vm.info
+    val tmdb = vm.tmdb
     val req = PlaybackRequest(c.subscriptionId, ContentType.MOVIE, c.remoteId, c.name, info?.image?.ifBlank { null } ?: c.logo)
     val h = history
     val canResume = h != null && h.positionMs > 30_000 && (h.durationMs == 0L || h.positionMs < h.durationMs * 0.95)
@@ -158,9 +292,14 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
             backdrop = info?.backdrop.orEmpty(),
             poster = info?.image?.ifBlank { null } ?: c.logo,
             title = c.name,
-            meta = listOf(c.year.ifBlank { info?.releaseDate?.take(4).orEmpty() }, info?.duration.orEmpty(), info?.genre.orEmpty()),
+            meta = listOf(
+                tmdb?.year?.ifBlank { null } ?: c.year.ifBlank { info?.releaseDate?.take(4).orEmpty() },
+                tmdb?.runtimeMin?.takeIf { it > 0 }?.let { stringResource(R.string.minutes_n, it) } ?: info?.duration.orEmpty(),
+                if (tmdb == null) info?.genre.orEmpty() else "",
+            ),
             rating = c.rating.ifBlank { info?.rating.orEmpty() },
             onBack = onBack,
+            tmdb = tmdb,
         ) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { PlayerLauncher.play(context, req) }, modifier = Modifier.novaFocus()) {
@@ -175,6 +314,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
                         Text(stringResource(R.string.start_over))
                     }
                 }
+                TrailerButton(tmdb?.trailerKey.orEmpty())
                 IconButton(onClick = vm::toggleFavorite, modifier = Modifier.novaFocus(CircleShape)) {
                     Icon(
                         if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -190,11 +330,12 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
                 modifier = Modifier.padding(16.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
             )
         }
-        val plot = info?.plot?.ifBlank { null } ?: c.plot
+        val plot = tmdb?.overview?.ifBlank { null } ?: info?.plot?.ifBlank { null } ?: c.plot
         if (plot.isNotBlank()) {
             Text(plot, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
         }
-        info?.cast?.takeIf { it.isNotBlank() }?.let {
+        if (tmdb != null && tmdb.cast.isNotEmpty()) CastRow(tmdb.cast)
+        else info?.cast?.takeIf { it.isNotBlank() }?.let {
             Text(
                 stringResource(R.string.cast) + ": " + it,
                 style = MaterialTheme.typography.bodySmall,
@@ -202,7 +343,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        info?.director?.takeIf { it.isNotBlank() }?.let {
+        (tmdb?.creators?.takeIf { it.isNotEmpty() }?.joinToString("، ") ?: info?.director)?.takeIf { it.isNotBlank() }?.let {
             Text(
                 stringResource(R.string.director) + ": " + it,
                 style = MaterialTheme.typography.bodySmall,
@@ -247,6 +388,8 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
     val context = LocalContext.current
     val c = item
     val info = vm.info
+    val tmdb = vm.tmdb
+    val tmdbEpisodes = vm.tmdbEpisodes
 
     if (c == null) {
         if (vm.error != null) ErrorView(vm.error, onRetry = { vm.load(true) }) else LoadingView()
@@ -267,12 +410,17 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             DetailHeader(
-                backdrop = "",
+                backdrop = info?.backdrop.orEmpty(),
                 poster = info?.cover?.ifBlank { null } ?: c.logo,
                 title = c.name,
-                meta = listOf(c.year.ifBlank { info?.releaseDate?.take(4).orEmpty() }, info?.genre.orEmpty()),
+                meta = listOf(
+                    tmdb?.year?.ifBlank { null } ?: c.year.ifBlank { info?.releaseDate?.take(4).orEmpty() },
+                    tmdb?.seasons?.takeIf { it > 0 }?.let { stringResource(R.string.seasons_count, it) }.orEmpty(),
+                    if (tmdb == null) info?.genre.orEmpty() else "",
+                ),
                 rating = c.rating.ifBlank { info?.rating.orEmpty() },
                 onBack = onBack,
+                tmdb = tmdb,
             ) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val l = last
@@ -294,6 +442,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
                             Text(stringResource(R.string.continue_episode, l.subtitle.substringBefore(" —")))
                         }
                     }
+                    TrailerButton(tmdb?.trailerKey.orEmpty())
                     IconButton(onClick = vm::toggleFavorite, modifier = Modifier.novaFocus(CircleShape)) {
                         Icon(
                             if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -304,9 +453,12 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
                 }
             }
         }
-        val plot = info?.plot?.ifBlank { null } ?: c.plot
+        val plot = tmdb?.overview?.ifBlank { null } ?: info?.plot?.ifBlank { null } ?: c.plot
         if (plot.isNotBlank()) {
             item { Text(plot, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp)) }
+        }
+        if (tmdb != null && tmdb.cast.isNotEmpty()) {
+            item(key = "cast") { CastRow(tmdb.cast) }
         }
         when {
             vm.loading && info == null -> item { Box(Modifier.fillMaxWidth().height(160.dp)) { LoadingView() } }
@@ -337,6 +489,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
                         val h = progress[e.id]
                         EpisodeRow(
                             episode = e,
+                            tmdb = tmdbEpisodes[e.episodeNum],
                             progress = if (h != null && h.durationMs > 0) h.positionMs.toFloat() / h.durationMs else null,
                             onClick = { PlayerLauncher.play(context, request(e)) },
                         )
@@ -351,7 +504,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
 }
 
 @Composable
-private fun EpisodeRow(episode: XEpisode, progress: Float?, onClick: () -> Unit) {
+private fun EpisodeRow(episode: XEpisode, tmdb: TmdbEpisode?, progress: Float?, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier
@@ -365,7 +518,7 @@ private fun EpisodeRow(episode: XEpisode, progress: Float?, onClick: () -> Unit)
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(120.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) {
-            NetImage(episode.image, Modifier.fillMaxSize())
+            NetImage(tmdb?.still?.ifBlank { null } ?: episode.image, Modifier.fillMaxSize())
             Icon(
                 Icons.Filled.PlayArrow, null, tint = Color.White,
                 modifier = Modifier.align(Alignment.Center).size(28.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
@@ -380,21 +533,23 @@ private fun EpisodeRow(episode: XEpisode, progress: Float?, onClick: () -> Unit)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                "${episode.episodeNum}. " + episode.title.ifBlank { stringResource(R.string.episode_n, episode.episodeNum) },
+                "${episode.episodeNum}. " + (tmdb?.name?.ifBlank { null } ?: episode.title.ifBlank { stringResource(R.string.episode_n, episode.episodeNum) }),
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (episode.durationSecs > 0) {
+            val minutes = if (episode.durationSecs > 0) episode.durationSecs / 60 else tmdb?.runtimeMin ?: 0
+            if (minutes > 0) {
                 Text(
-                    stringResource(R.string.minutes_n, episode.durationSecs / 60),
+                    stringResource(R.string.minutes_n, minutes),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (episode.plot.isNotBlank()) {
+            val epPlot = tmdb?.overview?.ifBlank { null } ?: episode.plot
+            if (epPlot.isNotBlank()) {
                 Text(
-                    episode.plot,
+                    epPlot,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,

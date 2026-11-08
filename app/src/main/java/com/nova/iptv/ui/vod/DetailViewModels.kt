@@ -19,6 +19,10 @@ import com.nova.iptv.data.network.XVodInfo
 import com.nova.iptv.data.repo.ContentRepository
 import com.nova.iptv.data.repo.SubscriptionRepository
 import com.nova.iptv.data.toNovaException
+import com.nova.iptv.data.tmdb.TmdbEpisode
+import com.nova.iptv.data.tmdb.TmdbInfo
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +46,8 @@ class MovieDetailViewModel @Inject constructor(
     val item: StateFlow<ContentEntity?> = itemFlow
 
     var info by mutableStateOf<XVodInfo?>(null)
+        private set
+    var tmdb by mutableStateOf<TmdbInfo?>(null)
         private set
     var notFound by mutableStateOf(false)
         private set
@@ -71,8 +77,9 @@ class MovieDetailViewModel @Inject constructor(
                 notFound = true; return@launch
             }
             itemFlow.value = c
-            val sub = subs.get(c.subscriptionId) ?: return@launch
-            info = content.vodInfo(sub, c.remoteId)
+            val sub = subs.get(c.subscriptionId)
+            if (sub != null && sub.type == SourceType.XTREAM) info = content.vodInfo(sub, c.remoteId)
+            tmdb = content.tmdbFor(c, info?.tmdbId.orEmpty())
         }
     }
 
@@ -93,6 +100,11 @@ class SeriesDetailViewModel @Inject constructor(
     val item: StateFlow<ContentEntity?> = itemFlow
 
     var info by mutableStateOf<XSeriesInfo?>(null)
+        private set
+    var tmdb by mutableStateOf<TmdbInfo?>(null)
+        private set
+    /** TMDB episodes of the selected season, by episode number. */
+    var tmdbEpisodes by mutableStateOf<Map<Int, TmdbEpisode>>(emptyMap())
         private set
     var loading by mutableStateOf(true)
         private set
@@ -131,6 +143,13 @@ class SeriesDetailViewModel @Inject constructor(
 
     init {
         load(false)
+        viewModelScope.launch {
+            snapshotFlow { selectedSeason to tmdb?.id }
+                .distinctUntilChanged()
+                .collect { (season, id) ->
+                    tmdbEpisodes = if (id != null && season >= 0) content.tmdbSeason(id, season) else emptyMap()
+                }
+        }
     }
 
     fun load(force: Boolean) {
@@ -145,6 +164,7 @@ class SeriesDetailViewModel @Inject constructor(
                 val i = content.seriesInfo(sub, c.remoteId, force)
                 info = i
                 if (selectedSeason !in i.seasons.keys) selectedSeason = i.seasons.keys.firstOrNull() ?: -1
+                if (tmdb == null) launch { tmdb = content.tmdbFor(c, i.tmdbId) }
             } catch (e: Exception) {
                 error = e.toNovaException()
             } finally {

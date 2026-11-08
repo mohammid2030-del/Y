@@ -308,3 +308,28 @@ fun GradientBadge(text: String, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/**
+ * TMDB title artwork ("logo") with a text fallback while loading fails.
+ * Transparent while loading so the backdrop shows through.
+ */
+@Composable
+fun TitleLogo(
+    logo: String,
+    modifier: Modifier = Modifier,
+    alignment: Alignment = Alignment.CenterStart,
+    fallback: @Composable () -> Unit,
+) {
+    if (logo.isBlank()) {
+        fallback(); return
+    }
+    SubcomposeAsyncImage(
+        model = logo,
+        contentDescription = null,
+        contentScale = ContentScale.Fit,
+        alignment = alignment,
+        modifier = modifier,
+        loading = { Box(Modifier.fillMaxSize()) },
+        error = { fallback() },
+    )
+}

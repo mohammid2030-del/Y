@@ -18,4 +18,12 @@ interface RemoteApi {
         @Url url: String,
         @Header("User-Agent") userAgent: String,
     ): Response<ResponseBody>
+
+    @Streaming
+    @GET
+    suspend fun getAuth(
+        @Url url: String,
+        @Header("User-Agent") userAgent: String,
+        @Header("Authorization") authorization: String,
+    ): Response<ResponseBody>
 }

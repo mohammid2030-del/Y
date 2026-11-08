@@ -34,6 +34,7 @@ data class AppSettings(
     val showEpgInList: Boolean = true,
     val introSeconds: Int = 0,
     val autoNext: Boolean = true,
+    val showMatches: Boolean = true,
 )
 
 @Singleton
@@ -53,6 +54,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val SHOW_EPG = booleanPreferencesKey("show_epg_list")
         val INTRO = intPreferencesKey("intro_sec")
         val AUTO_NEXT = booleanPreferencesKey("auto_next")
+        val SHOW_MATCHES = booleanPreferencesKey("show_matches")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -69,6 +71,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             showEpgInList = p[Keys.SHOW_EPG] ?: true,
             introSeconds = p[Keys.INTRO] ?: 0,
             autoNext = p[Keys.AUTO_NEXT] ?: true,
+            showMatches = p[Keys.SHOW_MATCHES] ?: true,
         )
     }.distinctUntilChanged()
 
@@ -86,6 +89,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
     suspend fun setShowEpg(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_EPG] = v }
     suspend fun setIntroSeconds(v: Int) = context.dataStore.edit { it[Keys.INTRO] = v }
     suspend fun setAutoNext(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_NEXT] = v }
+    suspend fun setShowMatches(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_MATCHES] = v }
     suspend fun setLastChannel(v: String) = context.dataStore.edit { it[Keys.LAST_CHANNEL] = v }
 
     suspend fun setPin(pin: String?) = context.dataStore.edit {
