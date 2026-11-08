@@ -59,8 +59,12 @@ jobs:
           set -e
           mkdir -p ~/.appstoreconnect/private_keys
           KEY=~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
-          printf '%s\n' "$ASC_KEY_P8" | tr -d '\r' > "$KEY"
-          grep -q "BEGIN PRIVATE KEY" "$KEY" || { echo "error: ASC_KEY_P8 does not look like a .p8 key (missing BEGIN PRIVATE KEY line)" | tee ../archive-key.log; exit 1; }
+          # Accept the key however it was pasted (with/without BEGIN/END lines, on one line, with spaces or CRLF)
+          BODY=$(printf '%s' "$ASC_KEY_P8" | sed -e 's/-----BEGIN PRIVATE KEY-----//' -e 's/-----END PRIVATE KEY-----//' | tr -d ' \r\n\t')
+          { echo "-----BEGIN PRIVATE KEY-----"; printf '%s' "$BODY" | fold -w 64; echo; echo "-----END PRIVATE KEY-----"; } > "$KEY"
+          if ! openssl pkey -in "$KEY" -noout 2>/dev/null; then
+            echo "error: ASC_KEY_P8 is not a valid private key (length ${#BODY}). Paste the whole content of the AuthKey .p8 file." | tee ../archive-key.log; exit 1
+          fi
           AUTH="-allowProvisioningUpdates -authenticationKeyPath $KEY -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
           cat > ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
