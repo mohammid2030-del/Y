@@ -8,6 +8,8 @@ import com.nova.iptv.data.db.SubscriptionDao
 import com.nova.iptv.data.tmdb.TmdbRepository
 import com.nova.iptv.ui.components.cleanFull
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -155,8 +157,8 @@ class LibraryRepository @Inject constructor(
         val tv = series(idx)
         list.asSequence().filter { it.tmdb.isEmpty() && tmdb.cachedPoster(tv, it.name, it.year) == null }.take(max).toList()
             .chunked(12).forEach { chunk ->
-                kotlinx.coroutines.coroutineScope {
-                    chunk.map { m -> kotlinx.coroutines.async { runCatching { tmdb.poster(tv, m.name, m.year) } } }.forEach { it.await() }
+                coroutineScope {
+                    chunk.map { m -> async { runCatching { tmdb.poster(tv, m.name, m.year) } } }.forEach { it.await() }
                 }
             }
     }
