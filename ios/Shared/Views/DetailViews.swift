@@ -16,17 +16,25 @@ private struct DetailHeader<Actions: View>: View {
         let title = tmdb?.title.isEmpty == false ? tmdb!.title : Clean.title(item.name)
         let rating = tmdb?.rating.isEmpty == false ? tmdb!.rating : item.rating
         VStack(alignment: .leading, spacing: 0) {
+            #if os(iOS)
             ZStack(alignment: .bottom) {
                 RemoteImage(url: backdrop.isEmpty ? poster : backdrop, maxPixel: 1920)
-                    .frame(maxWidth: .infinity).frame(height: Theme.isTV ? 620 : 300).clipped()
+                    .frame(maxWidth: .infinity).frame(height: 300).clipped()
                     .blur(radius: backdrop.isEmpty ? 24 : 0)
                 LinearGradient(colors: [.black.opacity(0.35), .clear, Theme.bg], startPoint: .top, endPoint: .bottom)
             }
+            #endif
             HStack(alignment: .top, spacing: Theme.isTV ? 50 : 18) {
-                RemoteImage(url: poster, maxPixel: 900).frame(width: Theme.isTV ? 300 : 120, height: Theme.isTV ? 450 : 180)
+                #if os(tvOS)
+                // Apple TV: the backdrop fills the screen behind the page; poster, info and buttons fit on the first screen.
+                RemoteImage(url: poster, maxPixel: 900).frame(width: 260, height: 390)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)).shadow(radius: 16)
-                    .offset(y: Theme.isTV ? -160 : -70)
-                    .padding(.bottom, Theme.isTV ? -160 : -70)
+                #else
+                RemoteImage(url: poster, maxPixel: 900).frame(width: 120, height: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)).shadow(radius: 16)
+                    .offset(y: -70)
+                    .padding(.bottom, -70)
+                #endif
                 VStack(alignment: .leading, spacing: 10) {
                     if let logo = tmdb?.logo, !logo.isEmpty {
                         RemoteImage(url: logo, contentMode: .fit).frame(maxWidth: Theme.isTV ? 600 : 300, maxHeight: Theme.isTV ? 140 : 70, alignment: .leading)
@@ -53,10 +61,31 @@ private struct DetailHeader<Actions: View>: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.pad)
+            .padding(.top, Theme.isTV ? 40 : 0)
             if let tag = tmdb?.tagline, !tag.isEmpty {
                 Text("“\(tag)”").italic().foregroundStyle(Theme.blue).padding(.horizontal, Theme.pad).padding(.top, 14)
             }
         }
+    }
+}
+
+/// Full-screen backdrop behind a detail page on Apple TV (stays still while the page scrolls).
+struct DetailBackdrop: View {
+    let url: String
+    var body: some View {
+        #if os(tvOS)
+        ZStack {
+            Theme.bg
+            if !url.isEmpty {
+                RemoteImage(url: url, maxPixel: 1920).frame(maxWidth: .infinity, maxHeight: .infinity).clipped().opacity(0.55)
+            }
+            LinearGradient(colors: [Theme.bg.opacity(0.95), Theme.bg.opacity(0.75), Theme.bg.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+            LinearGradient(colors: [.clear, Theme.bg], startPoint: .center, endPoint: .bottom)
+        }
+        .ignoresSafeArea()
+        #else
+        Theme.bg.ignoresSafeArea()
+        #endif
     }
 }
 
@@ -212,6 +241,10 @@ struct MovieDetailView: View {
     @State private var info: VodInfo?
     @State private var tmdb: TMDBInfo?
     @State private var trailer: String?
+    #if os(tvOS)
+    @FocusState private var playFocused: Bool
+    @State private var didFocus = false
+    #endif
 
     var body: some View {
         let h = state.history[HistoryItem.key(state.activeID, .movie, item.id)]
@@ -240,6 +273,15 @@ struct MovieDetailView: View {
             .padding(.bottom, 40)
         }
         .ignoresSafeArea(edges: Theme.isTV ? [] : .top)
+        .background(DetailBackdrop(url: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? "")))
+        #if os(tvOS)
+        .onAppear {
+            // Always start on Play, so the remote works immediately.
+            guard !didFocus else { return }
+            didFocus = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { playFocused = true }
+        }
+        #endif
         .task {
             if let sub = state.active, sub.kind == .xtream { info = await state.xtream(for: sub).vodInfo(item.id) }
             if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .movie, tmdbID: info?.tmdb ?? "", name: item.name, year: item.year) }
@@ -253,6 +295,9 @@ struct MovieDetailView: View {
         HStack(spacing: 12) {
             Button { state.playMovie(item) } label: { Label(L.t(canResume ? "resume" : "play"), systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent)
+                #if os(tvOS)
+                .focused($playFocused)
+                #endif
             if canResume {
                 Button { state.playMovie(item, fromStart: true) } label: { Label(L.t("startOver"), systemImage: "arrow.counterclockwise") }
                     .buttonStyle(.bordered)
@@ -278,6 +323,11 @@ struct SeriesDetailView: View {
     @State private var tmdb: TMDBInfo?
     @State private var tmEpisodes: [Int: TMDBEpisode] = [:]
     @State private var trailer: String?
+    private enum SField: Hashable { case resume, firstEpisode, season }
+    #if os(tvOS)
+    @FocusState private var sFocus: SField?
+    @State private var didFocus = false
+    #endif
 
     var body: some View {
         let seasons = info.map { $0.seasons.keys.sorted() } ?? []
@@ -296,6 +346,9 @@ struct SeriesDetailView: View {
                             Button { state.resume(last) } label: {
                                 Label(L.t("resume") + " " + (last.subtitle.components(separatedBy: " —").first ?? ""), systemImage: "play.fill")
                             }.buttonStyle(.borderedProminent)
+                            #if os(tvOS)
+                            .focused($sFocus, equals: .resume)
+                            #endif
                         }
                         #if os(iOS)
                         if let key = tmdb?.trailer, !key.isEmpty {
@@ -336,12 +389,14 @@ struct SeriesDetailView: View {
                         }.padding(.horizontal, Theme.pad).padding(.vertical, 6)
                     }
                     ForEach(episodes) { e in
+                        let isFirst = e.id == episodes.first?.id
                         Button { state.playEpisode(e, of: item, all: episodes) } label: {
                             EpisodeRow(episode: e, tm: tmEpisodes[e.num], fallback: item.logo,
                                        progress: state.history[HistoryItem.key(state.activeID, .series, item.id, e.id)]?.progress)
                         }
                         #if os(tvOS)
                         .buttonStyle(.card)
+                        .modifier(FirstEpisodeFocus(focus: $sFocus, on: isFirst))
                         #else
                         .buttonStyle(.plain)
                         #endif
@@ -352,6 +407,11 @@ struct SeriesDetailView: View {
             .padding(.bottom, 40)
         }
         .ignoresSafeArea(edges: Theme.isTV ? [] : .top)
+        .background(DetailBackdrop(url: tmdb?.backdrop.isEmpty == false ? tmdb!.backdrop : (info?.backdrop ?? "")))
+        #if os(tvOS)
+        .onChange(of: info?.seasons.count ?? -1) { _ in focusStart() }
+        .onAppear { focusStart() }
+        #endif
         .task {
             guard let sub = state.active, sub.kind == .xtream else { error = L.t("noEpisodes"); return }
             do {
@@ -369,6 +429,25 @@ struct SeriesDetailView: View {
         .sheet(item: Binding(get: { trailer.map { TrailerID(key: $0) } }, set: { trailer = $0?.key })) { t in TrailerSheet(key: t.key) }
         #endif
     }
+
+    #if os(tvOS)
+    private struct FirstEpisodeFocus: ViewModifier {
+        var focus: FocusState<SField?>.Binding
+        let on: Bool
+        @ViewBuilder func body(content: Content) -> some View {
+            if on { content.focused(focus, equals: .firstEpisode) } else { content }
+        }
+    }
+
+    /// Start on "Resume", or on the first episode once the list has loaded, so the remote works immediately.
+    private func focusStart() {
+        guard !didFocus else { return }
+        let hasResume = state.history.values.contains { $0.subID == state.activeID && $0.kind == .series && $0.stream.id == item.id }
+        guard hasResume || !(info?.seasons.isEmpty ?? true) else { return }
+        didFocus = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { sFocus = hasResume ? .resume : .firstEpisode }
+    }
+    #endif
 }
 
 private struct EpisodeRow: View {
