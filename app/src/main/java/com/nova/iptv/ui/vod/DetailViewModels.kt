@@ -40,7 +40,10 @@ class MovieDetailViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val content: ContentRepository,
     private val subs: SubscriptionRepository,
+    library: com.nova.iptv.data.library.LibraryRepository,
+    tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
 ) : ViewModel() {
+    val extras = DetailExtras(library, tmdbRepo, viewModelScope)
     private val id: Long = savedState.get<Long>("id") ?: 0L
     private val itemFlow = MutableStateFlow<ContentEntity?>(null)
     val item: StateFlow<ContentEntity?> = itemFlow
@@ -76,11 +79,24 @@ class MovieDetailViewModel @Inject constructor(
             if (c == null) {
                 notFound = true; return@launch
             }
-            itemFlow.value = c
-            val sub = subs.get(c.subscriptionId)
-            if (sub != null && sub.type == SourceType.XTREAM) info = content.vodInfo(sub, c.remoteId)
-            tmdb = content.tmdbFor(c, info?.tmdbId.orEmpty())
+            show(c)
         }
+    }
+
+    private suspend fun show(c: ContentEntity) {
+        itemFlow.value = c
+        extras.load(c)
+        info = null
+        val sub = subs.get(c.subscriptionId)
+        if (sub != null && sub.type == SourceType.XTREAM) info = content.vodInfo(sub, c.remoteId)
+        tmdb = content.tmdbFor(c, info?.tmdbId.orEmpty())
+    }
+
+    /** Switches the page to another copy of the title (another language / quality). */
+    fun pick(id: Long) {
+        extras.choosing = false
+        if (id == itemFlow.value?.id) return
+        viewModelScope.launch { content.byId(id)?.let { show(it) } }
     }
 
     fun toggleFavorite() {
@@ -94,7 +110,10 @@ class SeriesDetailViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val content: ContentRepository,
     private val subs: SubscriptionRepository,
+    library: com.nova.iptv.data.library.LibraryRepository,
+    tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
 ) : ViewModel() {
+    val extras = DetailExtras(library, tmdbRepo, viewModelScope)
     private val id: Long = savedState.get<Long>("id") ?: 0L
     private val itemFlow = MutableStateFlow<ContentEntity?>(null)
     val item: StateFlow<ContentEntity?> = itemFlow
@@ -158,6 +177,7 @@ class SeriesDetailViewModel @Inject constructor(
             error = null
             try {
                 val c = itemFlow.value ?: content.byId(id) ?: throw NovaException(com.nova.iptv.data.ErrorKind.UNKNOWN)
+                if (itemFlow.value == null) extras.load(c)
                 itemFlow.value = c
                 val sub = subs.get(c.subscriptionId) ?: throw NovaException(com.nova.iptv.data.ErrorKind.UNKNOWN)
                 if (sub.type != SourceType.XTREAM) throw NovaException(com.nova.iptv.data.ErrorKind.UNKNOWN)
@@ -170,6 +190,18 @@ class SeriesDetailViewModel @Inject constructor(
             } finally {
                 loading = false
             }
+        }
+    }
+
+    /** Switches the page to another copy of the series (another language / quality). */
+    fun pick(id: Long) {
+        extras.choosing = false
+        if (id == itemFlow.value?.id) return
+        viewModelScope.launch {
+            val c = content.byId(id) ?: return@launch
+            itemFlow.value = c
+            info = null; tmdb = null; tmdbEpisodes = emptyMap(); selectedSeason = -1
+            load(false)
         }
     }
 

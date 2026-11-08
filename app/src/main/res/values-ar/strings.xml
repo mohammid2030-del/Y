@@ -305,4 +305,26 @@
     <string name="viewer_delete">حذف المشاهد</string>
     <string name="viewer_delete_confirm">حذف هذا المشاهد مع تقدّمه ومفضلته؟</string>
     <string name="switch_viewer">تبديل المشاهد</string>
+    <string name="versions_n">%1$d نسخ</string>
+    <string name="lib_all_of">كل %1$s</string>
+    <string name="genre_reset">إعادة</string>
+    <string name="choose_version">اختر النسخة</string>
+    <string name="versions">النسخ</string>
+    <string name="g_action">أكشن</string>
+    <string name="g_drama">دراما</string>
+    <string name="g_comedy">كوميدي</string>
+    <string name="g_romance">رومانسي</string>
+    <string name="g_thriller">إثارة</string>
+    <string name="g_horror">رعب</string>
+    <string name="g_crime">جريمة</string>
+    <string name="g_scifi">خيال علمي</string>
+    <string name="g_adventure">مغامرة</string>
+    <string name="g_animation">رسوم متحركة</string>
+    <string name="g_family">عائلي</string>
+    <string name="g_mystery">غموض</string>
+    <string name="g_war">حرب</string>
+    <string name="g_documentary">وثائقي</string>
+    <string name="known_for">اشتهر بـ</string>
+    <string name="not_in_library">غير موجود في اشتراكك</string>
+    <string name="born">مواليد %1$s</string>
 </resources>

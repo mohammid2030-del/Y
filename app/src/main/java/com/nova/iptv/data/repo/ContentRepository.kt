@@ -243,7 +243,7 @@ class ContentRepository @Inject constructor(
     /** TMDB details for a movie / series (null when no key is set or nothing matched). */
     suspend fun tmdbFor(c: ContentEntity, providerTmdbId: String = ""): com.nova.iptv.data.tmdb.TmdbInfo? {
         if (!tmdb.enabled.value || c.type == ContentType.LIVE) return null
-        return tmdb.lookup(c.type == ContentType.SERIES, providerTmdbId, c.name, c.year)
+        return tmdb.lookup(c.type == ContentType.SERIES, providerTmdbId.ifBlank { c.tmdb }, c.name, c.year)
     }
 
     suspend fun tmdbSeason(tvId: Int, season: Int) = tmdb.season(tvId, season)

@@ -9,6 +9,7 @@ import androidx.paging.cachedIn
 import com.nova.iptv.data.repo.RECENT_ADDED
 import com.nova.iptv.data.db.CategoryEntity
 import com.nova.iptv.data.db.ContentEntity
+import com.nova.iptv.data.db.LibItem
 import com.nova.iptv.data.db.ContentType
 import com.nova.iptv.data.db.EpgProgramEntity
 import com.nova.iptv.data.db.FavoriteEntity
@@ -35,6 +36,8 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+const val SHELF = "\u0001shelf:"
 
 object SpecialCat {
     const val ALL = "\u0001all"
@@ -122,6 +125,66 @@ class LiveViewModel @Inject constructor(
         selected.value = category
     }
 
+    // ---- Netflix-style library: shelves (platforms / regions), one card per title, genre filters
+
+    val index: StateFlow<com.nova.iptv.data.library.LibraryRepository.Index?> = subId
+        .flatMapLatest { library.indexFlow(it, type) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Bumps when TMDB identified more titles (copies merge, genres become known). */
+    val libraryTick = MutableStateFlow(0)
+
+    /** Discover rows: each shelf with its newest titles. */
+    val shelfRows: StateFlow<List<Pair<com.nova.iptv.data.library.Shelf, List<LibItem>>>> = combine(index, libraryTick) { idx, _ -> idx }
+        .map { idx ->
+            if (idx == null) emptyList() else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                idx.shelves.map { sh -> sh to library.collapse(idx, idx.items.filter { idx.shelfOfCategory[it.categoryId] == sh.id }.sortedByDescending { it.added }.take(80)).take(20) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Current shelf browser state. */
+    val libCategory = MutableStateFlow<String?>(null)
+    val libGenre = MutableStateFlow<com.nova.iptv.data.library.Genre?>(null)
+    val libGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
+
+    val libItems: StateFlow<List<LibItem>?> = combine(index, selected, libCategory, libGenre, libraryTick) { idx, sel, cat, g, _ ->
+        arrayOf(idx, sel, cat, g)
+    }.map { a ->
+        val idx = a[0] as? com.nova.iptv.data.library.LibraryRepository.Index ?: return@map null
+        val sel = a[1] as String
+        if (!sel.startsWith(SHELF)) return@map null
+        val g = a[3] as? com.nova.iptv.data.library.Genre
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val list = library.browse(idx, sel.removePrefix(SHELF), a[2] as String?)
+            if (g == null) list else list.filter { library.matchesGenre(idx, it, g) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private var identifying: kotlinx.coroutines.Job? = null
+    /** Looks up the titles on screen with TMDB (once), then merges copies / applies genres. */
+    fun identify(list: List<LibItem>) {
+        val idx = index.value ?: return
+        identifying?.cancel()
+        identifying = viewModelScope.launch {
+            val before = library.tmdbVersion()
+            library.identify(idx, list)
+            if (library.tmdbVersion() != before) libraryTick.value++
+        }
+    }
+
+    fun openShelf(id: String) {
+        libCategory.value = null; libGenre.value = null
+        selected.value = SHELF + id
+    }
+
+    fun versionCount(item: LibItem): Int {
+        val idx = index.value ?: return 1
+        return library.versionCountFast(idx, item)
+    }
+
+    fun openLib(item: LibItem, onId: (Long) -> Unit) = onId(item.id)
+
     fun toggleFavorite(c: ContentEntity) {
         viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.LIVE, c.remoteId, c.name, c.logo) }
     }
@@ -135,6 +198,7 @@ abstract class VodViewModel(
     val type: String,
     private val content: ContentRepository,
     settings: SettingsRepository,
+    val library: com.nova.iptv.data.library.LibraryRepository,
 ) : ViewModel() {
     val subId: StateFlow<Long> = settings.activeSubscriptionId.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     val selected = MutableStateFlow(SpecialCat.ALL)
@@ -217,12 +281,12 @@ abstract class VodViewModel(
 }
 
 @HiltViewModel
-class MoviesViewModel @Inject constructor(content: ContentRepository, settings: SettingsRepository) :
-    VodViewModel(ContentType.MOVIE, content, settings)
+class MoviesViewModel @Inject constructor(content: ContentRepository, settings: SettingsRepository, library: com.nova.iptv.data.library.LibraryRepository) :
+    VodViewModel(ContentType.MOVIE, content, settings, library)
 
 @HiltViewModel
-class SeriesViewModel @Inject constructor(content: ContentRepository, settings: SettingsRepository) :
-    VodViewModel(ContentType.SERIES, content, settings)
+class SeriesViewModel @Inject constructor(content: ContentRepository, settings: SettingsRepository, library: com.nova.iptv.data.library.LibraryRepository) :
+    VodViewModel(ContentType.SERIES, content, settings, library)
 
 @HiltViewModel
 class FavoritesViewModel @Inject constructor(

@@ -2,6 +2,8 @@
 
 package com.nova.iptv.ui.home
 
+import com.nova.iptv.ui.components.NovaChip
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
@@ -112,6 +114,8 @@ fun VodTab(vm: VodViewModel, onOpen: (Long) -> Unit) {
     }
     if (selected == SpecialCat.ALL) {
         DiscoverView(vm, categories, listState, onOpen)
+    } else if (selected.startsWith(SHELF)) {
+        ShelfBrowser(vm, selected.removePrefix(SHELF), onOpen)
     } else {
         Column(Modifier.fillMaxSize().padding(top = homeTopInset())) {
             CategoryChips(categories, selected, vm.type, vm::select)
@@ -137,6 +141,7 @@ private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, lis
     val recent by vm.recentRow.collectAsStateWithLifecycle()
     val continueList by vm.continueWatching.collectAsStateWithLifecycle()
     val favorites by vm.favoriteKeys.collectAsStateWithLifecycle()
+    val shelfRows by vm.shelfRows.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val isMovie = vm.type == ContentType.MOVIE
 
@@ -168,7 +173,7 @@ private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, lis
             }
         }
         item(key = "chips") {
-            CategoryChips(categories, SpecialCat.ALL, vm.type, vm::select)
+            ShelfChips(vm, SpecialCat.ALL)
         }
         if (continueList.isNotEmpty()) {
             item(key = "continue") {
@@ -186,8 +191,16 @@ private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, lis
                 }
             }
         }
-        items(categories, key = { "cat_" + it.id }) { cat ->
-            CategoryRow(vm, cat, favorites, onOpen)
+        if (shelfRows.isNotEmpty()) {
+            items(shelfRows, key = { "shelf_" + it.first.id }) { (shelf, list) ->
+                if (list.isNotEmpty()) RowSection(shelf.title, count = shelf.count, onSeeAll = { vm.openShelf(shelf.id) }) {
+                    LibRow(vm, list, favorites, onOpen)
+                }
+            }
+        } else {
+            items(categories, key = { "cat_" + it.id }) { cat ->
+                CategoryRow(vm, cat, favorites, onOpen)
+            }
         }
     }
 }
@@ -312,3 +325,104 @@ private fun CategoryGrid(vm: VodViewModel, selected: String, gridState: LazyGrid
         }
     }
 }
+
+// ------------------------------------------------------------------ Netflix-style shelves
+
+/** Platforms / regions (Netflix, Shahid, Turkish…) plus favourites and recently added. */
+@Composable
+internal fun ShelfChips(vm: VodViewModel, selected: String) {
+    val idx by vm.index.collectAsStateWithLifecycle()
+    val shelves = idx?.shelves.orEmpty()
+    LazyRow(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(listOf(SpecialCat.ALL, SpecialCat.FAV, SpecialCat.RECENT)) { id ->
+            NovaChip(specialCategoryLabel(id, vm.type), selected == id, { vm.select(id) })
+        }
+        items(shelves, key = { it.id }) { sh ->
+            NovaChip(sh.title, selected == SHELF + sh.id, { vm.openShelf(sh.id) })
+        }
+    }
+}
+
+@Composable
+private fun LibRow(vm: VodViewModel, list: List<com.nova.iptv.data.db.LibItem>, favorites: Set<String>, onOpen: (Long) -> Unit) {
+    val w = posterWidth()
+    LaunchedEffect(list) { vm.identify(list) }
+    LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(list, key = { it.id }) { c -> LibCard(vm, c, favorites, Modifier.width(w), onOpen) }
+    }
+}
+
+@Composable
+private fun LibCard(vm: VodViewModel, c: com.nova.iptv.data.db.LibItem, favorites: Set<String>, modifier: Modifier, onOpen: (Long) -> Unit) {
+    val n = remember(c.id, vm.libraryTick.collectAsStateWithLifecycle().value) { vm.versionCount(c) }
+    Box(modifier) {
+        PosterCard(
+            title = c.name, image = c.logo, subtitle = c.year, rating = c.rating,
+            favorite = favKey(vm.type, c.remoteId) in favorites, type = vm.type, year = c.year,
+            onClick = { vm.openLib(c, onOpen) },
+        )
+        if (n > 1) GlassChip(stringResource(R.string.versions_n, n), Modifier.align(Alignment.TopEnd).padding(10.dp))
+    }
+}
+
+/** One shelf: its categories, genre filters (with reset), and one card per title. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ShelfBrowser(vm: VodViewModel, shelfId: String, onOpen: (Long) -> Unit) {
+    val idx by vm.index.collectAsStateWithLifecycle()
+    val list by vm.libItems.collectAsStateWithLifecycle()
+    val cat by vm.libCategory.collectAsStateWithLifecycle()
+    val genre by vm.libGenre.collectAsStateWithLifecycle()
+    val favorites by vm.favoriteKeys.collectAsStateWithLifecycle()
+    val shelf = idx?.shelves?.firstOrNull { it.id == shelfId }
+    val series = vm.type == ContentType.SERIES
+    val w = posterWidth()
+    LaunchedEffect(shelfId, cat, genre) { vm.libGridState.scrollToItem(0) }
+    LaunchedEffect(list) { list?.let { vm.identify(it.take(240)) } }
+    Column(Modifier.fillMaxSize().padding(top = homeTopInset())) {
+        ShelfChips(vm, SHELF + shelfId)
+        if (shelf != null) LazyRow(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { NovaChip(stringResource(R.string.lib_all_of, shelf.title), cat == null, { vm.libCategory.value = null }) }
+            items(shelf.categories, key = { it.id }) { c -> NovaChip(c.name, cat == c.remoteId, { vm.libCategory.value = c.remoteId }) }
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (genre != null) item { NovaChip("✕ " + stringResource(R.string.genre_reset), false, { vm.libGenre.value = null }) }
+            items(com.nova.iptv.data.library.Genre.available(series)) { g ->
+                NovaChip(genreLabel(g), genre == g, { vm.libGenre.value = if (genre == g) null else g })
+            }
+        }
+        val l = list
+        when {
+            l == null -> LoadingView()
+            l.isEmpty() -> EmptyView(stringResource(R.string.empty_content))
+            else -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(w), state = vm.libGridState,
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 32.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(l.size, key = { l[it].id }) { i -> LibCard(vm, l[i], favorites, Modifier, onOpen) }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun genreLabel(g: com.nova.iptv.data.library.Genre): String = stringResource(
+    when (g) {
+        com.nova.iptv.data.library.Genre.ACTION -> R.string.g_action
+        com.nova.iptv.data.library.Genre.DRAMA -> R.string.g_drama
+        com.nova.iptv.data.library.Genre.COMEDY -> R.string.g_comedy
+        com.nova.iptv.data.library.Genre.ROMANCE -> R.string.g_romance
+        com.nova.iptv.data.library.Genre.THRILLER -> R.string.g_thriller
+        com.nova.iptv.data.library.Genre.HORROR -> R.string.g_horror
+        com.nova.iptv.data.library.Genre.CRIME -> R.string.g_crime
+        com.nova.iptv.data.library.Genre.SCIFI -> R.string.g_scifi
+        com.nova.iptv.data.library.Genre.ADVENTURE -> R.string.g_adventure
+        com.nova.iptv.data.library.Genre.ANIMATION -> R.string.g_animation
+        com.nova.iptv.data.library.Genre.FAMILY -> R.string.g_family
+        com.nova.iptv.data.library.Genre.MYSTERY -> R.string.g_mystery
+        com.nova.iptv.data.library.Genre.WAR -> R.string.g_war
+        com.nova.iptv.data.library.Genre.DOCUMENTARY -> R.string.g_documentary
+    }
+)

@@ -214,7 +214,7 @@ private fun DetailHeader(
 
 /** Cast with photos from TMDB. */
 @Composable
-private fun CastRow(cast: List<TmdbPerson>) {
+private fun CastRow(cast: List<TmdbPerson>, onPerson: (TmdbPerson) -> Unit = {}) {
     if (cast.isEmpty()) return
     Column(Modifier.padding(top = 12.dp)) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -224,7 +224,11 @@ private fun CastRow(cast: List<TmdbPerson>) {
         }
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(cast, key = { it.name + it.role }) { p ->
-                Column(Modifier.width(88.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    Modifier.width(88.dp).novaFocus(RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))
+                        .clickable(enabled = p.id > 0) { onPerson(p) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     NetImage(
                         p.photo,
                         Modifier.size(80.dp).clip(CircleShape),
@@ -264,7 +268,7 @@ private fun TrailerButton(key: String) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: MovieDetailViewModel = hiltViewModel()) {
+fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, onOpenSeries: (Long) -> Unit = {}, vm: MovieDetailViewModel = hiltViewModel()) {
     val similar by vm.similar.collectAsStateWithLifecycle()
     val item by vm.item.collectAsStateWithLifecycle()
     val history by vm.history.collectAsStateWithLifecycle()
@@ -309,6 +313,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
                     }
                 }
                 TrailerButton(tmdb?.trailerKey.orEmpty())
+                VersionsButton(vm.extras)
                 IconButton(onClick = vm::toggleFavorite, modifier = Modifier.novaFocus(CircleShape)) {
                     Icon(
                         if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -318,6 +323,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
                 }
             }
         }
+        ExtrasDialogs(vm.extras, c.id, c.subscriptionId, vm::pick, onOpenMovie, onOpenSeries)
         if (canResume && h != null && h.durationMs > 0) {
             LinearProgressIndicator(
                 progress = { h.positionMs.toFloat() / h.durationMs },
@@ -328,7 +334,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, vm: 
         if (plot.isNotBlank()) {
             Text(plot, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
         }
-        if (tmdb != null && tmdb.cast.isNotEmpty()) CastRow(tmdb.cast)
+        if (tmdb != null && tmdb.cast.isNotEmpty()) CastRow(tmdb.cast) { vm.extras.openPerson(it, c.subscriptionId) }
         else info?.cast?.takeIf { it.isNotBlank() }?.let {
             Text(
                 stringResource(R.string.cast) + ": " + it,
@@ -374,7 +380,7 @@ private fun SimilarRow(list: List<ContentEntity>, onClick: (ContentEntity) -> Un
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm: SeriesDetailViewModel = hiltViewModel()) {
+fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, onOpenMovie: (Long) -> Unit = {}, vm: SeriesDetailViewModel = hiltViewModel()) {
     val similar by vm.similar.collectAsStateWithLifecycle()
     val item by vm.item.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
@@ -402,6 +408,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
         subtitle = "S${e.season} E${e.episodeNum}" + if (e.title.isNotBlank()) " — ${e.title}" else "",
     )
 
+    ExtrasDialogs(vm.extras, c.id, c.subscriptionId, vm::pick, onOpenMovie, onOpenSeries)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             DetailHeader(
@@ -438,6 +445,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
                         }
                     }
                     TrailerButton(tmdb?.trailerKey.orEmpty())
+                    VersionsButton(vm.extras)
                     IconButton(onClick = vm::toggleFavorite, modifier = Modifier.novaFocus(CircleShape)) {
                         Icon(
                             if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -453,7 +461,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, vm
             item { Text(plot, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp)) }
         }
         if (tmdb != null && tmdb.cast.isNotEmpty()) {
-            item(key = "cast") { CastRow(tmdb.cast) }
+            item(key = "cast") { CastRow(tmdb.cast) { vm.extras.openPerson(it, c.subscriptionId) } }
         }
         when {
             vm.loading && info == null -> item { Box(Modifier.fillMaxWidth().height(160.dp)) { LoadingView() } }
@@ -552,5 +560,31 @@ private fun EpisodeRow(episode: XEpisode, tmdb: TmdbEpisode?, progress: Float?, 
                 )
             }
         }
+    }
+}
+
+
+@Composable
+private fun VersionsButton(extras: DetailExtras) {
+    if (extras.versions.size < 2) return
+    OutlinedButton(onClick = { extras.choosing = true }, modifier = Modifier.novaFocus()) {
+        Text(stringResource(R.string.versions_n, extras.versions.size))
+    }
+}
+
+@Composable
+private fun ExtrasDialogs(
+    extras: DetailExtras, currentId: Long, subId: Long, onPick: (Long) -> Unit,
+    onOpenMovie: (Long) -> Unit, onOpenSeries: (Long) -> Unit,
+) {
+    if (extras.choosing && extras.versions.size > 1) {
+        VersionDialog(extras.versions, currentId, onPick = { onPick(it.item.id) }, onDismiss = { extras.choosing = false })
+    }
+    extras.personLoading?.let { PersonLoading(it.name) { extras.closePerson() } }
+    extras.person?.let { p ->
+        PersonDialog(p, extras.found, onOpen = { w, id ->
+            extras.closePerson()
+            if (w.isTv) onOpenSeries(id) else onOpenMovie(id)
+        }, onDismiss = { extras.closePerson() })
     }
 }

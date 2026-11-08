@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FavoriteEntity::class,
         HistoryEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -30,5 +30,12 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_subscriptionId_type_sortOrder` ON `content` (`subscriptionId`, `type`, `sortOrder`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_subscriptionId_type_added` ON `content` (`subscriptionId`, `type`, `added`)")
+    }
+}
+
+/** v3: TMDB id per title (from the provider's list). */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `content` ADD COLUMN `tmdb` TEXT NOT NULL DEFAULT ''")
     }
 }

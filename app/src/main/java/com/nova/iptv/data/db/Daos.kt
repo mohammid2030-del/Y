@@ -41,6 +41,17 @@ interface ContentDao {
     @Insert
     suspend fun insertCategories(items: List<CategoryEntity>)
 
+    /** Light rows for the library index (no plot / URLs), hidden categories left out. */
+    @Query(
+        "SELECT id, remoteId, name, categoryId, logo, year, added, rating, tmdb FROM content " +
+            "WHERE subscriptionId = :subId AND type = :type AND categoryId NOT IN " +
+            "(SELECT remoteId FROM categories WHERE subscriptionId = :subId AND type = :type AND hidden = 1) ORDER BY sortOrder"
+    )
+    suspend fun libraryItems(subId: Long, type: String): List<LibItem>
+
+    @Query("SELECT * FROM categories WHERE subscriptionId = :subId AND type = :type AND hidden = 0 ORDER BY sortOrder")
+    suspend fun visibleCategories(subId: Long, type: String): List<CategoryEntity>
+
     @Query("DELETE FROM content WHERE subscriptionId = :subId AND type = :type")
     suspend fun deleteContent(subId: Long, type: String)
 

@@ -50,30 +50,52 @@ fun String.cleanTitle(): String {
 fun seasonEpisodeOf(text: String): Pair<Int, Int>? =
     seRe.find(text)?.let { m -> m.groupValues[1].toIntOrNull()?.let { s -> m.groupValues[2].toIntOrNull()?.let { e -> s to e } } }
 
-private val SearchTagTokens = TagTokens + setOf(
-    "AMZ", "ATV", "DSNP", "HMAX", "MAX", "HULU", "PRIME", "US", "UK", "GB", "CA", "AU", "IN", "KR", "JP", "FR", "DE",
+private val AllTags = TagTokens + setOf(
+    "TOP", "NEW", "AMZ", "ATV", "DSNP", "HMAX", "MAX", "HULU", "PRIME", "US", "UK", "GB", "CA", "AU", "IN", "KR", "JP", "FR", "DE",
     "ES", "IT", "MX", "BR", "SUIBS", "DV", "DOLBY", "ATMOS", "REMUX", "WEB", "WEBDL", "BLURAY", "1080P", "720P", "2160P",
 )
-private val upperPrefixRe = Regex("""^[A-Z0-9][A-Z0-9\-]{1,14}\s*[-|]\s+""")
-private val yearBracketRe = Regex("""[(\[]((?:19|20)\d{2})[)\]]""")
-private val anyBracketRe = Regex("""[(\[][^)\]]*[)\]]""")
+private fun isAnyTagGroup(s: String): Boolean {
+    val parts = s.split('-', ' ', '_').filter { it.isNotBlank() }.map { it.uppercase() }
+    return parts.isNotEmpty() && parts.all { it in AllTags || it in PrefixCodes }
+}
+/** "4K-TOP", "TOP", "NF-AR", "VIP+" — an all-caps provider tag, never a real title word. */
+private fun isProviderTag(g: String): Boolean {
+    if (isAnyTagGroup(g)) return true
+    val letters = g.filter { it.isLetter() }
+    return g.length <= 12 && letters.isNotEmpty() && letters.all { it in 'A'..'Z' } &&
+        (g.length <= 4 || g.any { it.isDigit() || it in "-_+." })
+}
+private val fBracketStart = Regex("""^\s*[\[(|▎]\s*([^\])|▎]{1,12})\s*[\])|▎]\s*[:\-–—]?\s*""")
+private val fCodePrefix = Regex("""^\s*([A-Za-z0-9]{2,5})\s*[:|]\s*""")
+private val fTagPrefix = Regex("""^\s*([A-Za-z0-9][A-Za-z0-9_\-+.]{0,14})\s*[-|–—:▎]\s+""")
+private val fYearBracket = Regex("""[(\[]((?:19|20)\d{2})[)\]]""")
+private val fAnyBracket = Regex("""[(\[][^)\]]*[)\]]""")
+private val fSeason = Regex("""\s[-–]?\s*(S\d{1,2}(\s*E\d{1,3})?|Season\s*\d+|الموسم\s*\S+)\b.*$""", RegexOption.IGNORE_CASE)
+private val fTailYear = Regex("""\s[-–]?\s*((?:19|20)\d{2})\s*$""")
 
-/**
- * Aggressive clean-up for looking a title up (and for display when nothing better is known):
- * "4K-AMZ - Drive (2025) (US) HEVC" → ("Drive", "2025").
- */
-fun searchTitle(raw: String): Pair<String, String> {
-    var t = raw.cleanTitle()
-    t = t.replace(upperPrefixRe, "")
+/** Same cleaning as the Apple and Samsung apps: "4K-AMZ - Drive (2025) (US) HEVC" → ("Drive", "2025"). */
+fun cleanFull(raw: String): Pair<String, String> {
+    var t = raw.trim()
+    repeat(2) {
+        fBracketStart.find(t)?.let { m -> if (isProviderTag(m.groupValues[1]) && t.length - m.value.length > 1) t = t.substring(m.value.length) }
+    }
+    fCodePrefix.find(t)?.let { m -> if (m.groupValues[1].uppercase() in PrefixCodes && t.length > m.value.length) t = t.substring(m.value.length) }
+    repeat(2) {
+        fTagPrefix.find(t)?.let { m -> if (isProviderTag(m.groupValues[1]) && t.length - m.value.length > 1) t = t.substring(m.value.length) }
+    }
     var year = ""
-    yearBracketRe.find(t)?.let { m ->
+    fYearBracket.find(t)?.let { m ->
         year = m.groupValues[1]
         if (m.range.first > 0) t = t.substring(0, m.range.first)
     }
-    t = t.replace(anyBracketRe, " ")
+    t = t.replace(fAnyBracket, " ")
+    t = t.replace(fSeason, "")
+    if (year.isEmpty()) fTailYear.find(t)?.let { m -> if (m.range.first > 0) { year = m.groupValues[1]; t = t.substring(0, m.range.first) } }
     val words = t.split(' ').filter { it.isNotBlank() }.toMutableList()
-    while (words.size > 1 && words.last().trim('-', '|').uppercase() in SearchTagTokens) words.removeAt(words.lastIndex)
-    while (words.size > 1 && words.last() in setOf("-", "|")) words.removeAt(words.lastIndex)
-    val out = words.joinToString(" ").trim()
-    return (out.ifBlank { raw.trim() }) to year
+    while (words.size > 1 && (words.last().trim('-', '|').uppercase() in AllTags || words.last() in setOf("-", "|", "–"))) words.removeAt(words.lastIndex)
+    val out = words.joinToString(" ").trim(' ', '-', '|', '–', ':')
+    return out.ifEmpty { raw.trim() } to year
 }
+
+/** Clean title + year for TMDB lookups and display. */
+fun searchTitle(raw: String): Pair<String, String> = cleanFull(raw)

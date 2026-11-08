@@ -26,9 +26,23 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Localised poster + title for list cards. */
-data class TmdbCard(val poster: String, val title: String)
+data class TmdbCard(val poster: String, val title: String, val id: Int = 0, val genres: Set<Int> = emptySet(), val backdrop: String = "")
 
-data class TmdbPerson(val name: String, val role: String, val photo: String)
+data class TmdbPerson(val name: String, val role: String, val photo: String, val id: Int = 0)
+
+/** A title a person is known for (to open it from the library). */
+data class KnownWork(val id: Int, val isTv: Boolean, val title: String, val original: String, val year: String, val poster: String, val popularity: Double)
+
+data class PersonInfo(val id: Int, val name: String, val photo: String, val bio: String, val birthday: String, val place: String, val known: List<KnownWork>)
+
+/** Titles in scripts the viewer likely can't read (not Arabic or Latin) — show the English title instead. */
+fun foreignScript(s: String): Boolean = s.any { c ->
+    val b = Character.UnicodeBlock.of(c)
+    c.isLetter() && b != Character.UnicodeBlock.BASIC_LATIN && b != Character.UnicodeBlock.LATIN_1_SUPPLEMENT &&
+        b != Character.UnicodeBlock.LATIN_EXTENDED_A && b != Character.UnicodeBlock.LATIN_EXTENDED_B &&
+        b != Character.UnicodeBlock.ARABIC && b != Character.UnicodeBlock.ARABIC_PRESENTATION_FORMS_A &&
+        b != Character.UnicodeBlock.ARABIC_PRESENTATION_FORMS_B && b != Character.UnicodeBlock.LATIN_EXTENDED_ADDITIONAL
+}
 
 data class TmdbInfo(
     val id: Int,
@@ -130,10 +144,12 @@ class TmdbRepository @Inject constructor(
         val cacheKey = "${if (isTv) "tv" else "movie"}|$lang|${tmdbId.ifBlank { "$clean|$y" }}"
         infoCache.get(cacheKey)?.let { return it }
         synchronized(missCache) { if (cacheKey in missCache) return null }
-        val result = runCatching {
-            val id = tmdbId.filter { it.isDigit() }.toIntOrNull() ?: search(isTv, clean, y, lang)
+        val attempt = runCatching {
+            val id = tmdbId.filter { it.isDigit() }.toIntOrNull()?.takeIf { it > 0 } ?: search(isTv, clean, y, lang)
             id?.let { details(isTv, it, lang) }
-        }.getOrNull()
+        }
+        if (attempt.isFailure) return null   // network trouble: don't remember it as "not on TMDB"
+        val result = attempt.getOrNull()
         if (result != null) infoCache.put(cacheKey, result) else synchronized(missCache) { missCache += cacheKey }
         return result
     }
@@ -164,11 +180,56 @@ class TmdbRepository @Inject constructor(
                 var res = request(path, params).arr("results")
                 if (res.size() == 0 && y.length == 4) res = request(path, params - (if (isTv) "first_air_date_year" else "year")).arr("results")
                 val first = res.firstOrNull()?.obj()
-                TmdbCard(img(first?.str("poster_path").orEmpty(), "w342"), first?.str(if (isTv) "name" else "title").orEmpty())
-            }.getOrDefault(EMPTY_CARD)
-        }
+                if (first == null) EMPTY_CARD else {
+                    val id = first.int("id")
+                    var name = first.str(if (isTv) "name" else "title")
+                    if (foreignScript(name)) {
+                        name = first.str(if (isTv) "original_name" else "original_title").takeUnless { foreignScript(it) }
+                            ?: runCatching { request("${if (isTv) "tv" else "movie"}/$id", mapOf("language" to "en-US")).str(if (isTv) "name" else "title") }.getOrDefault("")
+                    }
+                    val genres = first.arr("genre_ids").mapNotNull { runCatching { it.asInt }.getOrNull() }.toSet()
+                    TmdbCard(img(first.str("poster_path"), "w342"), name, id, genres, img(first.str("backdrop_path"), "w780"))
+                }
+            }.getOrNull()
+        } ?: return EMPTY_CARD   // network trouble: try again next time instead of remembering "nothing"
         posterCache.put(k, result)
+        if (result.id > 0) synchronized(ids) { ids[k] = result.id; idsVersion++ }
         return result
+    }
+
+    private val ids = HashMap<String, Int>()
+    /** Bumps whenever a new title is identified, so lists can merge copies again. */
+    @Volatile var idsVersion = 0
+        private set
+
+    /** TMDB id already known for a title (no network). */
+    fun knownId(isTv: Boolean, title: String, year: String): Int? = synchronized(ids) { ids[posterKey(isTv, title, year)] }
+        ?: cachedPoster(isTv, title, year)?.id?.takeIf { it > 0 }
+
+    /** Person page: photo, short bio and the titles they're known for. */
+    suspend fun person(id: Int): PersonInfo? {
+        if (!_enabled.value || id <= 0) return null
+        val lang = lang()
+        return runCatching {
+            val o = request("person/$id", mapOf("language" to lang, "append_to_response" to "combined_credits"))
+            val bio = o.str("biography").ifBlank {
+                if (lang != "en") runCatching { request("person/$id", mapOf("language" to "en-US")).str("biography") }.getOrDefault("") else ""
+            }
+            val credits = o.get("combined_credits")?.obj()
+            val all = (credits?.arr("cast").orEmpty() + credits?.arr("crew").orEmpty()).mapNotNull { it.obj() }
+            val seen = HashSet<String>()
+            val known = all.mapNotNull { c ->
+                val tv = c.str("media_type") == "tv"
+                val wid = c.int("id")
+                if (wid <= 0 || !seen.add("$tv|$wid")) return@mapNotNull null
+                if (tv && c.arr("genre_ids").any { g -> runCatching { g.asInt in setOf(10767, 10763) }.getOrDefault(false) }) return@mapNotNull null  // talk shows / news
+                KnownWork(
+                    wid, tv, c.str(if (tv) "name" else "title"), c.str(if (tv) "original_name" else "original_title"),
+                    c.str(if (tv) "first_air_date" else "release_date").take(4), img(c.str("poster_path"), "w342"), c.dbl("popularity"),
+                )
+            }.sortedByDescending { it.popularity }.take(30)
+            PersonInfo(id, o.str("name"), img(o.str("profile_path"), "w342"), bio, o.str("birthday"), o.str("place_of_birth"), known)
+        }.getOrNull()
     }
 
     /** Arabic/English episode names, overviews and stills for one season. */
@@ -241,7 +302,7 @@ class TmdbRepository @Inject constructor(
 
         val credits = o.get("credits")?.obj()
         val cast = credits?.arr("cast")?.mapNotNull { it.obj() }?.take(15)?.map {
-            TmdbPerson(it.str("name"), it.str("character"), img(it.str("profile_path"), "w185"))
+            TmdbPerson(it.str("name"), it.str("character"), img(it.str("profile_path"), "w185"), it.int("id"))
         }.orEmpty()
         val creators = if (isTv) {
             o.arr("created_by").mapNotNull { it.obj()?.str("name") }
@@ -262,7 +323,11 @@ class TmdbRepository @Inject constructor(
                 ?.arr("release_dates")?.mapNotNull { it.obj()?.str("certification") }?.firstOrNull { it.isNotBlank() }
                 .orEmpty()
         }
-        val title = o.str(if (isTv) "name" else "title").ifBlank { en?.str(if (isTv) "name" else "title").orEmpty() }
+        var title = o.str(if (isTv) "name" else "title").ifBlank { en?.str(if (isTv) "name" else "title").orEmpty() }
+        if (foreignScript(title)) {
+            title = o.str(if (isTv) "original_name" else "original_title").takeUnless { foreignScript(it) }
+                ?: (en ?: runCatching { request("$type/$id", mapOf("language" to "en-US")) }.getOrNull())?.str(if (isTv) "name" else "title").orEmpty().ifBlank { title }
+        }
         return TmdbInfo(
             id = id,
             isTv = isTv,
@@ -336,6 +401,8 @@ class TmdbRepository @Inject constructor(
 }
 
 private fun JsonElement.obj(): JsonObject? = if (isJsonObject) asJsonObject else null
+private operator fun JsonArray.plus(o: JsonArray): JsonArray = JsonArray().also { r -> forEach { r.add(it) }; o.forEach { r.add(it) } }
+private fun JsonArray?.orEmpty(): JsonArray = this ?: JsonArray()
 private fun JsonObject.arr(name: String): JsonArray = get(name)?.takeIf { it.isJsonArray }?.asJsonArray ?: JsonArray()
 private fun JsonObject.strOrNull(name: String): String? = get(name)?.takeIf { it.isJsonPrimitive }?.asString
 private fun JsonObject.str(name: String): String = strOrNull(name).orEmpty()

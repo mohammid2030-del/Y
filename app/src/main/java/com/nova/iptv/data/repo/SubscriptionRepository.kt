@@ -407,6 +407,7 @@ class SubscriptionRepository @Inject constructor(
                             plot = m["plot"].orEmpty(),
                             added = m["added"]?.toLongOrNull() ?: 0L,
                             sortOrder = movies.size,
+                            tmdb = (m["tmdb"] ?: m["tmdb_id"]).orEmpty().filter { it.isDigit() }.takeIf { it.isNotEmpty() && it != "0" }.orEmpty(),
                         )
                         tick()
                     }
@@ -431,6 +432,7 @@ class SubscriptionRepository @Inject constructor(
                             plot = m["plot"].orEmpty(),
                             added = m["last_modified"]?.toLongOrNull() ?: 0L,
                             sortOrder = series.size,
+                            tmdb = (m["tmdb"] ?: m["tmdb_id"]).orEmpty().filter { it.isDigit() }.takeIf { it.isNotEmpty() && it != "0" }.orEmpty(),
                         )
                         tick()
                     }

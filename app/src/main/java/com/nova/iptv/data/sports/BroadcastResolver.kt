@@ -89,7 +89,7 @@ class BroadcastResolver @Inject constructor(
         // Sports channels only: "beIN BOX OFFICE", "MBC 2" or a movies channel is never the match channel.
         val sportsRe = Regex("sport|سبورت|رياض|ssc|thmanyah|ثمانية|alkass|al kass|الكاس|action|اكشن|أكشن", RegexOption.IGNORE_CASE)
         val notSportsRe = Regex("box ?office|movie|cinema|سينما|افلام|أفلام|film|drama|دراما|kids|اطفال|أطفال|junior|jeem|news|اخبار|أخبار|series|مسلسل|documentar|وثائقي|gourmet|nat ?geo|discovery|music|موسيقى|quran|قرآن|comedy|كوميدي", RegexOption.IGNORE_CASE)
-        val picks = bag.values.filter { ch ->
+        val ranked = bag.values.filter { ch ->
             val n = ch.name.lowercase(Locale.ROOT)
             (sportsRe.containsMatchIn(n) || sportsRe.containsMatchIn(categoryNames[ch.categoryId].orEmpty())) && !notSportsRe.containsMatchIn(n)
         }.map { ch ->
@@ -117,7 +117,13 @@ class BroadcastResolver @Inject constructor(
         }
             .filter { it.score > 0 }
             .sortedByDescending { it.score }
-            .take(12)
+        // Like the Apple / Samsung apps: only channels whose guide shows the match, or the competition's official
+        // broadcaster (or the one you picked before). Anything else only when nothing is confirmed.
+        val confirmed = ranked.filter { p ->
+            p.epgMatch || p.channel.remoteId == learnedForMatch ||
+                hints.any { h -> (p.channel.name + " " + categoryNames[p.channel.categoryId].orEmpty()).lowercase(Locale.ROOT).contains(h.lowercase(Locale.ROOT)) }
+        }
+        val picks = confirmed.ifEmpty { ranked }.take(12)
 
         val top = picks.firstOrNull()
         val auto = top?.takeIf { it.score >= 500 || (it.epgMatch && (picks.getOrNull(1)?.epgMatch != true || it.score - picks[1].score >= 40)) }

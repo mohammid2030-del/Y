@@ -82,6 +82,8 @@ data class ContentEntity(
     val num: Int = 0,
     val added: Long = 0,
     val sortOrder: Int = 0,
+    /** TMDB id the provider gives for the title (merges copies, exact posters). */
+    @androidx.room.ColumnInfo(defaultValue = "") val tmdb: String = "",
 )
 
 @Entity(
@@ -130,3 +132,16 @@ data class HistoryEntity(
             "$subId|$type|$remoteId|$episodeId"
     }
 }
+
+/** Library row: the few columns the movies / series browser needs. */
+data class LibItem(
+    val id: Long,
+    val remoteId: String,
+    val name: String,
+    val categoryId: String,
+    val logo: String,
+    val year: String,
+    val added: Long,
+    val rating: String,
+    val tmdb: String,
+)

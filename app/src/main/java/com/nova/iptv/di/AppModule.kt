@@ -66,7 +66,7 @@ object AppModule {
     @Singleton
     fun database(@ApplicationContext context: Context): NovaDatabase =
         Room.databaseBuilder(context, NovaDatabase::class.java, "nova.db")
-            .addMigrations(com.nova.iptv.data.db.MIGRATION_1_2)
+            .addMigrations(com.nova.iptv.data.db.MIGRATION_1_2, com.nova.iptv.data.db.MIGRATION_2_3)
             .fallbackToDestructiveMigration()
             .build()
 
