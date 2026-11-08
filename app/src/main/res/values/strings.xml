@@ -13,6 +13,7 @@
     <string name="autoplay_next">Autoplay next episode</string>
     <string name="autoplay_next_desc">Starts the next episode when the current one ends</string>
     <string name="back">Back</string>
+    <string name="browse_live">Browse live channels</string>
     <string name="buffer_size">Buffer size</string>
     <string name="cancel">Cancel</string>
     <string name="cast">Cast</string>
@@ -86,12 +87,15 @@
     <string name="lang_system">Device language</string>
     <string name="language">Language</string>
     <string name="last_update">Updated %1$s</string>
+    <string name="latest_movies">Latest movies</string>
+    <string name="latest_series">Latest series</string>
     <string name="legal_note">Use only subscriptions and playlists you are legally entitled to access. NOVA does not bypass DRM or content protection.</string>
     <string name="live_badge">LIVE</string>
     <string name="live_format">Live stream format</string>
     <string name="low_end_desc">Fewer animations, smaller buffers and max 720p for weaker devices</string>
     <string name="low_end_mode">Low-end device mode</string>
     <string name="max_connections">Max connections: %1$d</string>
+    <string name="menu_account">Account and settings</string>
     <string name="minutes_left">%1$d min left</string>
     <string name="minutes_n">%1$d min</string>
     <string name="more_like_this">More like this</string>
@@ -134,6 +138,7 @@
     <string name="playback">Playback</string>
     <string name="previous_channel">Previous channel</string>
     <string name="quality_track">Track %1$d</string>
+    <string name="recent_channels">Recently watched channels</string>
     <string name="reconnecting">Reconnecting… (%1$d)</string>
     <string name="refresh">Refresh</string>
     <string name="refresh_all_now">Refresh all subscriptions now</string>
@@ -179,9 +184,11 @@
     <string name="stream_info">Stream info</string>
     <string name="subs_size">Subtitle size</string>
     <string name="subscriptions">Subscriptions</string>
+    <string name="subscriptions_title">Subscriptions</string>
     <string name="subtitles_section">Subtitles</string>
     <string name="sync_failed">Could not load the subscription</string>
     <string name="tab_favorites">Favorites</string>
+    <string name="tab_home">Home</string>
     <string name="tab_live">Live TV</string>
     <string name="tab_movies">Movies</string>
     <string name="tab_search">Search</string>
@@ -205,6 +212,7 @@
     <string name="watch_catchup">Watch from archive</string>
     <string name="watch_live">Watch live</string>
     <string name="watch_now">Watch now</string>
+    <string name="watched_pct">%1$d%% watched</string>
     <string name="welcome_tagline">Your IPTV, beautifully organised. Live TV, movies and series in one premium player.</string>
     <string name="wrong_pin">Wrong PIN</string>
 </resources>

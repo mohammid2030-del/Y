@@ -32,6 +32,7 @@ data class XEpisode(
 data class XSeriesInfo(
     val name: String,
     val tmdbId: String = "",
+    val backdrop: String = "",
     val plot: String,
     val cover: String,
     val genre: String,
@@ -173,6 +174,13 @@ object XtreamParser {
         return XSeriesInfo(
             name = info.str("name"),
             tmdbId = info.str("tmdb").ifBlank { info.str("tmdb_id") }.filter { it.isDigit() },
+            backdrop = info.get("backdrop_path")?.let { el ->
+                when {
+                    el.isJsonArray && el.asJsonArray.size() > 0 && el.asJsonArray[0].isJsonPrimitive -> el.asJsonArray[0].asString
+                    el.isJsonPrimitive -> el.asString
+                    else -> ""
+                }
+            }.orEmpty(),
             plot = info.str("plot"),
             cover = info.str("cover"),
             genre = info.str("genre"),

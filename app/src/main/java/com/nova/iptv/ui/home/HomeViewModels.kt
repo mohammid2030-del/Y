@@ -123,6 +123,10 @@ class LiveViewModel @Inject constructor(
     }
 
     fun toggleFavorite(c: ContentEntity) {
+        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, type, c.remoteId, c.name, c.logo) }
+    }
+
+    fun toggleFavorite(c: ContentEntity) {
         viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.LIVE, c.remoteId, c.name, c.logo) }
     }
 
@@ -172,6 +176,8 @@ abstract class VodViewModel(
     val recentRow: StateFlow<List<ContentEntity>> = subId
         .flatMapLatest { content.recentlyAdded(it, type, 20) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    suspend fun heroInfo(c: ContentEntity) = content.heroInfo(c)
 
     /** Items of one category row (collected only while the row is on screen). */
     fun row(categoryId: String): Flow<List<ContentEntity>> =
@@ -272,3 +278,65 @@ fun favKey(type: String, remoteId: String) = "$type|$remoteId"
 
 @Suppress("unused")
 private fun <T> Flow<T>.ignore() = this
+
+
+/** "Home" tab: a mixed showcase across live, movies and series. */
+@HiltViewModel
+class DiscoverViewModel @Inject constructor(
+    private val content: ContentRepository,
+    settings: SettingsRepository,
+) : ViewModel() {
+    val subId: StateFlow<Long> = settings.activeSubscriptionId.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+
+    val featured: StateFlow<List<ContentEntity>> = subId
+        .flatMapLatest { s ->
+            combine(content.recentlyAdded(s, ContentType.MOVIE, 30), content.recentlyAdded(s, ContentType.SERIES, 30)) { m, se ->
+                val movies = m.filter { it.logo.isNotBlank() }
+                val series = se.filter { it.logo.isNotBlank() }
+                val out = ArrayList<ContentEntity>()
+                for (i in 0 until maxOf(movies.size, series.size)) {
+                    movies.getOrNull(i)?.let { out += it }
+                    series.getOrNull(i)?.let { out += it }
+                    if (out.size >= 8) break
+                }
+                out.take(8)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val continueWatching: StateFlow<List<HistoryEntity>> = subId
+        .flatMapLatest { content.continueWatching(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentChannels: StateFlow<List<ContentEntity>> = subId
+        .flatMapLatest { content.recent(it, ContentType.LIVE, 20) }
+        .map { l -> l.map { it.asContent() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val latestMovies: StateFlow<List<ContentEntity>> = subId
+        .flatMapLatest { content.recentlyAdded(it, ContentType.MOVIE, 20) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val latestSeries: StateFlow<List<ContentEntity>> = subId
+        .flatMapLatest { content.recentlyAdded(it, ContentType.SERIES, 20) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favorites: StateFlow<List<FavoriteEntity>> = subId
+        .flatMapLatest { content.favorites(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favoriteKeys: StateFlow<Set<String>> = subId
+        .flatMapLatest { content.favoriteKeys(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    suspend fun heroInfo(c: ContentEntity) = content.heroInfo(c)
+
+    fun open(item: ContentEntity, onId: (Long) -> Unit) {
+        if (item.id != 0L) { onId(item.id); return }
+        viewModelScope.launch { content.byRemote(item.subscriptionId, item.type, item.remoteId)?.let { onId(it.id) } }
+    }
+
+    fun toggleFavorite(c: ContentEntity) {
+        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, c.type, c.remoteId, c.name, c.logo) }
+    }
+}

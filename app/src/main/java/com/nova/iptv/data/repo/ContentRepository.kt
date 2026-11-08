@@ -46,6 +46,9 @@ data class PlaybackRequest(
     val catchupDurationMin: Int = 0,
 )
 
+/** Extra artwork / metadata for hero banners. */
+data class HeroInfo(val backdrop: String, val genre: String, val plot: String)
+
 data class EpisodeContext(
     val tmdbId: String,
     val current: com.nova.iptv.data.network.XEpisode,
@@ -68,6 +71,7 @@ class ContentRepository @Inject constructor(
 ) {
     private val seriesCache = LruCache<String, XSeriesInfo>(20)
     private val vodCache = LruCache<String, XVodInfo>(50)
+    private val heroCache = LruCache<String, HeroInfo>(60)
 
     fun categories(subId: Long, type: String): Flow<List<CategoryEntity>> = contentDao.observeCategories(subId, type)
     fun visibleCategories(subId: Long, type: String): Flow<List<CategoryEntity>> =
@@ -172,6 +176,21 @@ class ContentRepository @Inject constructor(
         val i = all.indexOfFirst { it.id == episodeId }
         if (i < 0) return null
         return EpisodeContext(info.tmdbId, all[i], all.getOrNull(i + 1))
+    }
+
+    /** Backdrop + genre for a featured movie/series (cached; Xtream only). */
+    suspend fun heroInfo(c: ContentEntity): HeroInfo? {
+        val key = "${c.subscriptionId}|${c.type}|${c.remoteId}"
+        heroCache.get(key)?.let { return it }
+        val sub = subs.get(c.subscriptionId) ?: return null
+        if (sub.type != SourceType.XTREAM) return null
+        val info = when (c.type) {
+            ContentType.MOVIE -> vodInfo(sub, c.remoteId)?.let { HeroInfo(it.backdrop, it.genre, it.plot) }
+            ContentType.SERIES -> runCatching { seriesInfo(sub, c.remoteId) }.getOrNull()?.let { HeroInfo(it.backdrop, it.genre, it.plot) }
+            else -> null
+        } ?: return null
+        heroCache.put(key, info)
+        return info
     }
 
     suspend fun movieTmdbId(subId: Long, movieId: String): String {
