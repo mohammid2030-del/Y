@@ -20,6 +20,35 @@ struct TMDBInfo {
 
 struct TMDBEpisode { var name: String; var overview: String; var still: String }
 
+/// Thread-safe "title → TMDB id" registry shared with the library index, so copies of a title with different
+/// names (Arabic / English / regional) merge into one card once TMDB has identified them.
+final class TMDBIDs: @unchecked Sendable {
+    static let shared = TMDBIDs()
+    private let lock = NSLock()
+    private var map: [String: Int] = [:]
+    private var ver = 0
+
+    init() {
+        for (k, v) in Storage.load("tmdbCards3", as: [String: TMDBCard].self) ?? [:] where v.id > 0 { map[TMDBIDs.strip(k)] = v.id }
+    }
+
+    /// "series|ar|Zmora|2026" → "series|Zmora|2026" (the id is the same in every language).
+    static func strip(_ ck: String) -> String {
+        let p = ck.split(separator: "|", omittingEmptySubsequences: false)
+        guard p.count >= 4 else { return ck }
+        return ([p[0]] + p[2...]).joined(separator: "|")
+    }
+
+    func set(_ ck: String, _ id: Int) {
+        lock.lock(); map[TMDBIDs.strip(ck)] = id; ver += 1; lock.unlock()
+    }
+    func id(_ key: String) -> Int? {
+        lock.lock(); defer { lock.unlock() }
+        return map[key]
+    }
+    var version: Int { lock.lock(); defer { lock.unlock() }; return ver }
+}
+
 /// Optional TMDB enrichment using the user's own key (Keychain). Responses are cached in memory and by URLCache.
 actor TMDB {
     static let shared = TMDB()
@@ -112,6 +141,7 @@ actor TMDB {
                             backdrop: img(jstr(f?["backdrop_path"]), "w780"),
                             genres: (f?["genre_ids"] as? [Any])?.map { jint($0) } ?? [])
         cards[ck] = card
+        if card.id > 0 { TMDBIDs.shared.set(ck, card.id) }
         dirty += 1
         if dirty % 20 == 0 { Storage.save("tmdbCards3", cards) }
         return card.id == 0 ? nil : card

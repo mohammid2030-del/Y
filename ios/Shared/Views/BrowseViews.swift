@@ -457,6 +457,7 @@ struct CatalogBrowser: View {
     @State private var filtered: [MediaItem]?
     @State private var done = 0
     @State private var total = 0
+    @State private var mergeTick = 0
 
     private var shelves: [Shelf] { state.shelves(kind) }
     private var currentShelf: Shelf? { shelves.first { $0.id == selection } }
@@ -541,9 +542,22 @@ struct CatalogBrowser: View {
             }
         }
         .task(id: filterKey) { await runGenreFilter() }
+        .task(id: "merge|\(selection)|\(category ?? "")|\(state.tmdbOn)|\(state.index == nil)") {
+            // Identify titles with TMDB in the background so copies with different names merge; refresh a few times.
+            guard state.tmdbOn, state.index != nil, selection != "__fav", selection != "__cont" else { return }
+            let refresher = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    mergeTick += 1
+                }
+            }
+            await state.identify(kind, baseItems)
+            refresher.cancel()
+            mergeTick += 1
+        }
     }
 
-    private var shown: [MediaItem] { genre == nil ? baseItems : (filtered ?? []) }
+    private var shown: [MediaItem] { _ = mergeTick; return genre == nil ? baseItems : (filtered ?? []) }
 
     private var header: some View {
         HStack(spacing: 14) {

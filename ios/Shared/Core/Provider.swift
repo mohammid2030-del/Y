@@ -130,16 +130,22 @@ struct Xtream {
             let y = jstr(s["year"]).isEmpty ? String(jstr(s["releaseDate"]).prefix(4)) : jstr(s["year"])
             return MediaItem(id: id, name: jstr(s["name"]).trimmingCharacters(in: .whitespaces), logo: jstr(s["stream_icon"]),
                              category: jstr(s["category_id"]), ext: jstr(s["container_extension"]),
-                             rating: jstr(s["rating"]), year: y, added: jint(s["added"]))
+                             rating: jstr(s["rating"]), year: y, added: jint(s["added"]),
+                             tmdb: Xtream.tmdbID(s))
         }
         cat.series = jlist(try await ser).compactMap { s in
             let id = jstr(s["series_id"]); guard !id.isEmpty else { return nil }
             let y = jstr(s["year"]).isEmpty ? String((jstr(s["releaseDate"]) + jstr(s["release_date"])).prefix(4)) : jstr(s["year"])
             return MediaItem(id: id, name: jstr(s["name"]).trimmingCharacters(in: .whitespaces), logo: jstr(s["cover"]),
                              category: jstr(s["category_id"]), rating: jstr(s["rating"]), year: y,
-                             added: jint(s["last_modified"]), plot: jstr(s["plot"]))
+                             added: jint(s["last_modified"]), plot: jstr(s["plot"]), tmdb: Xtream.tmdbID(s))
         }
         return (cat, exp)
+    }
+
+    static func tmdbID(_ s: [String: Any]) -> String? {
+        let t = (jstr(s["tmdb"]) + jstr(s["tmdb_id"])).filter(\.isNumber)
+        return t.isEmpty || t == "0" ? nil : t
     }
 
     func vodInfo(_ id: String) async -> VodInfo? {

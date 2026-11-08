@@ -33,6 +33,8 @@ struct MediaItem: Codable, Identifiable, Hashable {
     var plot: String = ""
     /// Direct URL (M3U sources only).
     var url: String = ""
+    /// TMDB id when the provider lists one (lets copies with different names merge into one card).
+    var tmdb: String? = nil
 }
 
 struct Catalog: Codable {

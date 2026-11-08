@@ -70,6 +70,8 @@ struct CatalogIndex {
     var key: [String: String] = [:]                    // "kind|itemID" → title key
     var variants: [String: [MediaItem]] = [:]          // "kind|titleKey" → every copy of that title, best first
     var quality: [String: Int] = [:]                   // "kind|itemID" → quality score
+    var cardKey: [String: String] = [:]                // "kind|itemID" → TMDB lookup key "kind|title|year"
+    var titleTmdb: [String: String] = [:]              // "kind|titleKey" → TMDB id a copy of that title carries
 
     private struct Rule { let id: String; let ar: String; let en: String; let icon: String; let pattern: String }
 
@@ -178,6 +180,7 @@ struct CatalogIndex {
                 let year = m.year.count >= 4 && m.year.prefix(4).allSatisfy(\.isNumber) ? String(m.year.prefix(4)) : c.year
                 byTitle[normalize(c.title), default: []].append((m, year))
                 idx.quality["\(kind.rawValue)|\(m.id)"] = qualityScore(m.name)
+                idx.cardKey["\(kind.rawValue)|\(m.id)"] = "\(kind.rawValue)|\(c.title)|\(year)"
             }
             for (t, list) in byTitle {
                 var years: [String: Int] = [:]
@@ -193,6 +196,7 @@ struct CatalogIndex {
                 for (y, ms) in groups {
                     let k = t + "|" + y
                     for m in ms { idx.key["\(kind.rawValue)|\(m.id)"] = k }
+                    if let t = ms.compactMap({ $0.tmdb }).first { idx.titleTmdb["\(kind.rawValue)|\(k)"] = t }
                     idx.variants["\(kind.rawValue)|\(k)"] = ms.sorted {
                         let a = idx.quality["\(kind.rawValue)|\($0.id)"] ?? 0, b = idx.quality["\(kind.rawValue)|\($1.id)"] ?? 0
                         return a != b ? a > b : $0.added > $1.added

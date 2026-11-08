@@ -129,7 +129,7 @@ final class AppState: ObservableObject {
     }
 
     func latest(_ kind: MediaKind, _ n: Int) -> [MediaItem] {
-        let k = "latest|\(kind.rawValue)"
+        let k = "latest|\(kind.rawValue)|\(TMDBIDs.shared.version)"
         if let hit = byCategoryCache[k] { return Array(hit.prefix(n)) }
         let recent = Array(catalog.items(kind).sorted { $0.added > $1.added }.prefix(240))
         let list = Array(collapse(kind, recent).prefix(60))
@@ -271,15 +271,27 @@ final class AppState: ObservableObject {
 
     func shelves(_ kind: MediaKind) -> [Shelf] { index?.shelves[kind] ?? [] }
 
+    /// Identity of a title: the TMDB id when known (provider field, another copy's id, or a TMDB lookup), else the cleaned title.
+    func groupKey(_ kind: MediaKind, _ m: MediaItem) -> String {
+        guard let idx = index else { return m.id }
+        let ik = "\(kind.rawValue)|\(m.id)"
+        let tk = idx.key[ik] ?? m.id
+        if let t = m.tmdb { return "tmdb:\(t)" }
+        if let t = idx.titleTmdb["\(kind.rawValue)|\(tk)"] { return "tmdb:\(t)" }
+        if let ck = idx.cardKey[ik], let id = TMDBIDs.shared.id(ck), id > 0 { return "tmdb:\(id)" }
+        return tk
+    }
+
     /// Titles of a shelf (or one of its categories), one card per title — the best copy (4K > FHD > HD), newest first.
     func browse(_ kind: MediaKind, shelf: String, category: String?) -> [MediaItem] {
         guard let idx = index else { return [] }
-        let ck = "\(kind.rawValue)|\(shelf)|\(category ?? "")"
+        let ck = "\(kind.rawValue)|\(shelf)|\(category ?? "")|\(TMDBIDs.shared.version)"
         if let hit = browseCache[ck] { return hit }
         let source: [MediaItem]
         if let category { source = items(kind, category: category) }
         else { source = catalog.items(kind).filter { idx.shelfOfCategory["\(kind.rawValue)|\($0.category)"] == shelf } }
         let out = collapse(kind, source)
+        if browseCache.count > 200 { browseCache = [:] }
         browseCache[ck] = out
         return out
     }
@@ -290,7 +302,7 @@ final class AppState: ObservableObject {
         var best: [String: MediaItem] = [:]
         var order: [String] = []
         for m in source {
-            let k = idx.key["\(kind.rawValue)|\(m.id)"] ?? m.id
+            let k = groupKey(kind, m)
             if let cur = best[k] {
                 let a = idx.quality["\(kind.rawValue)|\(m.id)"] ?? 0, b = idx.quality["\(kind.rawValue)|\(cur.id)"] ?? 0
                 if a > b || (a == b && m.added > cur.added) { best[k] = m }
@@ -302,10 +314,46 @@ final class AppState: ObservableObject {
         return order.compactMap { best[$0] }.sorted { $0.added > $1.added }
     }
 
-    /// Every copy of the same title in the library (4K / HD / dubbed / subtitled …), best first.
+    private var variantsCache: [String: [MediaItem]] = [:]
+
+    /// Every copy of the same title in the library (4K / HD / dubbed / subtitled, other names), best first.
     func variants(_ kind: MediaKind, _ item: MediaItem) -> [MediaItem] {
-        guard let idx = index, let k = idx.key["\(kind.rawValue)|\(item.id)"] else { return [item] }
-        return idx.variants["\(kind.rawValue)|\(k)"] ?? [item]
+        guard let idx = index else { return [item] }
+        let g = groupKey(kind, item)
+        let ck = "\(kind.rawValue)|\(g)|\(TMDBIDs.shared.version)"
+        if let hit = variantsCache[ck] { return hit }
+        var list: [MediaItem]
+        if g.hasPrefix("tmdb:") {
+            list = catalog.items(kind).filter { groupKey(kind, $0) == g }
+        } else {
+            list = idx.variants["\(kind.rawValue)|\(g)"] ?? [item]
+        }
+        if list.isEmpty { list = [item] }
+        list.sort {
+            let a = idx.quality["\(kind.rawValue)|\($0.id)"] ?? 0, b = idx.quality["\(kind.rawValue)|\($1.id)"] ?? 0
+            return a != b ? a > b : $0.added > $1.added
+        }
+        if variantsCache.count > 300 { variantsCache = [:] }
+        variantsCache[ck] = list
+        return list
+    }
+
+    /// Asks TMDB about titles of a list that it hasn't identified yet (cached for good), so copies merge.
+    func identify(_ kind: MediaKind, _ list: [MediaItem]) async {
+        guard tmdbOn, let idx = index else { return }
+        let todo = list.filter { m in
+            guard m.tmdb == nil, let ck = idx.cardKey["\(kind.rawValue)|\(m.id)"] else { return false }
+            return TMDBIDs.shared.id(ck) == nil
+        }
+        var i = 0
+        while i < todo.count {
+            if Task.isCancelled { return }
+            let chunk = Array(todo[i..<min(todo.count, i + 18)])
+            await withTaskGroup(of: Void.self) { g in
+                for m in chunk { g.addTask { _ = await TMDB.shared.card(kind: kind, name: m.name, year: m.year) } }
+            }
+            i += chunk.count
+        }
     }
 
     func categoryName(_ kind: MediaKind, _ id: String) -> String {
