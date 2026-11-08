@@ -4,6 +4,7 @@
 
   var STRINGS = {
     en: {
+    viewers: 'Viewers', switchViewer: 'Switch viewer', syncNow: 'Sync now', cloudOnHint: 'Viewers and where each one stopped are synced to every device signed in to this subscription.', cloudOffHint: 'Sync is not set up yet: viewers are saved on this TV.', cloudSynced: 'Synced just now', cloudOn: 'Synced', manageViewers: 'Manage viewers', addViewer: 'Add viewer', done: 'Done', switchSub: 'Switch subscription', viewerName: 'Name', setPinQ: 'Protect this viewer with a 4-digit PIN?', pinOptional: 'PIN (4 digits)', rename: 'Rename', changeColor: 'Change colour', deleteViewer: 'Delete viewer', pin4: 'The PIN must be 4 digits', chooseSub: 'Choose a subscription', chooseSubHint: 'Each subscription has its own viewers', 
       tagline: 'Your IPTV, beautifully organised. Live TV, movies and series in one premium player.',
       getStarted: 'Get started', chooseLanguage: 'Choose your language', continueLabel: 'Continue',
       addSubscription: 'Add subscription', editSubscription: 'Edit subscription',
@@ -67,6 +68,7 @@
       keysHint: 'CH ▲▼ change channel · INFO details · BACK exit'
     },
     ar: {
+    viewers: 'المشاهدون', switchViewer: 'تبديل المشاهد', syncNow: 'زامن الآن', cloudOnHint: 'المشاهدون ومكان توقف كل واحد يتزامنون مع كل جهاز يدخل بنفس هذا الاشتراك.', cloudOffHint: 'المزامنة غير مفعّلة بعد: المشاهدون محفوظون على هذا التلفزيون.', cloudSynced: 'تمت المزامنة الآن', cloudOn: 'متزامن', manageViewers: 'إدارة المشاهدين', addViewer: 'إضافة مشاهد', done: 'تم', switchSub: 'تغيير الاشتراك', viewerName: 'الاسم', setPinQ: 'هل تريد حماية هذا المشاهد برمز من ٤ أرقام؟', pinOptional: 'الرمز (٤ أرقام)', rename: 'تغيير الاسم', changeColor: 'تغيير اللون', deleteViewer: 'حذف المشاهد', pin4: 'الرمز يجب أن يكون ٤ أرقام', chooseSub: 'اختر الاشتراك', chooseSubHint: 'لكل اشتراك مشاهدوه الخاصون', 
       tagline: 'اشتراكك بتنظيم أنيق. بث مباشر وأفلام ومسلسلات في مشغل واحد فاخر.',
       getStarted: 'ابدأ الآن', chooseLanguage: 'اختر لغتك', continueLabel: 'متابعة',
       addSubscription: 'إضافة اشتراك', editSubscription: 'تعديل الاشتراك',

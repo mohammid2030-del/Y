@@ -171,7 +171,7 @@
     S.hidden = await Store.get('hidden:' + raw.id, {});
     S.data = await Store.get('data:' + raw.id, null);
     if (!S.data) return showSync(raw.id);
-    showHome();
+    await enterAfterSub();
   }
 
   function onVisibility() {
@@ -351,7 +351,7 @@
         S.data = data;
         S.settings.activeSub = subId;
         await saveSettings();
-        setTimeout(showHome, 300);
+        setTimeout(function () { enterAfterSub(); }, 300);
       } catch (e) {
         if (cancelled) return;
         const hasCache = !!(await Store.get('data:' + subId, null));
@@ -376,29 +376,30 @@
   function itemsFor(type, cat) {
     const all = (S.data && S.data[type]) || [];
     if (cat === '*all') return all.filter(function (i) { return !S.hidden[type + '|' + i.cat]; });
-    if (cat === '*fav') return S.fav.filter(function (f) { return f.sub === S.sub.id && f.type === type; }).map(function (f) { return f.item; });
+    if (cat === '*fav') return S.fav.filter(function (f) { return f.sub === owner() && f.type === type; }).map(function (f) { return f.item; });
     if (cat === '*recent') {
       if (type === 'live') {
         return Object.keys(S.history).map(function (k) { return S.history[k]; })
-          .filter(function (h) { return h.sub === S.sub.id && h.type === 'live'; })
+          .filter(function (h) { return h.sub === owner() && h.type === 'live'; })
           .sort(function (a, b) { return b.t - a.t; }).slice(0, 50).map(function (h) { return h.item; });
       }
       return all.filter(function (i) { return !S.hidden[type + '|' + i.cat]; }).slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0); }).slice(0, 200);
     }
     return all.filter(function (i) { return i.cat === cat; });
   }
-  function isFav(type, id) { return S.fav.some(function (f) { return f.sub === S.sub.id && f.type === type && f.id === id; }); }
+  function isFav(type, id) { return S.fav.some(function (f) { return f.sub === owner() && f.type === type && f.id === id; }); }
   function toggleFav(type, item) {
-    const i = S.fav.findIndex(function (f) { return f.sub === S.sub.id && f.type === type && f.id === item.id; });
-    if (i >= 0) S.fav.splice(i, 1);
-    else S.fav.push({ sub: S.sub.id, type: type, id: item.id, name: item.name, logo: item.logo, item: item });
+    const i = S.fav.findIndex(function (f) { return f.sub === owner() && f.type === type && f.id === item.id; });
+    let f;
+    if (i >= 0) { f = S.fav.splice(i, 1)[0]; cloudPut(favPath(f), Cloud.Codec.fav(f, true)); }
+    else { f = { sub: owner(), type: type, id: item.id, name: item.name, logo: item.logo, item: item }; S.fav.push(f); cloudPut(favPath(f), Cloud.Codec.fav(f, false)); }
     saveFav();
     return i < 0;
   }
-  function hkey(type, id, ep) { return S.sub.id + '|' + type + '|' + id + '|' + (ep || ''); }
+  function hkey(type, id, ep) { return owner() + '|' + type + '|' + id + '|' + (ep || ''); }
   function continueList(type) {
     return Object.keys(S.history).map(function (k) { return S.history[k]; }).filter(function (h) {
-      return h.sub === S.sub.id && h.type === type && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95);
+      return h.sub === owner() && h.type === type && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95);
     }).sort(function (a, b) { return b.t - a.t; }).filter(function (h, i, arr) {
       // one card per series: its most recent episode
       return arr.findIndex(function (x) { return x.type === h.type && x.id === h.id; }) === i;
@@ -720,7 +721,7 @@
         if (info && (season == null || seasons.indexOf(season) < 0)) season = seasons[0];
         const eps = info && season != null ? info.seasons[season] : [];
         const last = Object.keys(S.history).map(function (k) { return S.history[k]; })
-          .filter(function (h) { return h.sub === S.sub.id && h.type === 'series' && h.id === item.id; })
+          .filter(function (h) { return h.sub === owner() && h.type === 'series' && h.id === item.id; })
           .sort(function (a, b) { return b.t - a.t; })[0];
         if (tm && season != null && tmSeason !== season) {
           tmSeason = season;
@@ -831,7 +832,7 @@
 
   // ---- favorites
   function renderFavorites(c) {
-    const mine = S.fav.filter(function (f) { return f.sub === S.sub.id; });
+    const mine = S.fav.filter(function (f) { return f.sub === owner(); });
     if (!mine.length) { c.innerHTML = `<div class="empty">${esc(t('emptyFavorites'))}</div>`; return; }
     const groups = [['live', t('live')], ['movie', t('movies')], ['series', t('series')]];
     c.innerHTML = groups.map(function (g) {
@@ -927,6 +928,10 @@
         </div>`;
       }).join('')}
       <button data-f data-action="subAdd" class="set-row">＋ ${esc(t('addSubscription'))}</button>
+      <h3 class="row-title">${esc(t('viewers'))}</h3>
+      <button data-f data-action="switchViewer" class="set-row">${esc(t('switchViewer'))}<span>${esc(currentViewer() ? currentViewer().name : '')}</span></button>
+      ${Cloud.enabled() ? `<button data-f data-action="syncNow" class="set-row">${esc(t('syncNow'))}<span class="muted">${esc(S.cloudStatus || '')}</span></button>` : ''}
+      <p class="muted about">${esc(t(Cloud.enabled() ? 'cloudOnHint' : 'cloudOffHint'))}</p>
       <h3 class="row-title">${esc(t('settings'))}</h3>
       <button data-f data-action="lang" class="set-row">${esc(t('language'))}<span>${I18n.lang === 'ar' ? 'العربية' : 'English'}</span></button>
       <button data-f data-action="buffer" class="set-row">${esc(t('buffer'))}<span>${esc(t('seconds', S.settings.bufferSec))}</span></button>
@@ -950,12 +955,16 @@
     actions.subRefresh = function (el) { activate(sid(el)).then(function () { showSync(sid(el)); }); };
     actions.subEdit = function (el) { showAddSub(sid(el)); };
     actions.subAdd = function () { showAddSub(); };
+    actions.switchViewer = function () { showViewers(); };
+    actions.syncNow = async function () { await cloudPullViewers(); await cloudPullData(); renderSection(false); toast(t('cloudSynced')); };
     actions.subDel = async function (el) {
       const id = sid(el);
       if (!(await confirmBox(t('confirmDelete'), t('remove')))) return;
       S.subs = S.subs.filter(function (s) { return s.id !== id; });
-      S.fav = S.fav.filter(function (f) { return f.sub !== id; });
-      Object.keys(S.history).forEach(function (k) { if (S.history[k].sub === id) delete S.history[k]; });
+      function mine(o) { return o === id || String(o).indexOf(id + '#') === 0; }
+      S.fav = S.fav.filter(function (f) { return !mine(f.sub); });
+      Object.keys(S.history).forEach(function (k) { if (mine(S.history[k].sub)) delete S.history[k]; });
+      Store.del('viewers:' + id); Store.del('viewer:' + id);
       await Promise.all([saveSubs(), saveFav(), Store.set('history', S.history), Store.del('data:' + id), Store.del('hidden:' + id)]);
       if (!S.subs.length) { S.sub = null; S.data = null; showAddSub(); return; }
       if (id === S.sub.id) await activate(S.subs[0].id); else renderSection(false);
@@ -999,8 +1008,9 @@
     };
     actions.matchPrefs = function () { showMatchPrefs(); };
     actions.clearHistory = async function () {
-      Object.keys(S.history).forEach(function (k) { if (S.history[k].sub === S.sub.id) delete S.history[k]; });
+      Object.keys(S.history).forEach(function (k) { if (S.history[k].sub === owner()) delete S.history[k]; });
       await Store.set('history', S.history);
+      cloudPut('data/' + Cloud.safe(S.viewerId) + '/h', {});
       toast(t('historyCleared'));
     };
   }
@@ -1036,6 +1046,194 @@
   }
 
 
+  // ------------------------------------------------------------------ viewers (up to 5 per subscription) + sync
+  function owner() { return !S.viewerId || S.viewerId === 'main' ? S.sub.id : S.sub.id + '#' + S.viewerId; }
+  function currentViewer() { return (S.viewers || []).find(function (v) { return v.id === S.viewerId; }); }
+  function defaultViewers() { return [{ id: 'main', name: I18n.lang === 'ar' ? 'أنا' : 'Me', color: 0, pinHash: null, updated: 0 }]; }
+  let cloudKey = '';
+  async function loadViewers() {
+    const all = await Store.get('viewers:' + S.sub.id, null) || defaultViewers();
+    S.viewersAll = all;
+    S.viewers = all.filter(function (v) { return !v.deleted; });
+    if (!S.viewers.length) { S.viewersAll = S.viewers = defaultViewers(); }
+    const saved = await Store.get('viewer:' + S.sub.id, 'main');
+    S.viewerId = S.viewers.some(function (v) { return v.id === saved; }) ? saved : S.viewers[0].id;
+    cloudKey = Cloud.enabled() ? await Cloud.subKey(S.sub) : '';
+  }
+  function saveViewers() {
+    S.viewers = S.viewersAll.filter(function (v) { return !v.deleted; });
+    return Store.set('viewers:' + S.sub.id, S.viewersAll);
+  }
+  function cloudPath(p) { return cloudKey ? 'nova/v1/' + cloudKey + '/' + p : ''; }
+  function cloudPut(p, v) { const full = cloudPath(p); if (full) Cloud.put(full, v); }
+  function favPath(f) { return 'data/' + Cloud.safe(S.viewerId || 'main') + '/f/' + Cloud.Codec.favKey(f.type, f.id); }
+  function pushHistory(h) { if (h) cloudPut('data/' + Cloud.safe(S.viewerId || 'main') + '/h/' + Cloud.Codec.historyKey(h), Cloud.Codec.history(h)); }
+  function pushViewer(v) { cloudPut('profiles/' + Cloud.safe(v.id), Cloud.Codec.viewer(v)); }
+  function pinHashOf(pin) { return Store.sha256((cloudKey || S.sub.id) + ':' + pin); }
+
+  async function enterAfterSub() {
+    await loadViewers();
+    if (S.viewers.length === 1 && !S.viewers[0].pinHash) await chooseViewer(S.viewers[0]);
+    else showViewers();
+    cloudPullViewers().then(function (changed) { if (changed && screen && screen.name === 'viewers') showViewers(); });
+  }
+  async function chooseViewer(v) {
+    S.viewerId = v.id;
+    await Store.set('viewer:' + S.sub.id, v.id);
+    S.ui.section = 'home';
+    showHome();
+    cloudPullData().then(function (changed) { if (changed && screen && screen.name === 'home') renderSection(false); });
+  }
+
+  /** Viewers: newest change wins on each side; deletions travel as tombstones. */
+  async function cloudPullViewers() {
+    const base = cloudPath('profiles');
+    if (!base) return false;
+    const sid = S.sub.id;
+    const remote = await Cloud.get(base) || {};
+    if (!S.sub || S.sub.id !== sid) return false;
+    let changed = false;
+    Object.keys(remote).forEach(function (id) {
+      const rv = Cloud.Codec.viewerFrom(id, remote[id] || {});
+      const i = S.viewersAll.findIndex(function (v) { return v.id === id; });
+      if (i < 0) { S.viewersAll.push(rv); changed = true; }
+      else if (rv.updated > (S.viewersAll[i].updated || 0)) { S.viewersAll[i] = rv; changed = true; }
+      else if (rv.updated < (S.viewersAll[i].updated || 0)) pushViewer(S.viewersAll[i]);
+    });
+    S.viewersAll.forEach(function (v) { if (!remote[v.id]) pushViewer(v); });
+    if (changed) {
+      await saveViewers();
+      if (!S.viewers.some(function (v) { return v.id === S.viewerId; })) S.viewerId = S.viewers[0].id;
+    }
+    S.cloudStatus = t('cloudSynced');
+    return changed;
+  }
+
+  /** Progress and favorites of the current viewer: newest wins per title, both ways. */
+  async function cloudPullData() {
+    const base = cloudPath('data/' + Cloud.safe(S.viewerId || 'main'));
+    if (!base) return false;
+    const own = owner();
+    const remote = await Cloud.get(base) || {};
+    if (own !== owner()) return false;
+    let changed = false;
+    const rh = remote.h || {}, seen = {};
+    Object.keys(rh).forEach(function (k) {
+      const h = Cloud.Codec.historyFrom(rh[k], own);
+      if (!h) return;
+      seen[Cloud.Codec.historyKey(h)] = 1;
+      const key = own + '|' + h.type + '|' + h.id + '|' + (h.ep || '');
+      const local = S.history[key];
+      if (!local || h.t > (local.t || 0)) { S.history[key] = h; changed = true; }
+      else if (h.t < (local.t || 0)) pushHistory(local);
+    });
+    Object.keys(S.history).forEach(function (k) { const h = S.history[k]; if (h.sub === own && !seen[Cloud.Codec.historyKey(h)]) pushHistory(h); });
+    const rf = remote.f || {}, rseen = {};
+    Object.keys(rf).forEach(function (k) {
+      const d = rf[k]; if (!d || !d.k) return;
+      rseen[k] = 1;
+      const id = String(d.i);
+      const i = S.fav.findIndex(function (f) { return f.sub === own && f.type === d.k && f.id === id; });
+      if (d.del) { if (i >= 0) { S.fav.splice(i, 1); changed = true; } }
+      else if (i < 0) {
+        const item = { id: id, name: d.n || '', logo: d.l || '', cat: d.c || '', ext: d.x || '', year: d.y || '' };
+        S.fav.push({ sub: own, type: d.k, id: id, name: item.name, logo: item.logo, item: item }); changed = true;
+      }
+    });
+    S.fav.forEach(function (f) { if (f.sub === own && !rseen[Cloud.Codec.favKey(f.type, f.id)]) cloudPut(favPath(f), Cloud.Codec.fav(f, false)); });
+    if (changed) { saveHistory(); saveFav(); }
+    S.cloudStatus = t('cloudSynced');
+    return changed;
+  }
+
+  function showViewers(editing) {
+    setScreen('viewers', function () {
+      app.innerHTML = `<div class="profiles">
+        <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+        <div class="pf-brand"><div class="logo small"></div><span>NOVA</span></div>
+        <h1>${esc(t(editing ? 'manageViewers' : 'whoWatching'))}</h1>
+        <p class="muted">${esc(S.sub.name || '')}${Cloud.enabled() ? ' · ' + esc(t('cloudOn')) : ''}</p>
+        <div class="pf-row" data-group>
+          ${S.viewers.map(function (v, i) {
+            const pal = PALETTES[(v.color || 0) % PALETTES.length];
+            const act = v.id === S.viewerId;
+            return `<button data-f data-action="${editing ? 'vEdit' : 'vPick'}" data-id="${esc(v.id)}" class="pf"${act ? ' data-autofocus' : ''} style="animation-delay:${0.15 + i * 0.08}s">
+              <span class="pf-tile" style="background:linear-gradient(135deg,${pal[0]},${pal[1]})">
+                <span class="pf-init">${esc((v.name || 'N').trim().charAt(0).toUpperCase())}</span>
+                ${v.pinHash ? '<span class="pf-type">🔒</span>' : ''}
+                ${editing ? '<span class="pf-check">✎</span>' : ''}
+              </span>
+              <b>${esc(v.name)}</b></button>`;
+          }).join('')}
+          ${S.viewers.length < 5 ? `<button data-f data-action="vAdd" class="pf add"><span class="pf-tile dashed">＋</span><b>${esc(t('addViewer'))}</b></button>` : ''}
+        </div>
+        <div class="row center">
+          <button data-f data-action="vManage" class="btn ghost">${editing ? '✓ ' + esc(t('done')) : '✎ ' + esc(t('manageViewers'))}</button>
+          <button data-f data-action="vSwitchSub" class="btn ghost">⇄ ${esc(t('switchSub'))}</button>
+        </div>
+      </div>`;
+      function find(el) { return S.viewers.find(function (v) { return v.id === el.getAttribute('data-id'); }); }
+      actions.vPick = async function (el) {
+        const v = find(el); if (!v) return;
+        if (v.pinHash) {
+          const pin = await pinBox(t('enterPin') + ' — ' + v.name);
+          if (pin == null) return;
+          if ((await pinHashOf(pin)) !== v.pinHash) { toast(t('wrongPin')); return; }
+        }
+        chooseViewer(v);
+      };
+      actions.vEdit = function (el) { const v = find(el); if (v) editViewer(v); };
+      actions.vAdd = function () { editViewer(null); };
+      actions.vManage = function () { showViewers(!editing); };
+      actions.vSwitchSub = function () { showProfiles(); };
+      Nav.focusFirst();
+    }, { back: function () { if (editing) showViewers(false); else showProfiles(); } });
+  }
+
+  async function editViewer(v) {
+    const now = Date.now() / 1000;
+    if (!v) {
+      if (S.viewers.length >= 5) return;
+      const name = await inputBox(t('addViewer'), t('viewerName'));
+      if (!name) return showViewers(true);
+      const nv = { id: Math.random().toString(36).slice(2, 14), name: name, color: S.viewers.length % PALETTES.length, pinHash: null, updated: now };
+      if (await confirmBox(t('setPinQ'), t('yes'))) {
+        const pin = await pinBox(t('pinOptional'));
+        if (pin && pin.length === 4) nv.pinHash = await pinHashOf(pin);
+      }
+      S.viewersAll.push(nv);
+      await saveViewers(); pushViewer(nv);
+      return showViewers(true);
+    }
+    const choice = await chooseBox(v.name, [
+      { value: 'name', label: t('rename') }, { value: 'color', label: t('changeColor') },
+      { value: 'pin', label: t(v.pinHash ? 'changePin' : 'setPin') }
+    ].concat(v.pinHash ? [{ value: 'nopin', label: t('removePin') }] : [])
+     .concat(S.viewers.length > 1 ? [{ value: 'del', label: t('deleteViewer') }] : []), null);
+    const rec = S.viewersAll.find(function (x) { return x.id === v.id; });
+    if (!choice || !rec) return showViewers(true);
+    if (choice === 'name') { const n = await inputBox(t('rename'), v.name); if (n) rec.name = n; }
+    else if (choice === 'color') {
+      const c = await chooseBox(t('changeColor'), PALETTES.map(function (p, i) { return { value: i, label: ['🔵', '🩷', '🟢', '🟠', '🟣', '💚'][i] + ' ' + (i + 1) }; }), rec.color);
+      if (c !== undefined) rec.color = c;
+    }
+    else if (choice === 'pin') { const pin = await pinBox(t('pinOptional')); if (pin && pin.length === 4) rec.pinHash = await pinHashOf(pin); else if (pin) toast(t('pin4')); }
+    else if (choice === 'nopin') rec.pinHash = null;
+    else if (choice === 'del') {
+      if (!(await confirmBox(t('deleteViewer') + ' — ' + rec.name + '?', t('remove')))) return showViewers(true);
+      rec.deleted = true;
+      const own = rec.id === 'main' ? S.sub.id : S.sub.id + '#' + rec.id;
+      Object.keys(S.history).forEach(function (k) { if (S.history[k].sub === own) delete S.history[k]; });
+      S.fav = S.fav.filter(function (f) { return f.sub !== own; });
+      saveHistory(); saveFav();
+      if (S.viewerId === rec.id) S.viewerId = null;
+    }
+    rec.updated = Date.now() / 1000;
+    await saveViewers(); pushViewer(rec);
+    if (!S.viewerId && S.viewers.length) S.viewerId = S.viewers[0].id;
+    showViewers(true);
+  }
+
   // ------------------------------------------------------------------ profiles ("Who's watching?")
   const PALETTES = [['#4F7BFF', '#9B6CFF'], ['#FF5E8A', '#FF9F5A'], ['#16C7A8', '#2D8CFF'], ['#FFB648', '#FF5E5E'], ['#B45CFF', '#FF5CC8'], ['#3DDC84', '#0FA3B1']];
   function showProfiles() {
@@ -1043,8 +1241,8 @@
       app.innerHTML = `<div class="profiles">
         <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
         <div class="pf-brand"><div class="logo small"></div><span>NOVA</span></div>
-        <h1>${esc(t('whoWatching'))}</h1>
-        <p class="muted">${esc(t('whoHint'))}</p>
+        <h1>${esc(t('chooseSub'))}</h1>
+        <p class="muted">${esc(t('chooseSubHint'))}</p>
         <div class="pf-row" data-group>
           ${S.subs.map(function (s, i) {
             const pal = PALETTES[i % PALETTES.length];
@@ -1118,9 +1316,9 @@
     const feat = featuredItems();
     const cont = continueList('movie').concat(continueList('series')).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
     const chans = Object.keys(S.history).map(function (k) { return S.history[k]; })
-      .filter(function (h) { return h.sub === S.sub.id && h.type === 'live' && h.item; }).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
+      .filter(function (h) { return h.sub === owner() && h.type === 'live' && h.item; }).sort(function (a, b) { return b.t - a.t; }).slice(0, 15);
     const mov = latest('movie', 20), ser = latest('series', 20);
-    const favs = S.fav.filter(function (f) { return f.sub === S.sub.id && f.type !== 'live' && f.item; });
+    const favs = S.fav.filter(function (f) { return f.sub === owner() && f.type !== 'live' && f.item; });
     c.innerHTML = `<div class="disc" id="disc">
       ${feat.length ? `<section class="hero" id="hero"></section>` : '<div style="height:120px"></div>'}
       ${Matches.prefs().show ? `<section class="rowsec"><div class="rowhead"><span class="ball">⚽</span><h3>${esc(t('matches'))}</h3>
@@ -1539,8 +1737,9 @@
       const h = S.history[key];
       if (r.kind !== 'live' && r.kind !== 'catchup' && !r.fromStart && h && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95)) start = h.pos;
       if (r.kind === 'live') {
-        S.history[key] = { sub: S.sub.id, type: 'live', id: r.item.id, ep: '', title: r.item.name, logo: r.item.logo, pos: 0, dur: 0, t: Date.now(), item: r.item };
+        S.history[key] = { sub: owner(), type: 'live', id: r.item.id, ep: '', title: r.item.name, logo: r.item.logo, pos: 0, dur: 0, t: Date.now(), item: r.item };
         saveHistory();
+        pushHistory(S.history[key]);
       }
       open(r, start);
       loadEpg();
@@ -1549,16 +1748,18 @@
       if (r.kind === 'movie' || r.kind === 'series') saveTimer = setInterval(saveProgress, 10000);
     }
 
+    let lastCloudSave = 0;
     function saveProgress(finished) {
       if (!cur || (cur.kind !== 'movie' && cur.kind !== 'series')) return;
       const d = Player.duration(), pos = finished ? d : (lastPos || Player.time());
       if (!d || !pos) return;
       const key = historyKeyFor(cur);
       S.history[key] = {
-        sub: S.sub.id, type: cur.kind, id: cur.item.id, ep: cur.episode ? cur.episode.id : '', ext: cur.episode ? cur.episode.ext : '',
+        sub: owner(), type: cur.kind, id: cur.item.id, ep: cur.episode ? cur.episode.id : '', ext: cur.episode ? cur.episode.ext : '',
         title: cur.title, subtitle: cur.subtitle || '', logo: cur.logo, pos: pos, dur: d, t: Date.now(), item: cur.item
       };
       saveHistory();
+      if (finished || Date.now() - lastCloudSave > 30000) { lastCloudSave = Date.now(); pushHistory(S.history[key]); }
     }
 
     function zap(delta) {

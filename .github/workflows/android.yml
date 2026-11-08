@@ -64,8 +64,14 @@ jobs:
         run: set -o pipefail; ./gradlew --no-daemon assembleRelease 2>&1 | tee -a build.log
 
       - name: Collect APKs
+        env:
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
         run: |
           mkdir -p dist
+          DB=$(printf '%s' "$FIREBASE_DB_URL" | tr -cd 'A-Za-z0-9:/._-')
+          KEY=$(printf '%s' "$FIREBASE_API_KEY" | tr -cd 'A-Za-z0-9_-')
+          printf "window.NOVA_CONFIG = { dbUrl: '%s', apiKey: '%s' };\n" "$DB" "$KEY" > tizen/js/config.js
           cp app/build/outputs/apk/debug/app-debug.apk dist/NOVA-IPTV-debug.apk
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
             cp app/build/outputs/apk/release/app-release.apk dist/NOVA-IPTV.apk
