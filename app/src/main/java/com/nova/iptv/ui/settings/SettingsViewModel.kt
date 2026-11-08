@@ -51,6 +51,22 @@ class SettingsViewModel @Inject constructor(
         subtitles.save(subtitleConfig)
     }
 
+    var subtitleTest by mutableStateOf<com.nova.iptv.data.subs.SubtitleRepository.KeyTest?>(null)
+        private set
+    var subtitleTesting by mutableStateOf(false)
+        private set
+
+    fun testSubtitleCredentials() {
+        if (subtitleTesting) return
+        viewModelScope.launch {
+            subtitleTesting = true
+            subtitleTest = subtitles.testCredentials()
+            subtitleTesting = false
+        }
+    }
+
+    fun dismissSubtitleTest() { subtitleTest = null }
+
     fun clearSubtitleCache() {
         subtitles.clearCache()
         message = SettingsMessage.CACHE_CLEARED

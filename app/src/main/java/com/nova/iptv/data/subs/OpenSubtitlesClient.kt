@@ -2,8 +2,6 @@ package com.nova.iptv.data.subs
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.nova.iptv.data.ErrorKind
-import com.nova.iptv.data.NovaException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -12,6 +10,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** Error returned by OpenSubtitles, with the server's own explanation. */
+class OpenSubtitlesException(val code: Int, val serverMessage: String) : Exception("HTTP $code $serverMessage")
 
 data class FeatureResult(val title: String, val year: String, val tmdbId: String, val type: String)
 
@@ -32,23 +33,36 @@ class OpenSubtitlesClient @Inject constructor(private val http: OkHttpClient) {
     private fun execute(req: Request): JsonObject {
         http.newCall(req).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
-            when (resp.code) {
-                401, 403 -> throw NovaException(ErrorKind.AUTH_FAILED, resp.code)
-                406, 429 -> throw NovaException(ErrorKind.HTTP, resp.code)
-            }
-            if (!resp.isSuccessful) throw NovaException(ErrorKind.HTTP, resp.code)
             val el = runCatching { JsonParser.parseString(body) }.getOrNull()
-            return if (el != null && el.isJsonObject) el.asJsonObject else JsonObject()
+            val obj = if (el != null && el.isJsonObject) el.asJsonObject else JsonObject()
+            if (!resp.isSuccessful) throw OpenSubtitlesException(resp.code, serverMessage(obj, body))
+            return obj
         }
     }
 
-    /** Returns (token, baseUrl host) */
-    suspend fun login(apiKey: String, user: String, pass: String): Pair<String, String> = withContext(Dispatchers.IO) {
+    private fun serverMessage(o: JsonObject, body: String): String {
+        o.get("message")?.takeIf { it.isJsonPrimitive }?.asString?.let { return it }
+        val errors = o.get("errors")
+        if (errors != null && errors.isJsonArray && errors.asJsonArray.size() > 0) {
+            return errors.asJsonArray.joinToString(" · ") { if (it.isJsonPrimitive) it.asString else it.toString() }
+        }
+        return body.take(160)
+    }
+
+    data class Login(val token: String, val host: String, val allowedDownloads: Int)
+
+    suspend fun login(apiKey: String, user: String, pass: String): Login = withContext(Dispatchers.IO) {
         val payload = JsonObject().apply { addProperty("username", user); addProperty("password", pass) }
-        val o = execute(request("$BASE/login", apiKey, null).post(payload.toString().toRequestBody(jsonType)).build())
-        val token = o.get("token")?.takeIf { it.isJsonPrimitive }?.asString ?: throw NovaException(ErrorKind.AUTH_FAILED)
+        val o = execute(
+            request("$BASE/login", apiKey, null)
+                .header("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody(jsonType)).build()
+        )
+        val token = o.get("token")?.takeIf { it.isJsonPrimitive }?.asString
+            ?: throw OpenSubtitlesException(401, "no token")
         val host = o.get("base_url")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
-        token to host
+        val allowed = o.getAsJsonObject("user")?.get("allowed_downloads")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+        Login(token, host, allowed)
     }
 
     /** params must contain tmdb_id, or parent_tmdb_id + season_number + episode_number. */
@@ -98,10 +112,15 @@ class OpenSubtitlesClient @Inject constructor(private val http: OkHttpClient) {
     suspend fun download(apiKey: String, token: String?, host: String, fileId: Long): String = withContext(Dispatchers.IO) {
         val base = if (host.isNotBlank()) "https://$host/api/v1" else BASE
         val payload = JsonObject().apply { addProperty("file_id", fileId); addProperty("sub_format", "srt") }
-        val o = execute(request("$base/download", apiKey, token).post(payload.toString().toRequestBody(jsonType)).build())
-        val link = o.get("link")?.takeIf { it.isJsonPrimitive }?.asString ?: throw NovaException(ErrorKind.HTTP, 406)
+        val o = execute(
+            request("$base/download", apiKey, token)
+                .header("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody(jsonType)).build()
+        )
+        val link = o.get("link")?.takeIf { it.isJsonPrimitive }?.asString
+            ?: throw OpenSubtitlesException(406, o.get("message")?.takeIf { it.isJsonPrimitive }?.asString ?: "download limit")
         http.newCall(Request.Builder().url(link).header("User-Agent", USER_AGENT).build()).execute().use { r ->
-            if (!r.isSuccessful) throw NovaException(ErrorKind.HTTP, r.code)
+            if (!r.isSuccessful) throw OpenSubtitlesException(r.code, "file download failed")
             val bytes = r.body?.bytes() ?: ByteArray(0)
             decode(bytes)
         }

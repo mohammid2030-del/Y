@@ -409,6 +409,13 @@ fun SettingsScreen(
                     onClick = { subsSizeDialog = true },
                 )
             }
+            item {
+                SettingRow(
+                    stringResource(R.string.subs_test),
+                    stringResource(if (vm.subtitleTesting) R.string.testing else R.string.subs_test_desc),
+                    onClick = { vm.testSubtitleCredentials() },
+                )
+            }
             item { SettingRow(stringResource(R.string.subs_clear_cache), onClick = { vm.clearSubtitleCache() }) }
 
             item { SectionHeader(stringResource(R.string.tv_guide)) }
@@ -496,6 +503,30 @@ fun SettingsScreen(
             s.bufferSeconds,
             onPick = { vm.setBuffer(it) },
             onDismiss = { bufferDialog = false },
+        )
+    }
+    vm.subtitleTest?.let { r ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissSubtitleTest() },
+            title = { Text(stringResource(R.string.subs_test)) },
+            text = {
+                Column {
+                    Text(
+                        when {
+                            r.keyMessage == "NO_KEY" -> stringResource(R.string.subs_no_key)
+                            r.keyOk -> "✓ " + stringResource(R.string.subs_key_ok)
+                            else -> "✕ " + stringResource(R.string.subs_key_bad, r.keyMessage)
+                        },
+                        color = if (r.keyOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    )
+                    when (r.loginOk) {
+                        true -> Text("✓ " + stringResource(R.string.subs_login_ok, r.allowedDownloads), color = MaterialTheme.colorScheme.primary)
+                        false -> Text("✕ " + stringResource(R.string.subs_login_bad, r.loginMessage), color = MaterialTheme.colorScheme.error)
+                        null -> {}
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.dismissSubtitleTest() }) { Text(stringResource(R.string.ok)) } },
         )
     }
     subsField?.let { field ->

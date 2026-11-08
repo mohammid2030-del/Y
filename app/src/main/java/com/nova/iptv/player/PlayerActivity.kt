@@ -588,7 +588,7 @@ class PlayerActivity : AppCompatActivity() {
             com.nova.iptv.data.subs.SubStep.AUTH -> getString(R.string.subs_auth)
             com.nova.iptv.data.subs.SubStep.FAILED -> getString(R.string.subs_failed)
         }
-        ui.subsStatus = text
+        ui.subsStatus = if (st.detail.isNotBlank()) "$text\n(${st.detail})" else text
         val busy = st.step == com.nova.iptv.data.subs.SubStep.SEARCHING ||
             st.step == com.nova.iptv.data.subs.SubStep.DOWNLOADING ||
             st.step == com.nova.iptv.data.subs.SubStep.TRANSLATING
@@ -598,8 +598,14 @@ class PlayerActivity : AppCompatActivity() {
     private fun searchTitle(query: String) {
         lifecycleScope.launch {
             ui.linkSearching = true
-            ui.linkResults = subtitleRepo.searchTitles(query, tv = request.type == ContentType.SERIES)
-            if (ui.linkResults.isEmpty()) ui.subsStatus = getString(R.string.subs_no_titles)
+            val (results, error) = subtitleRepo.searchTitles(query, tv = request.type == ContentType.SERIES)
+            ui.linkResults = results
+            ui.subsStatus = when {
+                error == "NO_KEY" -> getString(R.string.subs_no_key)
+                error != null -> getString(R.string.subs_server_error, error)
+                results.isEmpty() -> getString(R.string.subs_no_titles)
+                else -> ui.subsStatus
+            }
             ui.linkSearching = false
         }
     }

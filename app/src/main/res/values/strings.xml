@@ -194,9 +194,13 @@
     <string name="subs_downloading">Downloading subtitles…</string>
     <string name="subs_failed">Couldn\'t load subtitles right now</string>
     <string name="subs_find_now">Find subtitles</string>
+    <string name="subs_key_bad">The API key was rejected (%1$s). Copy the key from opensubtitles.com → API consumers, not your password.</string>
+    <string name="subs_key_ok">The API key works</string>
     <string name="subs_limit">Daily subtitle download limit reached. Sign in to OpenSubtitles in Settings for more.</string>
     <string name="subs_link_hint">Wrong or missing match? Search the original (Turkish) or English name and pick the right title.</string>
     <string name="subs_linked">Linked to “%1$s”. Searching for subtitles…</string>
+    <string name="subs_login_bad">Sign-in failed (%1$s). Check the username and password.</string>
+    <string name="subs_login_ok">Signed in — %1$d downloads per day</string>
     <string name="subs_no_key">Add your OpenSubtitles API key in Settings to get subtitles</string>
     <string name="subs_no_titles">No matching titles found</string>
     <string name="subs_no_tmdb">Your provider doesn\'t identify this title. Link it by its English or Turkish name from the subtitles button.</string>
@@ -204,7 +208,10 @@
     <string name="subs_optional">Optional — raises the daily download limit</string>
     <string name="subs_password">OpenSubtitles password</string>
     <string name="subs_searching">Looking for Arabic subtitles…</string>
+    <string name="subs_server_error">OpenSubtitles replied: %1$s</string>
     <string name="subs_size">Subtitle size</string>
+    <string name="subs_test">Test OpenSubtitles key</string>
+    <string name="subs_test_desc">Checks the API key and your login</string>
     <string name="subs_translate">Translate when Arabic isn\'t available</string>
     <string name="subs_translate_desc">Translates Turkish (or English) subtitles to Arabic on this device</string>
     <string name="subs_translating">Translating from %1$s to Arabic… %2$d%%</string>

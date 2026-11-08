@@ -193,9 +193,13 @@
     <string name="subs_downloading">جارٍ تنزيل الترجمة…</string>
     <string name="subs_failed">تعذّر جلب الترجمة حالياً</string>
     <string name="subs_find_now">ابحث عن ترجمة</string>
+    <string name="subs_key_bad">تم رفض المفتاح (%1$s). انسخ المفتاح من opensubtitles.com ← API consumers وليس كلمة المرور.</string>
+    <string name="subs_key_ok">المفتاح يعمل بشكل صحيح</string>
     <string name="subs_limit">تم بلوغ الحد اليومي لتنزيل الترجمات. سجّل دخول OpenSubtitles من الإعدادات لزيادته.</string>
     <string name="subs_link_hint">لا توجد نتيجة أو العنوان غلط؟ ابحث بالاسم التركي الأصلي أو الإنجليزي واختر العنوان الصحيح.</string>
     <string name="subs_linked">تم الربط بـ «%1$s». جارٍ البحث عن ترجمة…</string>
+    <string name="subs_login_bad">فشل تسجيل الدخول (%1$s). تحقق من اسم المستخدم وكلمة المرور.</string>
+    <string name="subs_login_ok">تم تسجيل الدخول — %1$d تنزيل يومياً</string>
     <string name="subs_no_key">أضف مفتاح OpenSubtitles من الإعدادات لجلب الترجمات</string>
     <string name="subs_no_titles">لا توجد نتائج مطابقة</string>
     <string name="subs_no_tmdb">مزوّدك لا يعرّف هذا العنوان. اربطه باسمه الإنجليزي أو التركي من زر الترجمة.</string>
@@ -203,7 +207,10 @@
     <string name="subs_optional">اختياري — يرفع حد التنزيل اليومي</string>
     <string name="subs_password">كلمة مرور OpenSubtitles</string>
     <string name="subs_searching">جارٍ البحث عن ترجمة عربية…</string>
+    <string name="subs_server_error">رد OpenSubtitles: %1$s</string>
     <string name="subs_size">حجم الترجمة</string>
+    <string name="subs_test">اختبار مفتاح OpenSubtitles</string>
+    <string name="subs_test_desc">يتحقق من المفتاح ومن تسجيل الدخول</string>
     <string name="subs_translate">الترجمة الآلية عند عدم توفر العربية</string>
     <string name="subs_translate_desc">يترجم الترجمة التركية (أو الإنجليزية) إلى العربية على الجهاز نفسه</string>
     <string name="subs_translating">جارٍ الترجمة من %1$s إلى العربية… %2$d%%</string>

@@ -1,8 +1,6 @@
 package com.nova.iptv.data.subs
 
 import android.content.Context
-import com.nova.iptv.data.ErrorKind
-import com.nova.iptv.data.NovaException
 import com.nova.iptv.data.security.CryptoManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +25,7 @@ data class SubtitleTarget(val tmdbId: String, val season: Int = 0, val episode: 
 
 enum class SubStep { SEARCHING, DOWNLOADING, TRANSLATING, ADDED, ADDED_TRANSLATED, NOT_FOUND, NO_TMDB, NO_KEY, LIMIT, AUTH, FAILED }
 
-data class SubStatus(val step: SubStep, val progress: Int = 0, val fromLang: String = "")
+data class SubStatus(val step: SubStep, val progress: Int = 0, val fromLang: String = "", val detail: String = "")
 
 @Singleton
 class SubtitleRepository @Inject constructor(
@@ -52,7 +50,7 @@ class SubtitleRepository @Inject constructor(
 
     fun save(c: SubtitleConfig) {
         prefs.edit()
-            .putString("key", crypto.encrypt(c.apiKey.trim()))
+            .putString("key", crypto.encrypt(cleanKey(c.apiKey)))
             .putString("user", c.username.trim())
             .putString("pass", crypto.encrypt(c.password))
             .putBoolean("auto", c.autoArabic)
@@ -61,6 +59,9 @@ class SubtitleRepository @Inject constructor(
             .apply()
         token = null
     }
+
+    /** Pasted keys often carry spaces, new lines or invisible characters. */
+    private fun cleanKey(k: String) = k.filter { it.code in 33..126 }
 
     private fun file(key: String) = File(dir, key.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".ar.srt")
 
@@ -75,18 +76,51 @@ class SubtitleRepository @Inject constructor(
         prefs.edit().putString("map|$subId|$kind|$remoteId", tmdbId).apply()
     }
 
-    suspend fun searchTitles(query: String, tv: Boolean): List<FeatureResult> {
+    /** @return results, or an error message from the server. */
+    suspend fun searchTitles(query: String, tv: Boolean): Pair<List<FeatureResult>, String?> {
         val c = config()
-        if (c.apiKey.isBlank() || query.isBlank()) return emptyList()
-        return runCatching { client.features(c.apiKey, query, tv) }.getOrDefault(emptyList())
+        if (c.apiKey.isBlank()) return emptyList<FeatureResult>() to "NO_KEY"
+        if (query.isBlank()) return emptyList<FeatureResult>() to null
+        return try {
+            client.features(c.apiKey, query, tv) to null
+        } catch (e: OpenSubtitlesException) {
+            emptyList<FeatureResult>() to "${e.code}: ${e.serverMessage}"
+        } catch (e: Exception) {
+            emptyList<FeatureResult>() to (e.javaClass.simpleName)
+        }
+    }
+
+    data class KeyTest(val keyOk: Boolean, val keyMessage: String, val loginOk: Boolean?, val loginMessage: String, val allowedDownloads: Int)
+
+    /** Validates the API key (with a real search) and, if provided, the username/password. */
+    suspend fun testCredentials(): KeyTest = withContext(Dispatchers.IO) {
+        val c = config()
+        if (c.apiKey.isBlank()) return@withContext KeyTest(false, "NO_KEY", null, "", 0)
+        val (keyOk, keyMsg) = try {
+            client.features(c.apiKey, "matrix", tv = false); true to ""
+        } catch (e: OpenSubtitlesException) {
+            false to "${e.code}: ${e.serverMessage}"
+        } catch (e: Exception) {
+            false to (e.message ?: e.javaClass.simpleName)
+        }
+        if (c.username.isBlank() || c.password.isBlank()) return@withContext KeyTest(keyOk, keyMsg, null, "", 0)
+        try {
+            val l = client.login(c.apiKey, c.username, c.password)
+            token = l.token; host = l.host; tokenAt = System.currentTimeMillis()
+            KeyTest(keyOk, keyMsg, true, "", l.allowedDownloads)
+        } catch (e: OpenSubtitlesException) {
+            KeyTest(keyOk, keyMsg, false, "${e.code}: ${e.serverMessage}", 0)
+        } catch (e: Exception) {
+            KeyTest(keyOk, keyMsg, false, e.message ?: e.javaClass.simpleName, 0)
+        }
     }
 
     private suspend fun tokenFor(c: SubtitleConfig): String? {
         if (c.username.isBlank() || c.password.isBlank()) return null
         if (token != null && System.currentTimeMillis() - tokenAt < 20 * 3_600_000L) return token
-        val (t, h) = client.login(c.apiKey, c.username, c.password)
-        token = t; host = h; tokenAt = System.currentTimeMillis()
-        return t
+        val l = client.login(c.apiKey, c.username, c.password)
+        token = l.token; host = l.host; tokenAt = System.currentTimeMillis()
+        return l.token
     }
 
     /**
@@ -135,19 +169,20 @@ class SubtitleRepository @Inject constructor(
             val f = file(key); f.writeText(Srt.write(translated))
             onStatus(SubStatus(SubStep.ADDED_TRANSLATED, fromLang = source.language))
             f
-        } catch (e: NovaException) {
+        } catch (e: OpenSubtitlesException) {
             onStatus(
                 SubStatus(
-                    when {
-                        e.kind == ErrorKind.AUTH_FAILED -> SubStep.AUTH
-                        e.httpCode == 406 || e.httpCode == 429 -> SubStep.LIMIT
+                    when (e.code) {
+                        401, 403 -> SubStep.AUTH
+                        406, 429 -> SubStep.LIMIT
                         else -> SubStep.FAILED
-                    }
+                    },
+                    detail = "${e.code}: ${e.serverMessage}",
                 )
             )
             null
         } catch (e: Exception) {
-            onStatus(SubStatus(SubStep.FAILED))
+            onStatus(SubStatus(SubStep.FAILED, detail = e.message ?: e.javaClass.simpleName))
             null
         }
     }
