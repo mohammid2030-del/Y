@@ -4,7 +4,9 @@ struct TMDBCard: Codable, Hashable { var poster: String; var title: String; var 
 
 struct TMDBPerson: Hashable { var name: String; var role: String; var photo: String; var id: Int = 0 }
 
-struct TMDBPersonInfo { var bio = ""; var born = ""; var place = ""; var knownFor: [TMDBCard] = [] }
+struct KnownWork: Hashable, Identifiable { var id: Int; var poster: String; var title: String; var original: String; var isTV: Bool; var year: String }
+
+struct TMDBPersonInfo { var bio = ""; var born = ""; var place = ""; var knownFor: [KnownWork] = [] }
 
 struct TMDBInfo {
     var id: Int
@@ -198,7 +200,12 @@ actor TMDB {
         p.knownFor = cast.sorted { (Double(jstr($0["vote_count"])) ?? 0) > (Double(jstr($1["vote_count"])) ?? 0) }
             .filter { !jstr($0["poster_path"]).isEmpty && seen.insert(jint($0["id"])).inserted }
             .prefix(12)
-            .map { TMDBCard(poster: img(jstr($0["poster_path"]), "w342"), title: jstr($0["title"]).isEmpty ? jstr($0["name"]) : jstr($0["title"]), id: jint($0["id"])) }
+            .map { d -> KnownWork in
+                let tv = jstr(d["media_type"]) == "tv"
+                return KnownWork(id: jint(d["id"]), poster: img(jstr(d["poster_path"]), "w342"),
+                                 title: jstr(d[tv ? "name" : "title"]), original: jstr(d[tv ? "original_name" : "original_title"]), isTV: tv,
+                                 year: String(jstr(d[tv ? "first_air_date" : "release_date"]).prefix(4)))
+            }
         return p
     }
 

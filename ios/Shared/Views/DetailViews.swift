@@ -64,6 +64,8 @@ struct CastRow: View {
     let cast: [TMDBPerson]
     @EnvironmentObject var state: AppState
     @State private var person: TMDBPerson?
+    @State private var target: (MediaKind, MediaItem)?
+    @State private var go = false
     var body: some View {
         if !cast.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
@@ -87,7 +89,23 @@ struct CastRow: View {
                     .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 24 : 4)
                 }
             }
-            .sheet(item: $person) { p in PersonSheet(person: p).environmentObject(state) }
+            .sheet(item: $person) { p in
+                PersonSheet(person: p) { kind, item in
+                    // Close the sheet, then open the title in this same screen stack (Back returns here).
+                    person = nil
+                    target = (kind, item)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { go = true }
+                }
+                .environmentObject(state)
+            }
+            .navigationDestination(isPresented: $go) {
+                Group {
+                    if let t = target {
+                        if t.0 == .movie { MovieDetailView(item: t.1) } else { SeriesDetailView(item: t.1) }
+                    }
+                }
+                .toolbar(.hidden, for: .tabBar)
+            }
         }
     }
 }
@@ -97,8 +115,11 @@ extension TMDBPerson: Identifiable {}
 /// Cast member: photo, role, biography and best-known titles.
 struct PersonSheet: View {
     let person: TMDBPerson
+    var open: (MediaKind, MediaItem) -> Void = { _, _ in }
     @State private var info: TMDBPersonInfo?
     @State private var bioOpen = false
+    @State private var notice: String?
+    @State private var available: [Int: (MediaKind, MediaItem)] = [:]
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) private var dismiss
 
@@ -129,14 +150,24 @@ struct PersonSheet: View {
                 }
                 if let known = info?.knownFor, !known.isEmpty {
                     Text(L.t("knownFor")).font(.title3.bold())
+                    if let notice { Text(notice).font(.footnote).foregroundStyle(.orange) }
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: Theme.isTV ? 30 : 12) {
-                            ForEach(known, id: \.id) { c in
-                                Button { dismiss(); state.searchFor(c.title) } label: {
+                            ForEach(known) { w in
+                                let found = available[w.id]
+                                Button {
+                                    if let f = found { open(f.0, f.1) } else { notice = L.t("notInSub", w.title) }
+                                } label: {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        RemoteImage(url: c.poster).frame(width: Theme.posterW * 0.8, height: Theme.posterW * 1.2)
+                                        RemoteImage(url: w.poster).frame(width: Theme.posterW * 0.8, height: Theme.posterW * 1.2)
                                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                        Text(c.title).font(.caption).lineLimit(1).frame(width: Theme.posterW * 0.8, alignment: .leading)
+                                            .overlay(alignment: .topTrailing) {
+                                                if found != nil {
+                                                    Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(.white, Theme.blue).padding(6)
+                                                }
+                                            }
+                                            .opacity(found == nil ? 0.55 : 1)
+                                        Text(w.title).font(.caption).lineLimit(1).frame(width: Theme.posterW * 0.8, alignment: .leading)
                                     }.foregroundStyle(.white)
                                 }.buttonStyle(LiftButtonStyle(radius: 14))
                             }
@@ -147,7 +178,11 @@ struct PersonSheet: View {
             .padding(Theme.isTV ? 80 : 20)
         }
         .background(Theme.bg.ignoresSafeArea())
-        .task { info = await TMDB.shared.person(person.id) ?? TMDBPersonInfo() }
+        .task {
+            let i = await TMDB.shared.person(person.id) ?? TMDBPersonInfo()
+            info = i
+            for w in i.knownFor { if let f = await state.findInCatalog(w) { available[w.id] = f } }
+        }
     }
 }
 

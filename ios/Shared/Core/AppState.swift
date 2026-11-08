@@ -220,6 +220,38 @@ final class AppState: ObservableObject {
         Storage.save("history", history)
     }
 
+    private var titleIndexCache: [MediaKind: [String: [MediaItem]]] = [:]
+    private var titleIndexOwner = ""
+
+    /// Cleaned title → items, built once per catalog off the main thread.
+    private func titleIndex(_ kind: MediaKind) async -> [String: [MediaItem]] {
+        let owner = "\(activeID)|\(catalog.items(kind).count)"
+        if owner != titleIndexOwner { titleIndexCache = [:]; titleIndexOwner = owner }
+        if let i = titleIndexCache[kind] { return i }
+        let list = catalog.items(kind)
+        let idx = await Task.detached(priority: .userInitiated) { () -> [String: [MediaItem]] in
+            var d: [String: [MediaItem]] = [:]
+            for m in list { d[Clean.title(m.name).lowercased(), default: []].append(m) }
+            return d
+        }.value
+        titleIndexCache[kind] = idx
+        return idx
+    }
+
+    /// Finds a TMDB title in the user's own catalog (Arabic or original title, preferring the same year).
+    func findInCatalog(_ w: KnownWork) async -> (MediaKind, MediaItem)? {
+        let kind: MediaKind = w.isTV ? .series : .movie
+        let idx = await titleIndex(kind)
+        let names = [w.title, w.original].map { Clean.title($0).lowercased() }.filter { !$0.isEmpty }
+        let hits = names.flatMap { idx[$0] ?? [] }
+        guard !hits.isEmpty else { return nil }
+        let sameYear = hits.first { m in
+            let y = m.year.isEmpty ? Clean.full(m.name).year : String(m.year.prefix(4))
+            return w.year.isEmpty || y.isEmpty || y == w.year
+        }
+        return (kind, sameYear ?? hits[0])
+    }
+
     func searchFor(_ text: String) {
         pendingSearch = Clean.title(text)
         tab = .search
