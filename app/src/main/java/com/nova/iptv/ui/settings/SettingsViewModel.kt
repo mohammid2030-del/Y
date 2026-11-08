@@ -41,7 +41,21 @@ class SettingsViewModel @Inject constructor(
     private val content: ContentRepository,
     private val backup: BackupRepository,
     private val introStore: com.nova.iptv.data.repo.IntroStore,
+    private val subtitles: com.nova.iptv.data.subs.SubtitleRepository,
 ) : ViewModel() {
+    var subtitleConfig by mutableStateOf(subtitles.config())
+        private set
+
+    fun updateSubtitles(transform: (com.nova.iptv.data.subs.SubtitleConfig) -> com.nova.iptv.data.subs.SubtitleConfig) {
+        subtitleConfig = transform(subtitleConfig)
+        subtitles.save(subtitleConfig)
+    }
+
+    fun clearSubtitleCache() {
+        subtitles.clearCache()
+        message = SettingsMessage.CACHE_CLEARED
+    }
+
     val subscriptions: StateFlow<List<SubscriptionEntity>> =
         subs.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val settings: StateFlow<AppSettings> =
