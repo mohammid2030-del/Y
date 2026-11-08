@@ -59,7 +59,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +85,23 @@ import com.nova.iptv.ui.components.EmptyView
 import com.nova.iptv.ui.components.novaFocus
 import com.nova.iptv.ui.onboarding.NovaLogo
 import com.nova.iptv.ui.theme.LocalNovaFlags
+
+/** Increments each time the current tab is tapped again. */
+val LocalReselect = compositionLocalOf { 0 }
+
+/** Runs [action] when the user re-taps the tab this screen belongs to (not on first composition). */
+@Composable
+fun OnReselect(action: suspend () -> Unit) {
+    val signal = LocalReselect.current
+    val handled = remember { intArrayOf(signal) }
+    val latest by rememberUpdatedState(action)
+    LaunchedEffect(signal) {
+        if (signal != handled[0]) {
+            handled[0] = signal
+            latest()
+        }
+    }
+}
 
 enum class HomeTab(@StringRes val label: Int, val icon: ImageVector) {
     HOME(R.string.tab_home, Icons.Filled.Home),
@@ -110,6 +132,11 @@ fun HomeScreen(
     val subs by vm.subscriptions.collectAsStateWithLifecycle()
     val activeId by vm.activeId.collectAsStateWithLifecycle()
     val goTo: (HomeTab) -> Unit = { tabIndex = it.ordinal }
+    val reselects = remember { mutableStateMapOf<HomeTab, Int>() }
+    // Tapping the tab you are already on scrolls it smoothly back to the top.
+    val onPill: (HomeTab) -> Unit = { t ->
+        if (t == tab) reselects[t] = (reselects[t] ?: 0) + 1 else tabIndex = t.ordinal
+    }
 
     BackHandler(enabled = tabIndex != 0) { tabIndex = 0 }
 
@@ -126,6 +153,7 @@ fun HomeScreen(
             }
         } else {
             val padded = Modifier.fillMaxSize().padding(top = homeTopInset())
+            CompositionLocalProvider(LocalReselect provides (reselects[tab] ?: 0)) {
             when (tab) {
                 HomeTab.HOME -> DiscoverHome(onOpenMovie = onOpenMovie, onOpenSeries = onOpenSeries, onGoTo = goTo)
                 HomeTab.LIVE -> Box(padded) { LiveTab(wide = wide) }
@@ -133,6 +161,7 @@ fun HomeScreen(
                 HomeTab.SERIES -> VodTab(vm = hiltViewModel<SeriesViewModel>(), onOpen = onOpenSeries)
                 HomeTab.FAVORITES -> Box(padded) { FavoritesTab(onOpenMovie = onOpenMovie, onOpenSeries = onOpenSeries) }
                 HomeTab.SEARCH -> Box(padded) { SearchTab(onOpenMovie = onOpenMovie, onOpenSeries = onOpenSeries) }
+            }
             }
         }
 
@@ -160,7 +189,7 @@ fun HomeScreen(
                 NovaLogo(40)
                 Spacer(Modifier.width(8.dp))
             }
-            NavPill(selected = tab, wide = wide, onSelect = goTo)
+            NavPill(selected = tab, wide = wide, onSelect = onPill)
             AccountButton(
                 subs = subs.map { it.id to it.name },
                 activeId = activeId,

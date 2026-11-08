@@ -22,7 +22,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
@@ -88,12 +92,22 @@ private fun ContentEntity.meta(): String =
 fun VodTab(vm: VodViewModel, onOpen: (Long) -> Unit) {
     val categories by vm.categories.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(selected) { if (selected != SpecialCat.ALL) gridState.scrollToItem(0) }
+    OnReselect {
+        when {
+            selected == SpecialCat.ALL -> listState.smoothScrollToTop()
+            gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 -> gridState.smoothScrollToTop()
+            else -> vm.select(SpecialCat.ALL)
+        }
+    }
     if (selected == SpecialCat.ALL) {
-        DiscoverView(vm, categories, onOpen)
+        DiscoverView(vm, categories, listState, onOpen)
     } else {
         Column(Modifier.fillMaxSize().padding(top = homeTopInset())) {
             CategoryChips(categories, selected, vm.type, vm::select)
-            CategoryGrid(vm, selected, onOpen)
+            CategoryGrid(vm, selected, gridState, onOpen)
         }
     }
 }
@@ -110,7 +124,7 @@ internal fun posterWidth(): Dp {
 }
 
 @Composable
-private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, onOpen: (Long) -> Unit) {
+private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, listState: LazyListState, onOpen: (Long) -> Unit) {
     val featured by vm.featured.collectAsStateWithLifecycle()
     val recent by vm.recentRow.collectAsStateWithLifecycle()
     val continueList by vm.continueWatching.collectAsStateWithLifecycle()
@@ -126,7 +140,7 @@ private fun DiscoverView(vm: VodViewModel, categories: List<CategoryEntity>, onO
         return
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 32.dp)) {
         item(key = "hero") {
             if (featured.isNotEmpty()) {
                 FullBleedHero(
@@ -252,7 +266,7 @@ internal fun PosterRow(list: List<ContentEntity>, favorites: Set<String>, onClic
 }
 
 @Composable
-private fun CategoryGrid(vm: VodViewModel, selected: String, onOpen: (Long) -> Unit) {
+private fun CategoryGrid(vm: VodViewModel, selected: String, gridState: LazyGridState, onOpen: (Long) -> Unit) {
     val paged = vm.items.collectAsLazyPagingItems()
     val favorites by vm.favoriteKeys.collectAsStateWithLifecycle()
     val w = posterWidth()
@@ -263,6 +277,7 @@ private fun CategoryGrid(vm: VodViewModel, selected: String, onOpen: (Long) -> U
         )
         else -> LazyVerticalGrid(
             columns = GridCells.Adaptive(w),
+            state = gridState,
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 32.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
