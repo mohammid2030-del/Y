@@ -327,4 +327,9 @@
     <string name="known_for">اشتهر بـ</string>
     <string name="not_in_library">غير متوفر</string>
     <string name="born">مواليد %1$s</string>
+    <string name="trailer_finding">جارٍ البحث عن الإعلان…</string>
+    <string name="trailer_none">لا يوجد إعلان لهذا العنوان</string>
+    <string name="trailer_season">إعلان أي موسم؟</string>
+    <string name="parts_of">كل الأجزاء · %1$s</string>
+    <string name="now_showing">الحالي</string>
 </resources>

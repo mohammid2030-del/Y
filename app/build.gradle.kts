@@ -27,6 +27,7 @@ android {
         buildConfigField("String", "FIREBASE_API_KEY", "\"${cfg("FIREBASE_API_KEY")}\"")
         buildConfigField("String", "GOOGLE_TV_CLIENT_ID", "\"${cfg("GOOGLE_TV_CLIENT_ID")}\"")
         buildConfigField("String", "GOOGLE_TV_CLIENT_SECRET", "\"${cfg("GOOGLE_TV_CLIENT_SECRET")}\"")
+        buildConfigField("String", "YOUTUBE_API_KEY", "\"${cfg("YOUTUBE_API_KEY")}\"")
     }
 
     signingConfigs {

@@ -2,6 +2,13 @@
 
 package com.nova.iptv.ui.home
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -225,21 +232,40 @@ fun FullBleedHero(
         else -> (config.screenHeightDp * 0.66f).dp.coerceIn(460.dp, 640.dp)
     }
     val pager = rememberPagerState(pageCount = { items.size })
+    // the button selected in the hero (0 play / watch, 1 details, 2 favourite; -1 = focus elsewhere): kept on the next slide
+    var slot by remember { mutableIntStateOf(-1) }
+    var rotating by remember { mutableStateOf(false) }
+    val requesters = remember { List(3) { FocusRequester() } }
 
+    // every 5 s, also while Play / Details / + is selected
     LaunchedEffect(items.size) {
         while (items.size > 1) {
-            delay(7_000)
-            if (!pager.isScrollInProgress) pager.animateScrollToPage((pager.currentPage + 1) % items.size)
+            delay(5_000)
+            if (pager.isScrollInProgress || com.nova.iptv.ui.saver.UserActivity.idleMs < 1_500) continue   // not in the middle of a press
+            val keep = slot
+            rotating = true
+            val next = (pager.currentPage + 1) % items.size
+            pager.animateScrollToPage(next)
+            if (keep >= 0) {
+                // series have no Details button: Details → the main button
+                val target = if (keep == 1 && items[next].type != ContentType.MOVIE) 0 else keep
+                delay(40)
+                runCatching { requesters[target].requestFocus() }
+            }
+            delay(200)
+            rotating = false
         }
     }
 
-    Box(Modifier.fillMaxWidth().height(heroHeight)) {
+    Box(Modifier.fillMaxWidth().height(heroHeight).onFocusChanged { if (!it.hasFocus && !rotating) slot = -1 }) {
         HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items[it].type + items[it].remoteId }) { page ->
             val c = items[page]
             val info by produceState<HeroInfo?>(null, c.remoteId, c.type) { value = runCatching { heroInfo(c) }.getOrNull() }
             HeroPage(
                 c = c,
                 info = info,
+                requesters = if (page == pager.currentPage) requesters else null,
+                onSlot = { slot = it },
                 wide = wide,
                 favorite = favKey(c.type, c.remoteId) in favorites,
                 onPlay = { onPlay(c) },
@@ -270,6 +296,8 @@ fun FullBleedHero(
 private fun HeroPage(
     c: ContentEntity,
     info: HeroInfo?,
+    requesters: List<FocusRequester>?,
+    onSlot: (Int) -> Unit,
     wide: Boolean,
     favorite: Boolean,
     onPlay: () -> Unit,
@@ -399,8 +427,9 @@ private fun HeroPage(
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 val pill = RoundedCornerShape(50)
+                fun Modifier.slot(i: Int) = (requesters?.let { focusRequester(it[i]) } ?: this).onFocusChanged { if (it.isFocused) onSlot(i) }
                 Row(
-                    Modifier.novaFocus(pill).shadow(14.dp, pill).clip(pill).background(Color.White)
+                    Modifier.slot(0).novaFocus(pill).shadow(14.dp, pill).clip(pill).background(Color.White)
                         .clickable(onClick = onPlay).padding(horizontal = 26.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -411,18 +440,18 @@ private fun HeroPage(
                         color = Color.Black, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
                     )
                 }
-                if (isMovie) GlassPill(stringResource(R.string.details), Icons.Filled.Info, onDetails)
-                GlassCircle(if (favorite) Icons.Filled.Check else Icons.Filled.Add, stringResource(R.string.favorite), onFavorite)
+                if (isMovie) GlassPill(stringResource(R.string.details), Icons.Filled.Info, onDetails, Modifier.slot(1))
+                GlassCircle(if (favorite) Icons.Filled.Check else Icons.Filled.Add, stringResource(R.string.favorite), onFavorite, Modifier.slot(2))
             }
         }
     }
 }
 
 @Composable
-private fun GlassPill(label: String, icon: ImageVector, onClick: () -> Unit) {
+private fun GlassPill(label: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(50)
     Row(
-        Modifier.novaFocus(shape).clip(shape).background(Color.White.copy(alpha = 0.16f))
+        modifier.novaFocus(shape).clip(shape).background(Color.White.copy(alpha = 0.16f))
             .border(1.dp, Color.White.copy(alpha = 0.25f), shape)
             .clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -434,9 +463,9 @@ private fun GlassPill(label: String, icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-private fun GlassCircle(icon: ImageVector, description: String, onClick: () -> Unit) {
+private fun GlassCircle(icon: ImageVector, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        Modifier.novaFocus(CircleShape).size(46.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f))
+        modifier.novaFocus(CircleShape).size(46.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f))
             .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

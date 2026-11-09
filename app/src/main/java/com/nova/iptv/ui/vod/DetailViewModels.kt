@@ -42,8 +42,9 @@ class MovieDetailViewModel @Inject constructor(
     private val subs: SubscriptionRepository,
     library: com.nova.iptv.data.library.LibraryRepository,
     tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
+    youtube: com.nova.iptv.data.tmdb.YouTubeTrailers,
 ) : ViewModel() {
-    val extras = DetailExtras(library, tmdbRepo, viewModelScope)
+    val extras = DetailExtras(library, tmdbRepo, viewModelScope, youtube)
     private val id: Long = savedState.get<Long>("id") ?: 0L
     private val itemFlow = MutableStateFlow<ContentEntity?>(null)
     val item: StateFlow<ContentEntity?> = itemFlow
@@ -90,6 +91,7 @@ class MovieDetailViewModel @Inject constructor(
         val sub = subs.get(c.subscriptionId)
         if (sub != null && sub.type == SourceType.XTREAM) info = content.vodInfo(sub, c.remoteId)
         tmdb = content.tmdbFor(c, info?.tmdbId.orEmpty())
+        tmdb?.let { extras.loadParts(it.collectionId, c.subscriptionId) }
     }
 
     /** Switches the page to another copy of the title (another language / quality). */
@@ -112,8 +114,9 @@ class SeriesDetailViewModel @Inject constructor(
     private val subs: SubscriptionRepository,
     library: com.nova.iptv.data.library.LibraryRepository,
     tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
+    youtube: com.nova.iptv.data.tmdb.YouTubeTrailers,
 ) : ViewModel() {
-    val extras = DetailExtras(library, tmdbRepo, viewModelScope)
+    val extras = DetailExtras(library, tmdbRepo, viewModelScope, youtube)
     private val id: Long = savedState.get<Long>("id") ?: 0L
     private val itemFlow = MutableStateFlow<ContentEntity?>(null)
     val item: StateFlow<ContentEntity?> = itemFlow

@@ -64,6 +64,14 @@ data class TmdbInfo(
     val trailerKey: String,
     val certification: String,
     val seasons: Int,
+    /** Usable trailers best first (never an episode preview); `trailerKey` is the first. */
+    val trailers: List<String> = emptyList(),
+    /** Logo in the app language only, and whether TMDB has the title + story in the app language. */
+    val logoLocal: String = "",
+    val localText: Boolean = false,
+    /** The film series this movie belongs to (TMDB collection), 0 when none. */
+    val collectionId: Int = 0,
+    val collectionName: String = "",
 ) {
     val ratingText: String get() = if (rating > 0) String.format(Locale.US, "%.1f", rating) else ""
 }
@@ -315,10 +323,9 @@ class TmdbRepository @Inject constructor(
         } else {
             credits?.arr("crew")?.mapNotNull { it.obj() }?.filter { it.str("job") == "Director" }?.map { it.str("name") }.orEmpty()
         }
-        val videos = o.get("videos")?.obj()?.arr("results")?.mapNotNull { it.obj() }.orEmpty()
-            .filter { it.str("site") == "YouTube" && it.str("type") in setOf("Trailer", "Teaser") }
-        val trailer = (videos.firstOrNull { it.str("type") == "Trailer" } ?: videos.firstOrNull())?.str("key").orEmpty()
-            .ifBlank { trailerFallback(type, id, lang) }
+        // trailer in the app language first, then English / any; trailer > teaser; never an episode preview
+        val trailers = rankTrailers(o.get("videos")?.obj()?.arr("results"), lang).ifEmpty { trailerFallback(type, id, lang) }
+        val trailer = trailers.firstOrNull().orEmpty()
         val cert = if (isTv) {
             o.get("content_ratings")?.obj()?.arr("results")?.mapNotNull { it.obj() }
                 ?.let { l -> (l.firstOrNull { it.str("iso_3166_1") == "SA" } ?: l.firstOrNull { it.str("iso_3166_1") == "US" })?.str("rating") }
@@ -354,18 +361,78 @@ class TmdbRepository @Inject constructor(
             trailerKey = trailer,
             certification = cert,
             seasons = o.int("number_of_seasons"),
+            trailers = trailers,
+            logoLocal = img(pick("logos", listOf(lang)), "w500"),
+            localText = o.str("overview").isNotBlank() && !foreignScript(o.str(if (isTv) "name" else "title")),
+            collectionId = o.get("belongs_to_collection")?.takeIf { it.isJsonObject }?.asJsonObject?.int("id") ?: 0,
+            collectionName = o.get("belongs_to_collection")?.takeIf { it.isJsonObject }?.asJsonObject?.str("name").orEmpty(),
         )
     }
 
+    private fun rankTrailers(results: JsonArray?, lang: String): List<String> {
+        val types = mapOf("Trailer" to 0, "Teaser" to 1)
+        fun rank(v: JsonObject): Double {
+            val l = v.str("iso_639_1")
+            return (types[v.str("type")] ?: 9) * 10.0 + (if (l == lang) 0 else if (l == "en") 1 else 2) - (if (v.get("official")?.let { runCatching { it.asBoolean }.getOrNull() } == true) 0.5 else 0.0)
+        }
+        return results.orEmpty().mapNotNull { it.obj() }
+            .filter { it.str("site") == "YouTube" && it.str("type") in types && YouTubeTrailers.episodeOf(it.str("name")) <= 1 }
+            .sortedBy { rank(it) }.take(6).map { it.str("key") }.filter { it.isNotBlank() }
+    }
+
+    private val seasonVideoCache = LruCache<String, List<String>>(60)
+    /** Trailers / teasers of one season (TMDB season videos, best first), empty when TMDB has none. */
+    suspend fun seasonTrailers(tvId: Int, season: Int): List<String> {
+        if (!_enabled.value || tvId <= 0) return emptyList()
+        val lang = lang()
+        val ck = "$tvId|$season|$lang"
+        seasonVideoCache.get(ck)?.let { return it }
+        val out = runCatching {
+            rankTrailers(request("tv/$tvId/season/$season/videos", mapOf("language" to lang, "include_video_language" to "$lang,en,null")).arr("results"), lang)
+        }.getOrNull() ?: return emptyList()
+        seasonVideoCache.put(ck, out)
+        return out
+    }
+
+    private val collectionCache = LruCache<String, Pair<String, List<KnownWork>>>(40)
+    /** Every part of a film series, in release order. */
+    suspend fun collection(id: Int): Pair<String, List<KnownWork>>? {
+        if (!_enabled.value || id <= 0) return null
+        val ck = "${lang()}|$id"
+        collectionCache.get(ck)?.let { return it }
+        val o = runCatching { request("collection/$id", mapOf("language" to lang())) }.getOrNull() ?: return null
+        val parts = o.arr("parts").mapNotNull { it.obj() }
+            .filter { it.str("release_date").isNotBlank() || it.str("poster_path").isNotBlank() }
+            .sortedBy { it.str("release_date").ifBlank { "9999" } }
+            .map { KnownWork(it.int("id"), false, it.str("title"), it.str("original_title"), it.str("release_date").take(4), img(it.str("poster_path"), "w342"), it.dbl("popularity")) }
+        val out = o.str("name") to parts
+        collectionCache.put(ck, out)
+        return out
+    }
+
+    private val searchCache = LruCache<String, List<KnownWork>>(60)
+    /** TMDB search over movies and series in any language ("تمرد" finds the film whatever the subscription calls it). */
+    suspend fun searchAll(q: String): List<KnownWork> {
+        if (!_enabled.value || q.isBlank()) return emptyList()
+        val ck = "${lang()}|${q.lowercase()}"
+        searchCache.get(ck)?.let { return it }
+        val o = runCatching { request("search/multi", mapOf("query" to q, "language" to lang(), "include_adult" to "false")) }.getOrNull() ?: return emptyList()
+        val out = o.arr("results").mapNotNull { it.obj() }.filter { it.str("media_type") in setOf("movie", "tv") }.take(12).map {
+            val tv = it.str("media_type") == "tv"
+            KnownWork(it.int("id"), tv, it.str(if (tv) "name" else "title"), it.str(if (tv) "original_name" else "original_title"),
+                it.str(if (tv) "first_air_date" else "release_date").take(4), img(it.str("poster_path"), "w342"), it.dbl("popularity"))
+        }
+        searchCache.put(ck, out)
+        return out
+    }
+
+    /** App language ("ar" / "en"). */
+    fun language(): String = lang()
+
     /** Arabic results often have no trailer — try English. */
-    private suspend fun trailerFallback(type: String, id: Int, lang: String): String {
-        if (lang == "en") return ""
-        return runCatching {
-            request("$type/$id/videos", mapOf("language" to "en-US")).arr("results").mapNotNull { it.obj() }
-                .filter { it.str("site") == "YouTube" && it.str("type") in setOf("Trailer", "Teaser") }
-                .sortedBy { if (it.str("type") == "Trailer") 0 else 1 }
-                .firstOrNull()?.str("key").orEmpty()
-        }.getOrDefault("")
+    private suspend fun trailerFallback(type: String, id: Int, lang: String): List<String> {
+        if (lang == "en") return emptyList()
+        return runCatching { rankTrailers(request("$type/$id/videos", mapOf("language" to "en-US")).arr("results"), "en") }.getOrDefault(emptyList())
     }
 
     private suspend fun request(

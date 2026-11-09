@@ -328,4 +328,9 @@
     <string name="known_for">Known for</string>
     <string name="not_in_library">Not available</string>
     <string name="born">Born %1$s</string>
+    <string name="trailer_finding">Looking for the trailer…</string>
+    <string name="trailer_none">No trailer found for this title</string>
+    <string name="trailer_season">Trailer of which season?</string>
+    <string name="parts_of">All parts · %1$s</string>
+    <string name="now_showing">Now</string>
 </resources>

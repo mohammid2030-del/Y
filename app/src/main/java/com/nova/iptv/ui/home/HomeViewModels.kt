@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -333,6 +334,8 @@ data class SearchState(
 class SearchViewModel @Inject constructor(
     private val content: ContentRepository,
     settings: SettingsRepository,
+    private val tmdb: com.nova.iptv.data.tmdb.TmdbRepository,
+    private val library: com.nova.iptv.data.library.LibraryRepository,
 ) : ViewModel() {
     private val subId: StateFlow<Long> = settings.activeSubscriptionId.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     val state = MutableStateFlow(SearchState())
@@ -343,8 +346,23 @@ class SearchViewModel @Inject constructor(
 
     val results: StateFlow<List<ContentEntity>?> = combine(subId, state) { s, st -> s to st }
         .debounce(300)
-        .mapLatest { (s, st) ->
-            if (st.query.trim().length < 2) null else content.search(s, st.query, st.type, st.categoryId)
+        .transformLatest { (s, st) ->
+            val q = st.query.trim()
+            if (q.length < 2) { emit(null); return@transformLatest }
+            val local = content.search(s, st.query, st.type, st.categoryId)
+            emit(local)
+            // titles known by another name: ask TMDB (Arabic / English / original names) and show the ones in the subscription
+            if (st.type == ContentType.LIVE || st.categoryId.isNotEmpty() || !tmdb.enabled.value) return@transformLatest
+            val seen = local.map { it.id }.toHashSet()
+            val extra = ArrayList<ContentEntity>()
+            for (w in tmdb.searchAll(q)) {
+                val type = if (w.isTv) ContentType.SERIES else ContentType.MOVIE
+                if (st.type.isNotEmpty() && st.type != type) continue
+                val id = runCatching { library.find(s, w) }.getOrNull() ?: continue
+                if (!seen.add(id)) continue
+                content.byId(id)?.let { extra += it }
+            }
+            if (extra.isNotEmpty()) emit(extra + local)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 

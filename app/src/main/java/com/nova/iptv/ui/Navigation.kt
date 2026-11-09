@@ -8,6 +8,8 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.navigation.navArgument
 import com.nova.iptv.ui.epg.EpgScreen
 import com.nova.iptv.ui.home.HomeScreen
@@ -56,6 +58,9 @@ fun NavHostController.goHomeClearing() {
 @Composable
 fun NovaNavHost(startDestination: String, googleFirst: Boolean = false) {
     val nav = rememberNavController()
+    // screensaver only on the app's own pages (not during setup / profile choice)
+    val route = nav.currentBackStackEntryAsState().value?.destination?.route
+    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
     NavHost(
         navController = nav,
         startDestination = startDestination,
@@ -164,5 +169,7 @@ fun NovaNavHost(startDestination: String, googleFirst: Boolean = false) {
         composable(Routes.HIDDEN) {
             HiddenCategoriesScreen(onBack = { nav.popBackStack() })
         }
+    }
+    com.nova.iptv.ui.saver.ScreenSaverHost(allowed = route in setOf(Routes.HOME, Routes.MOVIE, Routes.SERIES, Routes.EPG))
     }
 }

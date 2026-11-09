@@ -60,7 +60,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Versions (copies of the same title) and the cast person sheet — shared by the movie and series pages. */
-class DetailExtras(private val library: LibraryRepository, private val tmdb: TmdbRepository, private val scope: CoroutineScope) {
+class DetailExtras(
+    private val library: LibraryRepository,
+    private val tmdb: TmdbRepository,
+    private val scope: CoroutineScope,
+    private val youtube: com.nova.iptv.data.tmdb.YouTubeTrailers? = null,
+) {
     var versions by mutableStateOf<List<Version>>(emptyList())
         private set
     /** Asked on every entry when there's more than one copy (Arabic first), like the Apple and Samsung apps. */
@@ -90,6 +95,127 @@ class DetailExtras(private val library: LibraryRepository, private val tmdb: Tmd
     }
 
     fun closePerson() { person = null; personLoading = null; found.clear() }
+
+    // ---- trailers (like Samsung / Apple TV): TMDB trailers, else a checked YouTube search; series ask which season
+
+    /** Seasons to choose from when the series has several (0 = not asking). */
+    var askSeasons by mutableStateOf(0)
+    private var trailerJob: kotlinx.coroutines.Job? = null
+
+    fun trailer(context: android.content.Context, tm: com.nova.iptv.data.tmdb.TmdbInfo?, c: ContentEntity, series: Boolean, seasonsHave: List<Int> = emptyList()) {
+        if (series) {
+            val max = minOf(30, maxOf(tm?.seasons ?: 0, seasonsHave.maxOrNull() ?: 0))
+            if (max > 1) { askSeasons = max; return }
+        }
+        play(context, tm?.trailers.orEmpty(), youtube?.query(tm, c.name, c.year, series))
+    }
+
+    fun seasonTrailer(context: android.content.Context, tm: com.nova.iptv.data.tmdb.TmdbInfo?, c: ContentEntity, n: Int) {
+        askSeasons = 0
+        trailerJob?.cancel()
+        trailerJob = scope.launch {
+            android.widget.Toast.makeText(context, R.string.trailer_finding, android.widget.Toast.LENGTH_SHORT).show()
+            val keys = if (tm != null) tmdb.seasonTrailers(tm.id, n) else emptyList()
+            open(context, keys, youtube?.query(tm, c.name, c.year, true, n))
+        }
+    }
+
+    private fun play(context: android.content.Context, keys: List<String>, q: com.nova.iptv.data.tmdb.YouTubeTrailers.Query?) {
+        trailerJob?.cancel()
+        trailerJob = scope.launch {
+            if (keys.isEmpty()) android.widget.Toast.makeText(context, R.string.trailer_finding, android.widget.Toast.LENGTH_SHORT).show()
+            open(context, keys, q)
+        }
+    }
+
+    private suspend fun open(context: android.content.Context, keys: List<String>, q: com.nova.iptv.data.tmdb.YouTubeTrailers.Query?) {
+        val k = when {
+            youtube != null && q != null -> youtube.find(keys, q)
+            else -> keys.firstOrNull().orEmpty()
+        }
+        // nothing that really is this title's trailer: say so instead of showing a random video
+        if (k.isNotEmpty()) com.nova.iptv.player.TrailerActivity.start(context, k)
+        else android.widget.Toast.makeText(context, R.string.trailer_none, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    // ---- movie series parts (TMDB collection)
+
+    var partsName by mutableStateOf("")
+        private set
+    var parts by mutableStateOf<List<KnownWork>>(emptyList())
+        private set
+    val partFound = mutableStateMapOf<Int, Long?>()
+    private var partsFor = 0
+
+    fun loadParts(collectionId: Int, subId: Long) {
+        if (collectionId <= 0 || collectionId == partsFor) return
+        partsFor = collectionId
+        scope.launch {
+            val col = tmdb.collection(collectionId) ?: return@launch
+            if (col.second.size < 2) return@launch
+            col.second.forEach { w -> partFound[w.id] = runCatching { library.find(subId, w) }.getOrNull() }
+            partsName = col.first; parts = col.second
+        }
+    }
+}
+
+/** Season picker for the trailer of a series with several seasons. */
+@Composable
+fun TrailerSeasonDialog(count: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.trailer_season)) },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(count) { i ->
+                    Text(
+                        stringResource(R.string.season_n, i + 1),
+                        Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier)
+                            .novaFocus(RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))
+                            .clickable { onPick(i + 1) }.padding(14.dp),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/** Every part of the film series under the movie; the ones in the subscription open directly, the current one is marked. */
+@Composable
+fun PartsRow(name: String, parts: List<KnownWork>, found: Map<Int, Long?>, currentTmdb: Int, onOpen: (Long) -> Unit) {
+    if (parts.size < 2) return
+    Column(Modifier.padding(top = 16.dp)) {
+        Text(stringResource(R.string.parts_of, name), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(parts, key = { it.id }) { w ->
+                val here = w.id == currentTmdb
+                val id = found[w.id]
+                Column(
+                    Modifier.width(110.dp).novaFocus(RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = !here && id != null) { id?.let(onOpen) }
+                        .alpha(if (here || id != null) 1f else 0.45f),
+                ) {
+                    androidx.compose.foundation.layout.Box {
+                        NetImage(w.poster, Modifier.size(110.dp, 160.dp).clip(RoundedCornerShape(10.dp)))
+                        if (here) Text(
+                            stringResource(R.string.now_showing),
+                            Modifier.padding(6.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                    Text(w.title, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(if (id != null || here) w.year else stringResource(R.string.not_in_library), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -253,11 +253,9 @@ private fun CastRow(cast: List<TmdbPerson>, onPerson: (TmdbPerson) -> Unit = {})
 }
 
 @Composable
-private fun TrailerButton(key: String) {
-    if (key.isBlank()) return
-    val context = LocalContext.current
+private fun TrailerButton(onClick: () -> Unit) {
     OutlinedButton(
-        onClick = { com.nova.iptv.player.TrailerActivity.start(context, key) },
+        onClick = onClick,
         modifier = Modifier.novaFocus(),
     ) {
         Icon(Icons.Filled.Movie, null)
@@ -312,7 +310,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, onOp
                         Text(stringResource(R.string.start_over))
                     }
                 }
-                TrailerButton(tmdb?.trailerKey.orEmpty())
+                TrailerButton { vm.extras.trailer(context, tmdb, c, series = false) }
                 VersionsButton(vm.extras)
                 IconButton(onClick = vm::toggleFavorite, modifier = Modifier.novaFocus(CircleShape)) {
                     Icon(
@@ -351,6 +349,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, onOp
                 modifier = Modifier.padding(16.dp),
             )
         }
+        PartsRow(vm.extras.partsName, vm.extras.parts, vm.extras.partFound, tmdb?.id ?: 0) { onOpenMovie(it) }
         if (similar.isNotEmpty()) {
             SimilarRow(similar) { onOpenMovie(it.id) }
         }
@@ -409,6 +408,9 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, on
     )
 
     ExtrasDialogs(vm.extras, c.id, c.subscriptionId, vm::pick, onOpenMovie, onOpenSeries)
+    if (vm.extras.askSeasons > 0) {
+        TrailerSeasonDialog(vm.extras.askSeasons, onPick = { vm.extras.seasonTrailer(context, tmdb, c, it) }, onDismiss = { vm.extras.askSeasons = 0 })
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             DetailHeader(
@@ -444,7 +446,7 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, on
                             Text(stringResource(R.string.continue_episode, l.subtitle.substringBefore(" —")))
                         }
                     }
-                    TrailerButton(tmdb?.trailerKey.orEmpty())
+                    TrailerButton { vm.extras.trailer(context, tmdb, c, series = true, seasonsHave = info?.seasons?.keys?.toList().orEmpty()) }
                     VersionsButton(vm.extras)
                     IconButton(onClick = vm::toggleFavorite, modifier = Modifier.novaFocus(CircleShape)) {
                         Icon(

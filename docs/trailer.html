@@ -9,7 +9,10 @@
 (function () {
   var q = {}; location.search.slice(1).split('&').forEach(function (kv) { var p = kv.split('='); if (p[0]) q[p[0]] = decodeURIComponent(p[1] || ''); });
   var id = String(q.v || '').replace(/[^A-Za-z0-9_-]/g, '');
-  function tell(type, extra) { try { parent.postMessage(JSON.stringify({ nova: 'trailer', type: type, extra: extra || null }), '*'); } catch (e) {} }
+  function tell(type, extra) {
+    try { if (window.NovaTrailer) NovaTrailer.event(type, extra == null ? null : String(extra)); } catch (e) {}   // Android app
+    try { if (parent !== window) parent.postMessage(JSON.stringify({ nova: 'trailer', type: type, extra: extra || null }), '*'); } catch (e) {}
+  }
   if (!id) { tell('error', 'no-id'); return; }
   window.onYouTubeIframeAPIReady = function () {
     new YT.Player('p', {

@@ -42,6 +42,17 @@ class MainActivity : AppCompatActivity() {
         val tv = isTvDevice(this)
         setContent { NovaRoot(isTv = tv) }
     }
+
+    // every remote press / touch counts as activity (screensaver, hero)
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        com.nova.iptv.ui.saver.UserActivity.touch()
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        com.nova.iptv.ui.saver.UserActivity.touch()
+        return super.dispatchTouchEvent(ev)
+    }
 }
 
 fun isTvDevice(context: Context): Boolean {
