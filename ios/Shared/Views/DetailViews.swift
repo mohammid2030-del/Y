@@ -578,6 +578,9 @@ struct TrailerSheet: View {
 
 struct YouTubeView: UIViewRepresentable {
     let key: String
+    /// YouTube's official embedded player on NOVA's GitHub Pages page (a real web origin, which YouTube requires).
+    static let page = "https://mohammid2030-del.github.io/Y/trailer.html"
+    func makeCoordinator() -> Coordinator { Coordinator(key: key) }
     func makeUIView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.allowsInlineMediaPlayback = true
@@ -585,16 +588,37 @@ struct YouTubeView: UIViewRepresentable {
         let web = WKWebView(frame: .zero, configuration: cfg)
         web.isOpaque = false
         web.backgroundColor = .black
+        web.navigationDelegate = context.coordinator
         let safe = key.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        let html = """
-        <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000}
-        iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head><body>
-        <iframe src="https://www.youtube-nocookie.com/embed/\(safe)?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
-        </body></html>
-        """
-        web.loadHTMLString(html, baseURL: URL(string: "https://nova-iptv.app/"))
+        if let url = URL(string: "\(Self.page)?v=\(safe)&hl=\(L.isArabic ? "ar" : "en")") { web.load(URLRequest(url: url)) }
         return web
     }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        let key: String
+        private var fellBack = false
+        init(key: String) { self.key = key }
+        /// Page not reachable: embed directly instead.
+        private func fallback(_ web: WKWebView) {
+            guard !fellBack else { return }
+            fellBack = true
+            let safe = key.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+            let html = """
+            <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000}
+            iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head><body>
+            <iframe src="https://www.youtube-nocookie.com/embed/\(safe)?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+            </body></html>
+            """
+            web.loadHTMLString(html, baseURL: URL(string: "https://nova-iptv.app/"))
+        }
+        func webView(_ web: WKWebView, decidePolicyFor response: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if response.isForMainFrame, let h = response.response as? HTTPURLResponse, h.statusCode >= 400 {
+                decisionHandler(.cancel); fallback(web); return
+            }
+            decisionHandler(.allow)
+        }
+        func webView(_ web: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { fallback(web) }
+    }
 }
 #endif

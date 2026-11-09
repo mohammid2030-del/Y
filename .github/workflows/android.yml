@@ -86,13 +86,15 @@ jobs:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           GOOGLE_TV_CLIENT_ID: ${{ secrets.GOOGLE_TV_CLIENT_ID }}
           GOOGLE_TV_CLIENT_SECRET: ${{ secrets.GOOGLE_TV_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           mkdir -p dist
           DB=$(printf '%s' "$FIREBASE_DB_URL" | tr -cd 'A-Za-z0-9:/._-')
           KEY=$(printf '%s' "$FIREBASE_API_KEY" | tr -cd 'A-Za-z0-9_-')
           GID=$(printf '%s' "$GOOGLE_TV_CLIENT_ID" | tr -cd 'A-Za-z0-9._-')
           GSEC=$(printf '%s' "$GOOGLE_TV_CLIENT_SECRET" | tr -cd 'A-Za-z0-9._-')
-          printf "window.NOVA_CONFIG = { dbUrl: '%s', apiKey: '%s', gid: '%s', gsec: '%s' };\n" "$DB" "$KEY" "$GID" "$GSEC" > tizen/js/config.js
+          YT=$(printf '%s' "$YOUTUBE_API_KEY" | tr -cd 'A-Za-z0-9_-')
+          printf "window.NOVA_CONFIG = { dbUrl: '%s', apiKey: '%s', gid: '%s', gsec: '%s', yt: '%s' };\n" "$DB" "$KEY" "$GID" "$GSEC" "$YT" > tizen/js/config.js
           cp app/build/outputs/apk/debug/app-debug.apk dist/NOVA-IPTV-debug.apk
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
             cp app/build/outputs/apk/release/app-release.apk dist/NOVA-IPTV.apk

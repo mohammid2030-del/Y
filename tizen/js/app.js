@@ -1977,29 +1977,50 @@
       tizen.application.launchAppControl(ctl, YOUTUBE_APP, function () {}, function () { onFail(); });
     } catch (e) { onFail(); }
   }
-  function showTrailer(key, query) {
-    const k = String(key || '').replace(/[^A-Za-z0-9_-]/g, '');
-    if (k) { launchYouTube('v=' + k, function () { embedTrailer(k); }); return; }
+  // In-app player: YouTube's official embedded player on a small web page (docs/trailer.html on GitHub Pages),
+  // because YouTube refuses embeds from apps without a web address. Falls back to the YouTube app.
+  const PLAYER_PAGE = 'https://mohammid2030-del.github.io/Y/trailer.html';
+  async function showTrailer(key, query) {
+    let k = String(key || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!k && query && YouTube.enabled()) {
+      toast(t('findingTrailer'));
+      k = await YouTube.find(query);
+    }
+    if (k) { embedTrailer(k); return; }
     if (query) { launchYouTube('search_query=' + encodeURIComponent(query), function () { toast(t('noTrailer')); }); return; }
     toast(t('noTrailer'));
   }
-  // fallback when the YouTube app can't be opened: embedded player inside the app
   function embedTrailer(k) {
     const prev = screen;
     const box = document.createElement('div');
     box.className = 'trailer';
-    box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${k}?autoplay=1&rel=0&modestbranding=1&controls=1&playsinline=1"
-      allow="autoplay; encrypted-media; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
-      <div class="trailer-hint">${esc(t('back'))} ↩</div>`;
+    box.innerHTML = `<iframe src="${PLAYER_PAGE}?v=${k}&hl=${I18n.lang}" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+      <div class="trailer-hint">${esc(t('back'))} ↩</div><div class="trailer-wait spinner"></div>`;
     document.body.appendChild(box);
     const prevBack = screen.back;
+    let started = false, closed = false;
+    function close() {
+      if (closed) return; closed = true;
+      window.removeEventListener('blur', refocus); window.removeEventListener('message', onMsg);
+      clearTimeout(guard);
+      if (box.parentNode) box.parentNode.removeChild(box);
+      if (screen === prev) screen.back = prevBack;
+    }
+    function toApp() { close(); launchYouTube('v=' + k, function () { toast(t('noTrailer')); }); }
+    function onMsg(e) {
+      let d = null; try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
+      if (!d || d.nova !== 'trailer') return;
+      if (d.type === 'ready' || d.type === 'playing') { started = true; const w = box.querySelector('.trailer-wait'); if (w) w.remove(); }
+      if (d.type === 'ended') close();
+      if (d.type === 'error') toApp();   // the video doesn't allow embedding (or the page isn't up): YouTube app
+    }
+    window.addEventListener('message', onMsg);
+    // nothing from the player in 12 s: open it in the YouTube app instead
+    const guard = setTimeout(function () { if (!started && !closed) toApp(); }, 12000);
+    // keep the remote's BACK key with the app even if the embedded player grabs focus
     function refocus() { setTimeout(function () { try { window.focus(); } catch (e) { /* */ } }, 50); }
     window.addEventListener('blur', refocus);
-    screen.back = function () {
-      window.removeEventListener('blur', refocus);
-      box.remove();
-      if (screen === prev) screen.back = prevBack;
-    };
+    screen.back = close;
   }
 
   /** Text entry dialog (TV keyboard). */

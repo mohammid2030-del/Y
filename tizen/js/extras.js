@@ -492,4 +492,30 @@
   global.Clean = { full: cleanFull, title: function (s) { return cleanFull(s).title; }, se: seasonEpisode };
   global.Tmdb = Tmdb;
   global.Matches = Matches;
+
+  /**
+   * YouTube Data API: finds a trailer when TMDB has none (Arabic / Turkish titles). 100 searches a day for the
+   * whole project, so every answer is remembered (also "nothing found") and never searched again.
+   */
+  var ytCache = null;
+  global.YouTube = {
+    enabled: function () { return !!(global.NOVA_CONFIG && NOVA_CONFIG.yt); },
+    find: async function (query) {
+      if (!this.enabled() || !query) return '';
+      if (!ytCache) ytCache = (await Store.get('ytTrailers')) || {};
+      var key = query.toLowerCase();
+      if (ytCache[key] !== undefined) return ytCache[key];
+      var url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=6&videoEmbeddable=true&safeSearch=moderate' +
+        '&q=' + encodeURIComponent(query) + '&key=' + encodeURIComponent(NOVA_CONFIG.yt);
+      var r;
+      try { r = await Api.json(url, 12000); } catch (e) { return ''; }   // quota used up / offline: try again another time
+      var items = (r && r.items) || [];
+      var words = /trailer|teaser|official|promo|اعلان|إعلان|برومو|تريلر|fragman|tanıtım/i;
+      var best = items.filter(function (it) { return words.test((it.snippet && it.snippet.title) || ''); })[0] || items[0];
+      var id = best && best.id && best.id.videoId ? best.id.videoId : '';
+      ytCache[key] = id;
+      Store.set('ytTrailers', ytCache);
+      return id;
+    }
+  };
 })(window);

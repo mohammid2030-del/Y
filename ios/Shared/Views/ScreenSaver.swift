@@ -63,24 +63,52 @@ enum TrailerLauncher {
         return "\(name) \(year) \(arabic ? "اعلان" : "trailer")".replacingOccurrences(of: "  ", with: " ")
     }
 
-    /// `fallback` is called when no YouTube app could take it (iPad then plays it inside the app).
-    @MainActor static func open(key: String?, query: String, fallback: @escaping (String?) -> Void) {
-        let k = (key ?? "").filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        var urls: [URL] = []
-        if !k.isEmpty {
-            urls = ["youtube://watch?v=\(k)", "youtube://www.youtube.com/watch?v=\(k)", "https://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
-        } else {
-            urls = ["youtube://results?search_query=\(q)", "youtube://www.youtube.com/results?search_query=\(q)", "https://www.youtube.com/results?search_query=\(q)"].compactMap(URL.init)
+    /// Finds a trailer on YouTube when TMDB has none (YouTube Data API, 100 searches a day for the project:
+    /// every answer is remembered, also "nothing found").
+    static func search(_ query: String) async -> String {
+        let apiKey = CloudConfig.youtubeKey
+        guard !apiKey.isEmpty, !query.isEmpty else { return "" }
+        let cacheKey = "yt|" + query.lowercased()
+        if let hit = UserDefaults.standard.string(forKey: cacheKey) { return hit }
+        var c = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
+        c.queryItems = [.init(name: "part", value: "snippet"), .init(name: "type", value: "video"), .init(name: "maxResults", value: "6"),
+                        .init(name: "videoEmbeddable", value: "true"), .init(name: "safeSearch", value: "moderate"),
+                        .init(name: "q", value: query), .init(name: "key", value: apiKey)]
+        guard let url = c.url, let res = try? await URLSession.shared.data(from: url) else { return "" }
+        let (data, resp) = res
+        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }   // quota / offline: try another time
+        let items = (o["items"] as? [[String: Any]]) ?? []
+        func title(_ i: [String: Any]) -> String { ((i["snippet"] as? [String: Any])?["title"] as? String) ?? "" }
+        let words = try? NSRegularExpression(pattern: "trailer|teaser|official|promo|اعلان|إعلان|برومو|تريلر|fragman|tanıtım", options: .caseInsensitive)
+        let best = items.first { i in let t = title(i); return words?.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil } ?? items.first
+        let id = ((best?["id"] as? [String: Any])?["videoId"] as? String) ?? ""
+        UserDefaults.standard.set(id, forKey: cacheKey)
+        return id
+    }
+
+    /// TMDB trailer, else a YouTube API search. iPad plays it inside the app (`play`); Apple TV has no web view,
+    /// so it opens the video in the YouTube app. Without any video: a YouTube search.
+    @MainActor static func open(key: String?, query: String, play: @escaping (String?) -> Void) {
+        Task { @MainActor in
+            var k = (key ?? "").filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+            if k.isEmpty { k = await search(query) }
+            #if os(iOS)
+            if !k.isEmpty { play(k); return }
+            #endif
+            let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            var urls: [URL] = !k.isEmpty
+                ? ["youtube://watch?v=\(k)", "youtube://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
+                : ["youtube://results?search_query=\(q)", "youtube://www.youtube.com/results?search_query=\(q)", "https://www.youtube.com/results?search_query=\(q)"].compactMap(URL.init)
+            #if os(tvOS)
+            urls.removeAll { $0.scheme == "https" }   // no browser on Apple TV
+            #endif
+            func attempt(_ i: Int) {
+                guard i < urls.count else { play(nil); return }
+                UIApplication.shared.open(urls[i], options: [:]) { ok in if !ok { attempt(i + 1) } }
+            }
+            attempt(0)
         }
-        #if os(tvOS)
-        urls.removeAll { $0.scheme == "https" }   // no browser on Apple TV
-        #endif
-        func attempt(_ i: Int) {
-            guard i < urls.count else { fallback(k.isEmpty ? nil : k); return }
-            UIApplication.shared.open(urls[i], options: [:]) { ok in if !ok { attempt(i + 1) } }
-        }
-        attempt(0)
     }
 }
 
