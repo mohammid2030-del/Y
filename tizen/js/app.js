@@ -49,7 +49,7 @@
     return (h ? h + ':' + pad(m) : m) + ':' + pad(s % 60);
   }
   function img(url, cls) {
-    return url ? `<img class="${cls || ''}" src="${esc(url)}" onerror="this.style.visibility='hidden'" alt="">` : '';
+    return url ? `<img class="${cls || ''}" src="${esc(url)}" decoding="async" onerror="this.style.visibility='hidden'" alt="">` : '';
   }
   function errText(e) {
     const k = e && e.kind;
@@ -847,7 +847,7 @@
           <div class="row" data-group>
             <button data-f data-autofocus data-action="play" class="btn primary">▶ ${esc(t(canResume ? 'resume' : 'play'))}</button>
             ${canResume ? `<button data-f data-action="restart" class="btn">↺ ${esc(t('startOver'))}</button>` : ''}
-            ${tm && tm.trailer ? `<button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>` : ''}
+            <button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>
             <button data-f data-action="fav" class="btn">${isFav('movie', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
             ${versionCount('movie', item) > 1 ? `<button data-f data-action="versions" class="btn vbtn">⧉ ${esc(Library.label('movie', item))}</button>` : ''}
           </div>
@@ -881,7 +881,7 @@
     actions.versions = function () { openTitle('movie', item); };
     actions.play = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: (info && info.image) || item.logo }); };
     actions.restart = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: item.logo, fromStart: true }); };
-    actions.trailer = function () { if (info && info.tm && info.tm.trailer) showTrailer(info.tm.trailer); };
+    actions.trailer = function () { const tmi = info && info.tm; showTrailer(tmi && tmi.trailer, trailerQuery(tmi, item)); };
     actions.fav = function (el) {
       const added = toggleFav('movie', item);
       el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
@@ -922,7 +922,7 @@
               ${tm && tm.genres.length ? `<div class="genres">${tm.genres.slice(0, 4).map(function (g) { return `<span class="chip">${esc(g)}</span>`; }).join('')}</div>` : ''}
               <div class="row" data-group>
                 ${last ? `<button data-f data-autofocus data-action="cont" class="btn primary">▶ ${esc(t('resume'))} ${esc((last.subtitle || '').split(' —')[0])}</button>` : ''}
-                ${tm && tm.trailer ? `<button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>` : ''}
+                <button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>
                 <button data-f data-action="fav" class="btn">${isFav('series', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
                 ${versionCount('series', item) > 1 ? `<button data-f data-action="versions" class="btn vbtn">⧉ ${esc(Library.label('series', item))}</button>` : ''}
               </div>
@@ -961,7 +961,7 @@
           el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
         };
         actions.reload = load;
-        actions.trailer = function () { if (tm && tm.trailer) showTrailer(tm.trailer); };
+        actions.trailer = function () { showTrailer(tm && tm.trailer, trailerQuery(tm, item)); };
         actions.person = function (el) { const c = tm && tm.cast[parseInt(el.getAttribute('data-i'), 10)]; if (c) showPerson(c); };
         actions.versions = function () { openTitle('series', item); };
         // keep the remote where it was when the page refreshes with more data (TMDB, episodes)
@@ -1595,7 +1595,7 @@
     if (!node || !it || !Tmdb.enabled()) return;
     Tmdb.card(type, it.name, it.year).then(function (r) {
       if (!r || !document.body.contains(node)) return;
-      if (r.poster) { const im = node.querySelector('.pimg img'); if (im) im.src = r.poster; else { const b = node.querySelector('.pimg'); if (b) b.insertAdjacentHTML('afterbegin', `<img src="${esc(r.poster)}">`); } }
+      if (r.poster) { const im = node.querySelector('.pimg img'); if (im) { im.decoding = 'async'; im.src = r.poster; } else { const b = node.querySelector('.pimg'); if (b) b.insertAdjacentHTML('afterbegin', `<img decoding="async" src="${esc(r.poster)}">`); } }
       if (r.title) { const tt = node.querySelector('.ptitle'); if (tt) tt.textContent = r.title; }
     });
   }
@@ -1702,6 +1702,8 @@
     heroTimer = setInterval(function () {
       if (screen.name !== 'home' || S.ui.section !== 'home' || !$('#hero')) { clearInterval(heroTimer); return; }
       if (Nav.current && $('#hero').contains(Nav.current)) return; // don't rotate under the user's focus
+      if (Nav.idleFor && Nav.idleFor() < 6000) return;              // nor while the remote is in use (repaint is heavy on TVs)
+      const hb = $('#hero'); if (hb && hb.getBoundingClientRect().bottom < 0) return;   // scrolled away
       renderHero(feat, (idx + 1) % feat.length);
     }, 8000);
   }
@@ -1842,10 +1844,30 @@
     }, { back: function () { matchList = null; showHome(); } });
   }
 
-  // ---- trailer (YouTube embedded player, inside the app)
-  function showTrailer(key) {
-    const k = String(key).replace(/[^A-Za-z0-9_-]/g, '');
-    if (!k) return;
+  // ---- trailer: opens in the TV's YouTube app (TMDB trailer, or a YouTube search for Arabic / Turkish titles TMDB lacks)
+  const YOUTUBE_APP = '111299001912';
+  function trailerQuery(tm, item) {
+    const name = (tm && (tm.original || tm.title)) || Clean.title(item.name);
+    const year = (tm && tm.year) || item.year || '';
+    const arabic = /[\u0600-\u06FF]/.test(name);
+    return (name + ' ' + String(year).slice(0, 4) + ' ' + (arabic ? 'اعلان' : 'trailer')).replace(/\s+/g, ' ').trim();
+  }
+  function launchYouTube(values, onFail) {
+    try {
+      if (!(window.tizen && tizen.application && tizen.ApplicationControl)) throw new Error('no tizen');
+      const data = new tizen.ApplicationControlData('PAYLOAD', [JSON.stringify({ values: values })]);
+      const ctl = new tizen.ApplicationControl('http://tizen.org/appcontrol/operation/view', null, null, null, [data]);
+      tizen.application.launchAppControl(ctl, YOUTUBE_APP, function () {}, function () { onFail(); });
+    } catch (e) { onFail(); }
+  }
+  function showTrailer(key, query) {
+    const k = String(key || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (k) { launchYouTube('v=' + k, function () { embedTrailer(k); }); return; }
+    if (query) { launchYouTube('search_query=' + encodeURIComponent(query), function () { toast(t('noTrailer')); }); return; }
+    toast(t('noTrailer'));
+  }
+  // fallback when the YouTube app can't be opened: embedded player inside the app
+  function embedTrailer(k) {
     const prev = screen;
     const box = document.createElement('div');
     box.className = 'trailer';
@@ -1854,7 +1876,6 @@
       <div class="trailer-hint">${esc(t('back'))} ↩</div>`;
     document.body.appendChild(box);
     const prevBack = screen.back;
-    // Keep the remote's BACK key with the app even if the embedded player grabs focus.
     function refocus() { setTimeout(function () { try { window.focus(); } catch (e) { /* */ } }, 50); }
     window.addEventListener('blur', refocus);
     screen.back = function () {

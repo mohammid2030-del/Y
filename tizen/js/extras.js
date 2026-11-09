@@ -50,7 +50,9 @@
   var TMDB = 'https://api.themoviedb.org/3/';
   var tmdbKey = '';
   var infoCache = {}, posterCache = {}, seasonCache = {};
-  var cleanMemo = {}, idsVer = 0, inflight = {};   // cleaning titles is costly on a TV CPU
+  var cleanMemo = {}, idsVer = 0, inflight = {}, idsLog = [];
+  /** A title TMDB just identified — the library merges its copies incrementally from this log. */
+  function noteId(type, title, y, id) { if (!id) return; idsLog.push([type, title, y, id]); idsVer = idsLog.length; }   // cleaning titles is costly on a TV CPU
   var posterStore = null, posterDirty = false, posterTimer = null;
   var queue = [], active = 0;
 
@@ -76,7 +78,7 @@
   }
 
   // Cards on screen go first (newest request first); background identification only uses spare capacity.
-  var lowQueue = [];
+  var lowQueue = [], lowTimer = null;
   function limited(fn, low) {
     return new Promise(function (resolve) {
       (low ? lowQueue : queue).push(function () {
@@ -88,13 +90,21 @@
   }
   function next() {
     while (active < 5 && queue.length) queue.pop()();
+    if (lowQueue.length && !queue.length && global.Nav && Nav.idleFor && Nav.idleFor() < 1500) {
+      clearTimeout(lowTimer); lowTimer = setTimeout(next, 1600); return;   // viewer is browsing: wait
+    }
     while (active < 2 && !queue.length && lowQueue.length) lowQueue.shift()();
   }
 
   function savePosters() {
     posterDirty = true;
     clearTimeout(posterTimer);
-    posterTimer = setTimeout(function () { if (posterDirty) { posterDirty = false; Store.set('tmdbPosters2', posterCache); } }, 4000);
+    // saving the whole cache is heavy on a TV: do it rarely, and only while the remote is idle
+    posterTimer = setTimeout(function save() {
+      if (!posterDirty) return;
+      if (global.Nav && Nav.idleFor && Nav.idleFor() < 4000) { posterTimer = setTimeout(save, 4000); return; }
+      posterDirty = false; Store.set('tmdbPosters2', posterCache);
+    }, 20000);
   }
 
   var Tmdb = {
@@ -146,11 +156,11 @@
           if (f && foreignScript(v.title)) {
             // no Arabic title on TMDB → show the English one instead of Cyrillic / CJK
             return tmdbGet((isTv ? 'tv/' : 'movie/') + f.id, { language: 'en-US' }).then(function (en) {
-              v.title = (en && (en.name || en.title)) || v.title; posterCache[key] = v; savePosters(); idsVer++; return v;
+              v.title = (en && (en.name || en.title)) || v.title; posterCache[key] = v; savePosters(); noteId(type, c.title, y, v.id); return v;
             }, function () { posterCache[key] = v; savePosters(); return v; });
           }
           posterCache[key] = v; savePosters();
-          if (v.id) idsVer++;
+          if (v.id) noteId(type, c.title, y, v.id);
           return v;
         });
       }, low);
@@ -160,6 +170,13 @@
 
     /** Bumps whenever TMDB identifies another title (so the library can merge copies again). */
     idsVersion: function () { return idsVer; },
+    idsSince: function (n) { return idsLog.slice(n || 0); },
+
+    /** Same as idFor, for a title that's already cleaned (no regex work). */
+    idForClean: function (type, title, y) {
+      var a = posterCache[type + '|ar|' + title + '|' + y], b = posterCache[type + '|en|' + title + '|' + y];
+      return (a && a.id) || (b && b.id) || 0;
+    },
 
     /** TMDB id already known for a title (no network). */
     idFor: function (type, name, year) {
@@ -201,7 +218,7 @@
         var t = isTv ? 'tv' : 'movie';
         return tmdbGet(t + '/' + id, {
           language: l, append_to_response: 'credits,images,videos,' + (isTv ? 'content_ratings' : 'release_dates'),
-          include_image_language: l + ',en,null'
+          include_image_language: l + ',en,null', include_video_language: l + ',ar,en,tr,null'
         }).then(function (o) {
           var needEn = l !== 'en' && (!o.overview || !(o.title || o.name) || foreignScript(o.title || o.name));
           return (needEn ? tmdbGet(t + '/' + id, { language: 'en-US' }).catch(function () { return null; }) : Promise.resolve(null)).then(function (en) {
@@ -214,8 +231,12 @@
               }
               return '';
             }
-            var vids = ((o.videos && o.videos.results) || []).filter(function (v) { return v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'); });
-            var trailer = (vids.filter(function (v) { return v.type === 'Trailer'; })[0] || vids[0] || {}).key || '';
+            // trailer in the viewer's language first, then English / any; trailer > teaser > clip
+            var vids = ((o.videos && o.videos.results) || []).filter(function (v) { return v.site === 'YouTube'; });
+            var TYPES = { Trailer: 0, Teaser: 1, Clip: 2, Featurette: 3 };
+            var rank = function (v) { return (v.type in TYPES ? TYPES[v.type] : 9) * 10 + (v.iso_639_1 === l ? 0 : v.iso_639_1 === 'en' ? 1 : 2) - (v.official ? 0.5 : 0); };
+            vids.sort(function (a, b) { return rank(a) - rank(b); });
+            var trailer = vids.length && rank(vids[0]) < 40 ? vids[0].key : '';
             var crew = (o.credits && o.credits.crew) || [];
             var info = {
               id: id,

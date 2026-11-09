@@ -10,7 +10,7 @@
 
   var current = null;
   var lastRect = null;        // where focus was, to recover when the focused element is re-rendered
-  var lastKeyAt = 0;
+  var lastKeyAt = 0, lastAnyKey = 0;
   var lastContent = null;     // last focused element outside the top navigation
   var keyHandler = null;   // screen-level handler, return true to consume
   var backHandler = null;
@@ -39,9 +39,16 @@
     return r.width > 0 && r.height > 0;
   }
 
+  var rectCache = null;   // rects measured once per key press (TVs are slow at layout reads)
+  function rectOf(el) {
+    if (rectCache) { var r = rectCache.get(el); if (r) return r; r = el.getBoundingClientRect(); rectCache.set(el, r); return r; }
+    return el.getBoundingClientRect();
+  }
   function focusables() {
     return Array.prototype.filter.call(layer().querySelectorAll('[data-f]'), function (el) {
-      return !el.disabled && visible(el);
+      if (el.disabled || el.offsetParent === null) return false;
+      var r = rectOf(el);
+      return r.width > 0 && r.height > 0;
     });
   }
 
@@ -58,11 +65,12 @@
 
   /** True when nothing focusable sits above the element in this scroller (it's the first row). */
   function firstIn(p, el, r) {
+    // only the first few focusables in page order can sit above the first row
     var list = p.querySelectorAll('[data-f]');
-    for (var i = 0; i < list.length; i++) {
+    for (var i = 0; i < list.length && i < 40; i++) {
       var o = list[i];
       if (o === el || o.disabled || o.offsetParent === null) continue;
-      if (o.getBoundingClientRect().bottom <= r.top + 1) return false;
+      if (rectOf(o).bottom <= r.top + 1) return false;
     }
     return true;
   }
@@ -153,7 +161,7 @@
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (el === current) continue;
-      var r = el.getBoundingClientRect(), p = center(r);
+      var r = rectOf(el), p = center(r);
       var ok = dir === 'left' ? p.x < c.x - 2 && r.left < from.left - 1
         : dir === 'right' ? p.x > c.x + 2 && r.right > from.right + 1
         : dir === 'up' ? p.y < c.y - 2 && r.top < from.top - 1
@@ -196,6 +204,11 @@
   }
 
   function move(dir) {
+    rectCache = typeof Map === 'function' ? new Map() : null;
+    try { return moveInner(dir); } finally { rectCache = null; }
+  }
+
+  function moveInner(dir) {
     var els = focusables();
     if (!current || els.indexOf(current) < 0) {
       // the focused element was re-rendered: continue from where it was instead of jumping to the top
@@ -262,6 +275,7 @@
   function onKey(e) {
     var code = e.keyCode;
     var inInput = document.activeElement && document.activeElement.tagName === 'INPUT';
+    lastAnyKey = Date.now();
     if (keyHandler && keyHandler(code, e)) { e.preventDefault(); return; }
 
     if (code === KEY.BACK || code === KEY.ESC || (code === KEY.BACKSPACE && !inInput)) {
@@ -297,6 +311,8 @@
   global.Nav = {
     KEY: KEY, registerKeys: registerKeys, focus: focus, focusFirst: focusFirst, move: move,
     get current() { return current; },
+    /** ms since the last remote key — background work waits until the viewer pauses. */
+    idleFor: function () { return Date.now() - lastAnyKey; },
     reveal: reveal,
     setKeyHandler: function (fn) { keyHandler = fn; },
     setBackHandler: function (fn) { backHandler = fn; },

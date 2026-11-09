@@ -90,7 +90,7 @@
 
   /** Built in slices so the TV stays responsive. */
   async function build(data) {
-    var out = { shelves: {}, shelfOf: {}, key: {}, q: {}, titleTmdb: {}, variants: {}, catName: {}, byNorm: {}, clean: {}, gk: {}, groups: {}, gver: {} };
+    var out = { shelves: {}, shelfOf: {}, key: {}, q: {}, titleTmdb: {}, variants: {}, catName: {}, byNorm: {}, clean: {}, ct: {}, byCT: {}, gk: {}, groups: {}, gver: {}, gat: {}, bcache: {}, scache: {} };
     var types = ['movie', 'series'];
     for (var ti = 0; ti < types.length; ti++) {
       var type = types[ti];
@@ -119,6 +119,8 @@
         (byTitle[nt] = byTitle[nt] || []).push([m, y]);
         (out.byNorm[type + '|' + nt] = out.byNorm[type + '|' + nt] || []).push(m);
         out.clean[type + '|' + m.id] = y;
+        out.ct[type + '|' + m.id] = c.title;   // cleaned once here, reused for TMDB lookups
+        (out.byCT[type + '|' + c.title + '|' + y] = out.byCT[type + '|' + c.title + '|' + y] || []).push(m);
         out.q[type + '|' + m.id] = quality(m.name);
         if (i % 1500 === 1499) await wait();
       }
@@ -149,6 +151,24 @@
   function ensureGroups(type, all) {
     var v = global.Tmdb && Tmdb.idsVersion ? Tmdb.idsVersion() : 0;
     if (idx.gver[type] === v && idx.gk[type]) return;
+    if (idx.gk[type] && Tmdb.idsSince) {
+      // only the titles TMDB identified since last time move to their TMDB group (no full scan)
+      var gk0 = idx.gk[type], groups0 = idx.groups[type];
+      Tmdb.idsSince(idx.gver[type]).forEach(function (e) {
+        if (e[0] !== type) return;
+        var nk = 'tmdb:' + e[3];
+        (idx.byCT[type + '|' + e[1] + '|' + e[2]] || []).forEach(function (m) {
+          if (m.tmdb || idx.titleTmdb[type + '|' + (idx.key[type + '|' + m.id] || m.id)]) return;
+          var old = gk0[m.id];
+          if (old === nk) return;
+          if (old && old.indexOf('tmdb:') === 0 && groups0[old]) groups0[old] = groups0[old].filter(function (x) { return x !== m; });
+          gk0[m.id] = nk;
+          (groups0[nk] = groups0[nk] || []).push(m);
+        });
+      });
+      idx.gver[type] = v;
+      return;
+    }
     var gk = {}, groups = {};
     idx.gk[type] = null;
     for (var i = 0; i < all.length; i++) {
@@ -162,7 +182,7 @@
   function groupKey(type, m) {
     if (!idx) return m.id;
     var v = global.Tmdb && Tmdb.idsVersion ? Tmdb.idsVersion() : 0;
-    if (idx.gk[type] && idx.gver[type] === v && idx.gk[type][m.id]) return idx.gk[type][m.id];
+    if (idx.gk[type] && idx.gk[type][m.id]) return idx.gk[type][m.id];   // may be up to 20 s old: fine
     return rawGroupKey(type, m);
   }
 
@@ -171,7 +191,9 @@
     if (m.tmdb) return 'tmdb:' + m.tmdb;
     var t = idx.titleTmdb[type + '|' + tk];
     if (t) return 'tmdb:' + t;
-    var id = global.Tmdb && Tmdb.enabled() ? Tmdb.idFor(type, m.name, m.year) : 0;
+    var ct = idx.ct[type + '|' + m.id];
+    var id = !(global.Tmdb && Tmdb.enabled()) ? 0
+      : ct !== undefined && Tmdb.idForClean ? Tmdb.idForClean(type, ct, idx.clean[type + '|' + m.id] || '') : Tmdb.idFor(type, m.name, m.year);
     if (id) return 'tmdb:' + id;
     return tk;
   }
@@ -198,15 +220,35 @@
     ensure: function (data) {
       if (owner === data && (idx || building)) return building || Promise.resolve(idx);
       owner = data; idx = null;
-      building = build(data).then(function (r) { if (owner === data) { idx = r; building = null; } return r; });
+      building = build(data).then(function (r) {
+        if (owner === data) {
+          idx = r; building = null;
+          // group the titles ahead of time (when the remote is idle) so the first shelf opens at once
+          var warm = function (type) {
+            if (idx !== r) return;
+            if (global.Nav && Nav.idleFor && Nav.idleFor() < 2000) { setTimeout(function () { warm(type); }, 2000); return; }
+            ensureGroups(type, (data && data[type]) || []);
+          };
+          setTimeout(function () { warm('movie'); setTimeout(function () { warm('series'); }, 500); }, 1500);
+        }
+        return r;
+      });
       return building;
     },
     shelves: function (type) { return (idx && idx.shelves[type]) || []; },
     browse: function (type, all, shelf, cat) {
       if (!idx) return [];
       ensureGroups(type, all);
-      var src = cat ? all.filter(function (m) { return m.cat === cat; }) : all.filter(function (m) { return idx.shelfOf[type + '|' + m.cat] === shelf; });
-      return collapse(type, src);
+      // same shelf again (back from a title, switching tabs): reuse the list instead of re-scanning the library
+      var ck = type + '|' + shelf + '|' + (cat || '') + '|' + all.length + '|' + idx.gver[type];
+      if (idx.bcache[ck]) return idx.bcache[ck];
+      var sk = type + '|' + shelf + '|' + (cat || '') + '|' + all.length;
+      var src = idx.scache[sk] || (idx.scache[sk] = cat ? all.filter(function (m) { return m.cat === cat; })
+        : all.filter(function (m) { return idx.shelfOf[type + '|' + m.cat] === shelf; }));
+      var out = collapse(type, src);
+      if (Object.keys(idx.bcache).length > 60) idx.bcache = {};
+      idx.bcache[ck] = out;
+      return out;
     },
     collapse: collapse,
     groupKey: function (type, m) { return idx ? groupKey(type, m) : String(m.id); },
