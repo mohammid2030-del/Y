@@ -106,7 +106,7 @@
     } else if (document.activeElement && document.activeElement.tagName === 'INPUT') {
       document.activeElement.blur();
     }
-    if (!(opts && opts.noScroll)) reveal(el, !(opts && opts.instant) && Date.now() - lastKeyAt > 160);
+    if (!(opts && opts.noScroll)) reveal(el, false);
     lastRect = el.getBoundingClientRect();
     var group = el.closest('[data-group]');
     if (group) group.setAttribute('data-last', indexInGroup(el, group));
@@ -141,21 +141,56 @@
     return best;
   }
 
-  /** Best element in a direction (same scoring as move). */
+  /**
+   * Best element in a direction.
+   * Direction is decided by centres (a focused item is scaled up and can overlap its neighbour — with edges
+   * that neighbour was skipped: Live TV → Series, Today → nothing).
+   * Up/down: stay in the same list/grid when it continues that way; otherwise go to the nearest row and pick
+   * the closest item in it, even if it sits far to the side (Today / Tomorrow chips).
+   */
   function pick(els, dir, from, c) {
-    var best = null, bestScore = Infinity;
+    var cands = [];
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (el === current) continue;
-      var r = el.getBoundingClientRect(), p = center(r), primary, secondary;
-      var gapX = Math.max(0, Math.max(r.left, from.left) - Math.min(r.right, from.right));
-      var gapY = Math.max(0, Math.max(r.top, from.top) - Math.min(r.bottom, from.bottom));
-      if (dir === 'left') { if (r.right > from.left + 1) continue; primary = from.left - r.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
-      else if (dir === 'right') { if (r.left < from.right - 1) continue; primary = r.left - from.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
-      else if (dir === 'up') { if (r.bottom > from.top + 1) continue; primary = from.top - r.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
-      else { if (r.top < from.bottom - 1) continue; primary = r.top - from.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
-      var score = Math.max(primary, 0) + secondary;
-      if (score < bestScore) { bestScore = score; best = el; }
+      var r = el.getBoundingClientRect(), p = center(r);
+      var ok = dir === 'left' ? p.x < c.x - 2 && r.left < from.left - 1
+        : dir === 'right' ? p.x > c.x + 2 && r.right > from.right + 1
+        : dir === 'up' ? p.y < c.y - 2 && r.top < from.top - 1
+        : p.y > c.y + 2 && r.bottom > from.bottom + 1;
+      if (ok) cands.push({ el: el, r: r, p: p });
+    }
+    if (!cands.length) return null;
+    function gapX(r) { return Math.max(0, Math.max(r.left, from.left) - Math.min(r.right, from.right)); }
+    function gapY(r) { return Math.max(0, Math.max(r.top, from.top) - Math.min(r.bottom, from.bottom)); }
+    var best = null, bestScore = Infinity, k, o, score;
+    if (dir === 'left' || dir === 'right') {
+      for (k = 0; k < cands.length; k++) {
+        o = cands[k];
+        var prim = dir === 'left' ? from.left - o.r.right : o.r.left - from.right;
+        score = Math.max(prim, 0) + gapY(o.r) * 3 + Math.abs(o.p.y - c.y) * 0.1;
+        if (score < bestScore) { bestScore = score; best = o.el; }
+      }
+      return best;
+    }
+    // up / down
+    var group = current && current.closest('[data-group]');
+    if (group) {
+      for (k = 0; k < cands.length; k++) {
+        o = cands[k];
+        if (!group.contains(o.el) || gapX(o.r) > 0) continue;
+        score = gapY(o.r) + Math.abs(o.p.x - c.x) * 0.1;
+        if (score < bestScore) { bestScore = score; best = o.el; }
+      }
+      if (best) return best;
+    }
+    var nearest = Infinity;
+    for (k = 0; k < cands.length; k++) nearest = Math.min(nearest, gapY(cands[k].r));
+    for (k = 0; k < cands.length; k++) {
+      o = cands[k];
+      if (gapY(o.r) > nearest + 40) continue;   // only the nearest row
+      score = gapX(o.r) * 2 + Math.abs(o.p.x - c.x) * 0.1 + gapY(o.r);
+      if (score < bestScore) { bestScore = score; best = o.el; }
     }
     return best;
   }
@@ -203,21 +238,7 @@
       }
       els = [best];
     }
-    for (var i = 0; i < els.length; i++) {
-      var el = els[i];
-      if (el === current) continue;
-      var r = el.getBoundingClientRect(), p = center(r), primary, secondary;
-      // secondary = gap between the rectangles on the other axis (0 when they overlap), so a wide field
-      // directly above/below always beats a smaller element further away.
-      var gapX = Math.max(0, Math.max(r.left, from.left) - Math.min(r.right, from.right));
-      var gapY = Math.max(0, Math.max(r.top, from.top) - Math.min(r.bottom, from.bottom));
-      if (dir === 'left') { if (r.right > from.left + 1) continue; primary = from.left - r.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
-      else if (dir === 'right') { if (r.left < from.right - 1) continue; primary = r.left - from.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
-      else if (dir === 'up') { if (r.bottom > from.top + 1) continue; primary = from.top - r.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
-      else { if (r.top < from.bottom - 1) continue; primary = r.top - from.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
-      var score = Math.max(primary, 0) + secondary;
-      if (score < bestScore) { bestScore = score; best = el; }
-    }
+    if (!best) best = pick(els, dir, from, c);
     if (best && !inNav && best.closest('.topnav')) {
       // Entering the top bar always lands on the current section.
       var act = document.querySelector('.topnav .side-item.active');

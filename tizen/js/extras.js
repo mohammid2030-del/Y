@@ -50,7 +50,7 @@
   var TMDB = 'https://api.themoviedb.org/3/';
   var tmdbKey = '';
   var infoCache = {}, posterCache = {}, seasonCache = {};
-  var cleanMemo = {}, idsVer = 0;   // cleaning titles is costly on a TV CPU
+  var cleanMemo = {}, idsVer = 0, inflight = {};   // cleaning titles is costly on a TV CPU
   var posterStore = null, posterDirty = false, posterTimer = null;
   var queue = [], active = 0;
 
@@ -75,16 +75,21 @@
     return Api.json(TMDB + path + (q.length ? '?' + q.join('&') : ''), 15000, bearer ? { Authorization: 'Bearer ' + k } : null);
   }
 
-  function limited(fn) {
+  // Cards on screen go first (newest request first); background identification only uses spare capacity.
+  var lowQueue = [];
+  function limited(fn, low) {
     return new Promise(function (resolve) {
-      queue.push(function () {
+      (low ? lowQueue : queue).push(function () {
         active++;
         fn().then(resolve, function () { resolve(null); }).then(function () { active--; next(); });
       });
       next();
     });
   }
-  function next() { while (active < 4 && queue.length) queue.shift()(); }
+  function next() {
+    while (active < 5 && queue.length) queue.pop()();
+    while (active < 2 && !queue.length && lowQueue.length) lowQueue.shift()();
+  }
 
   function savePosters() {
     posterDirty = true;
@@ -116,13 +121,14 @@
     },
 
     /** Localised poster + title for list cards. Resolves {poster, title} or null. */
-    card: function (type, name, year) {
+    card: function (type, name, year, low) {
       if (!tmdbKey || (type !== 'movie' && type !== 'series')) return Promise.resolve(null);
       var c = cleanFull(name);
       var y = /^\d{4}/.test(year || '') ? String(year).slice(0, 4) : c.year;
       var key = type + '|' + lang() + '|' + c.title + '|' + y;
       if (posterCache[key] !== undefined) return Promise.resolve(posterCache[key]);
-      return limited(function () {
+      if (inflight[key]) return inflight[key];
+      var job = inflight[key] = limited(function () {
         var isTv = type === 'series';
         var params = { query: c.title, language: lang(), include_adult: 'false' };
         if (y) params[isTv ? 'first_air_date_year' : 'year'] = y;
@@ -147,7 +153,9 @@
           if (v.id) idsVer++;
           return v;
         });
-      });
+      }, low);
+      job.then(function () { delete inflight[key]; });
+      return job;
     },
 
     /** Bumps whenever TMDB identifies another title (so the library can merge copies again). */

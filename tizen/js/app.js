@@ -700,7 +700,7 @@
     if (!st.genre) {
       draw(list);
       // let TMDB identify titles in the background so copies with different names merge next time
-      if (Tmdb.enabled() && st.sel.indexOf('__') !== 0) list.slice(0, 400).forEach(function (m) { Tmdb.card(type, m.name, m.year); });
+      if (Tmdb.enabled() && st.sel.indexOf('__') !== 0) list.slice(0, 400).forEach(function (m) { Tmdb.card(type, m.name, m.year, true); });
       return;
     }
     // genre: categories named after the genre count at once; the rest are checked with TMDB (cached afterwards)
@@ -1645,6 +1645,18 @@
       const row = n.parentNode.getAttribute('data-type');
       const it = row === 'fav' ? favs[parseInt(n.getAttribute('data-i'), 10)].item : lists[type][parseInt(n.getAttribute('data-i'), 10)];
       localize(n, type, it);
+    });
+    // continue watching: TMDB title and wide artwork, like the posters
+    if (Tmdb.enabled()) c.querySelectorAll('.wcard').forEach(function (n) {
+      const h = S.history[n.getAttribute('data-h')];
+      if (!h || h.type === 'live') return;
+      const name = (h.item && h.item.name) || h.title;
+      Tmdb.card(h.type, name, h.item && h.item.year).then(function (r) {
+        if (!r || !document.body.contains(n)) return;
+        const art = r.bd || r.poster;
+        if (art) { const b = n.querySelector('.wbg'); if (b) b.innerHTML = `<img src="${esc(art)}">`; }
+        if (r.title) { const tt = n.querySelector('.wtxt b'); if (tt) tt.textContent = r.title; }
+      });
     });
     if (feat.length) renderHero(feat, 0);
     if (Matches.prefs().show) loadMatches(false);
