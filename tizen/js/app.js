@@ -1998,7 +1998,7 @@
       <div class="trailer-hint">${esc(t('back'))} ↩</div><div class="trailer-wait spinner"></div>`;
     document.body.appendChild(box);
     const prevBack = screen.back;
-    let started = false, closed = false;
+    let started = false, closed = false, playing = false, readyAt = 0;   // ready but never playing in 9 s → YouTube app
     function close() {
       if (closed) return; closed = true;
       window.removeEventListener('blur', refocus); window.removeEventListener('message', onMsg);
@@ -2010,7 +2010,9 @@
     function onMsg(e) {
       let d = null; try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
       if (!d || d.nova !== 'trailer') return;
+      if (d.type === 'ready' && !readyAt) { readyAt = Date.now(); setTimeout(function () { if (!playing && !closed) toApp(); }, 9000); }
       if (d.type === 'ready' || d.type === 'playing') { started = true; const w = box.querySelector('.trailer-wait'); if (w) w.remove(); }
+      if (d.type === 'playing') playing = true;
       if (d.type === 'ended') close();
       if (d.type === 'error') toApp();   // the video doesn't allow embedding (or the page isn't up): YouTube app
     }

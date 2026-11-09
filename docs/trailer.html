@@ -16,8 +16,17 @@
       videoId: id, width: '100%', height: '100%',
       playerVars: { autoplay: 1, controls: 1, rel: 0, modestbranding: 1, playsinline: 1, hl: q.hl || 'ar', cc_lang_pref: q.hl || 'ar', origin: location.origin },
       events: {
-        onReady: function (e) { tell('ready'); try { e.target.playVideo(); } catch (x) {} },
-        onStateChange: function (e) { if (e.data === 1) tell('playing'); if (e.data === 0) tell('ended'); },
+        onReady: function (e) {
+          tell('ready');
+          var p = e.target;
+          try { p.playVideo(); } catch (x) {}
+          // autoplay with sound blocked? start muted, then turn the sound back on
+          setTimeout(function () { try { if (p.getPlayerState() !== 1) { p.mute(); p.playVideo(); } } catch (x) {} }, 1500);
+        },
+        onStateChange: function (e) {
+          if (e.data === 1) { tell('playing'); try { if (e.target.isMuted()) e.target.unMute(); } catch (x) {} }
+          if (e.data === 0) tell('ended');
+        },
         onError: function (e) { tell('error', e.data); }
       }
     });
