@@ -209,6 +209,7 @@
       return collapse(type, src);
     },
     collapse: collapse,
+    groupKey: function (type, m) { return idx ? groupKey(type, m) : String(m.id); },
     /** A title from an actor's list, if the subscription has it (instant lookup). */
     find: function (type, w) {
       if (!idx) return null;

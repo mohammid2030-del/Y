@@ -671,7 +671,7 @@
       const keep = Nav.current && grid.contains(Nav.current) ? Nav.current.getAttribute('data-key') : null;
       grid.innerHTML = '';
       if (!list.length) { grid.innerHTML = `<div class="empty">${esc(t(st.sel === '__fav' ? 'emptyFavorites' : 'emptyContent'))}</div>`; return; }
-      windowed(grid, list, function (it, i) {
+      const w = windowed(grid, list, function (it, i) {
         return `<button data-f data-i="${i}" data-key="${type}:${esc(it.id)}" data-action="open" class="poster">
           <span class="pimg">${img(it.logo)}${isFav(type, it.id) ? '<span class="star">★</span>' : ''}</span>
           <span class="ptitle">${esc(Clean.title(it.name))}</span>
@@ -681,6 +681,19 @@
         nodes.forEach(function (n) { localize(n, type, list[parseInt(n.getAttribute('data-i'), 10)]); });
       });
       if (keep) { const again = grid.querySelector('[data-key="' + cssEsc(keep) + '"]'); if (again) Nav.focus(again, { noScroll: true }); }
+      else if (S.ui.focusKey && S.ui.focusKey.indexOf(type + ':') === 0) {
+        // coming back from a title: make sure its card exists so the remote lands on it again
+        const want = S.ui.focusKey.slice(type.length + 1);
+        let at = list.findIndex(function (m) { return String(m.id) === want; });
+        if (at < 0) {
+          // the card may now show another copy of the same title (copies merged after TMDB matched them)
+          const orig = all.filter(function (m) { return String(m.id) === want; })[0];
+          const g = orig && Library.groupKey(type, orig);
+          if (g) at = list.findIndex(function (m) { return Library.groupKey(type, m) === g; });
+          if (at >= 0) S.ui.focusKey = type + ':' + list[at].id;
+        }
+        while (at >= 0 && w.rendered <= at && w.rendered < list.length) w.more();
+      }
     }
     const list = base();
     const job = ++genreJob;
@@ -716,8 +729,33 @@
     })();
   }
 
+  // ---- detail history: a title opened from an actor's page goes back to the title you came from
+  let detailStack = [], curDetail = null;
+  function detailBack() {
+    const prev = detailStack.pop();
+    if (prev) { if (prev.type === 'movie') showMovie(prev.item, true); else showSeries(prev.item, null, true); }
+    else showHome();
+  }
+  /** Identity of the focused control, so a re-render can put focus back on the same thing. */
+  function focusId(el) {
+    if (!el) return null;
+    const a = el.getAttribute('data-action'); if (!a) return null;
+    return a + '|' + (el.getAttribute('data-i') || el.getAttribute('data-s') || el.getAttribute('data-key') || '');
+  }
+  function refocusId(id) {
+    if (!id) return false;
+    const parts = id.split('|'), a = parts[0], v = parts.slice(1).join('|');
+    const els = document.querySelectorAll('[data-action="' + cssEsc(a) + '"]');
+    for (let i = 0; i < els.length; i++) {
+      const e = els[i];
+      if ((e.getAttribute('data-i') || e.getAttribute('data-s') || e.getAttribute('data-key') || '') === v) { Nav.focus(e); return true; }
+    }
+    if (els[0]) { Nav.focus(els[0]); return true; }
+    return false;
+  }
+
   /** Opens a title; when the library has several copies, asks which one every time (Arabic copies first, preselected). */
-  async function openTitle(type, item) {
+  async function openTitle(type, item, beforeShow) {
     const all = (S.data && S.data[type]) || [];
     const copies = Library.ordered(type, Library.variants(type, all, item));
     let pick = item;
@@ -726,7 +764,9 @@
       if (v === undefined) return;
       pick = copies[v];
     }
-    if (type === 'movie') showMovie(pick); else showSeries(pick);
+    if (beforeShow) beforeShow();
+    else if (!(Nav.current && Nav.current.closest('.detail'))) detailStack = [];   // opened from a list: fresh history
+    if (type === 'movie') showMovie(pick, true); else showSeries(pick, null, true);
   }
 
   /** Cast member: photo, role, biography and best-known titles (those in the subscription open directly). */
@@ -756,7 +796,8 @@
       const i = parseInt(m.slice(1), 10), f = found[i];
       if (!f) { toast(t('notInSub', works[i].title)); return; }
       md.close();
-      if (f.type === 'movie') showMovie(f.item); else showSeries(f.item);
+      const from = curDetail;
+      openTitle(f.type, f.item, function () { if (from) detailStack.push(from); });
     });
     Nav.focusFirst(md.el);
   }
@@ -766,19 +807,21 @@
     else playVod({ kind: 'series', item: h.item, title: h.title, logo: h.logo, episode: { id: h.ep, ext: h.ext }, subtitle: h.subtitle });
   }
 
-  async function showMovie(item) {
+  async function showMovie(item, fromStack) {
+    if (!fromStack) detailStack = [];
+    curDetail = { type: 'movie', item: item };
     setScreen('detail', function () {
       app.innerHTML = detailHtml(item, null);
       bindMovie(item, null);
-    }, { back: function () { showHome(); } });
+    }, { back: detailBack });
     let info = await Api.vodInfo(S.sub, item.id);
     function redraw() {
       if (screen.name !== 'detail') return;
-      const focusAction = Nav.current && Nav.current.getAttribute('data-action');
+      const fid = focusId(Nav.current), scroller = $('.detail'), top = scroller ? scroller.scrollTop : 0;
       app.innerHTML = detailHtml(item, info);
       bindMovie(item, info);
-      const again = focusAction && $('[data-action="' + focusAction + '"]');
-      if (again) Nav.focus(again);
+      const sc = $('.detail'); if (sc) sc.scrollTop = top;
+      if (!refocusId(fid)) Nav.focusFirst();
     }
     if (info) redraw();
     const tm = await Tmdb.details('movie', info && info.tmdb, item.name, item.year);
@@ -846,9 +889,15 @@
     Nav.focusFirst();
   }
 
-  async function showSeries(item, keepSeason) {
+  async function showSeries(item, keepSeason, fromStack) {
+    if (!fromStack) detailStack = [];
+    curDetail = { type: 'series', item: item };
+    let firstRender = true, autoFid = null;
     let info = null, season = keepSeason || null, error = null, tm = null, tmEps = {}, tmSeason = null;
     function render() {
+      // until the viewer moves, keep landing on the main action (Play / Continue / first episode) as data arrives
+      const fid = firstRender || focusId(Nav.current) === autoFid ? null : focusId(Nav.current);
+      const oldScroll = !firstRender && $('.detail') ? $('.detail').scrollTop : 0;
       setScreen('detail', function () {
         const seasons = info ? Object.keys(info.seasons).map(Number).sort(function (a, b) { return a - b; }) : [];
         if (info && (season == null || seasons.indexOf(season) < 0)) season = seasons[0];
@@ -915,8 +964,11 @@
         actions.trailer = function () { if (tm && tm.trailer) showTrailer(tm.trailer); };
         actions.person = function (el) { const c = tm && tm.cast[parseInt(el.getAttribute('data-i'), 10)]; if (c) showPerson(c); };
         actions.versions = function () { openTitle('series', item); };
-        Nav.focusFirst();
-      }, { back: function () { showHome(); } });
+        // keep the remote where it was when the page refreshes with more data (TMDB, episodes)
+        const sc = $('.detail'); if (sc && oldScroll) sc.scrollTop = oldScroll;
+        if (!refocusId(fid)) { Nav.focusFirst(); autoFid = focusId(Nav.current); }
+        firstRender = false;
+      }, { back: detailBack });
     }
     function load() {
       error = null; info = null; render();

@@ -56,6 +56,17 @@
     return out;
   }
 
+  /** True when nothing focusable sits above the element in this scroller (it's the first row). */
+  function firstIn(p, el, r) {
+    var list = p.querySelectorAll('[data-f]');
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o === el || o.disabled || o.offsetParent === null) continue;
+      if (o.getBoundingClientRect().bottom <= r.top + 1) return false;
+    }
+    return true;
+  }
+
   /** Scrolls every scrollable ancestor so the element is fully visible and never hidden under the floating top bar. */
   function reveal(el, smooth) {
     var nav = document.querySelector('.topnav');
@@ -68,7 +79,7 @@
       var dy = 0, dx = 0;
       if (p.scrollHeight > p.clientHeight + 1) {
         var offTop = r.top - pr.top + p.scrollTop;         // position inside the scrolled content
-        if (offTop + r.height < pr.height * 0.55) dy = -p.scrollTop;   // near the start: show the whole top (hero) again
+        if (offTop + r.height < pr.height * 0.55 || firstIn(p, el, r)) dy = -p.scrollTop;   // near the start / first row: show the whole top (hero) again
         else if (el.closest('.hrow') && p.contains(el.closest('.hrow'))) dy = r.top - topLimit;   // rows: snap the row under the bar, like a TV shelf
         else if (r.top < topLimit) dy = r.top - topLimit;
         else if (r.bottom > bottomLimit) dy = Math.min(r.bottom - bottomLimit, r.top - topLimit);
@@ -130,6 +141,25 @@
     return best;
   }
 
+  /** Best element in a direction (same scoring as move). */
+  function pick(els, dir, from, c) {
+    var best = null, bestScore = Infinity;
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (el === current) continue;
+      var r = el.getBoundingClientRect(), p = center(r), primary, secondary;
+      var gapX = Math.max(0, Math.max(r.left, from.left) - Math.min(r.right, from.right));
+      var gapY = Math.max(0, Math.max(r.top, from.top) - Math.min(r.bottom, from.bottom));
+      if (dir === 'left') { if (r.right > from.left + 1) continue; primary = from.left - r.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
+      else if (dir === 'right') { if (r.left < from.right - 1) continue; primary = r.left - from.right; secondary = gapY * 3 + Math.abs(p.y - c.y) * 0.1; }
+      else if (dir === 'up') { if (r.bottom > from.top + 1) continue; primary = from.top - r.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
+      else { if (r.top < from.bottom - 1) continue; primary = r.top - from.bottom; secondary = gapX * 3 + Math.abs(p.x - c.x) * 0.1; }
+      var score = Math.max(primary, 0) + secondary;
+      if (score < bestScore) { bestScore = score; best = el; }
+    }
+    return best;
+  }
+
   function move(dir) {
     var els = focusables();
     if (!current || els.indexOf(current) < 0) {
@@ -144,8 +174,35 @@
       focus(lastContent);
       return true;
     }
+    // The top bar floats over the content, so it is never "between" rows:
+    //  - inside the bar, left/right stay in the bar and up does nothing;
+    //  - from the content, up goes through every row (even ones scrolled out of view) and only
+    //    reaches the bar from the top-most row.
+    var navEls = [], contentEls = [];
+    for (var n = 0; n < els.length; n++) (els[n].closest('.topnav') ? navEls : contentEls).push(els[n]);
+    if (inNav) {
+      if (dir === 'up') return true;
+      if (dir === 'left' || dir === 'right') els = navEls;
+      else els = contentEls;
+    } else if (dir !== 'up') {
+      els = contentEls;
+    }
     var from = current.getBoundingClientRect(), c = center(from);
     var best = null, bestScore = Infinity;
+    if (!inNav && dir === 'up') {
+      best = pick(contentEls, dir, from, c);
+      if (!best) {
+        var act = document.querySelector('.topnav .side-item.active');
+        var target = act && visible(act) ? act : pick(navEls, dir, from, c) || navEls[0];
+        if (target) {
+          // show the top of the page (hero / first row) under the bar
+          scrollParents(current).forEach(function (p) { if (p.scrollHeight > p.clientHeight + 1) p.scrollTop = 0; });
+          focus(target, { noScroll: true });
+        }
+        return true;
+      }
+      els = [best];
+    }
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (el === current) continue;
