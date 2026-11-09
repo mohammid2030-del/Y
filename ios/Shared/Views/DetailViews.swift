@@ -421,7 +421,7 @@ struct MovieDetailView: View {
                     .buttonStyle(.bordered)
             }
             // YouTube app: TMDB trailer, or a YouTube search when TMDB has none (Arabic / Turkish titles)
-            Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown, series: false)) { trailer = $0 ?? "" } } label: {
+            Button { TrailerLauncher.open(keys: tmdb?.trailers ?? [], query: TrailerLauncher.query(tmdb, shown, series: false)) { trailer = $0 ?? "" } } label: {
                 Label(L.t("trailer"), systemImage: "film")
             }.buttonStyle(.bordered)
             if state.variants(.movie, item).count > 1 {
@@ -453,7 +453,7 @@ struct SeriesDetailView: View {
     private func openSeasonTrailer(_ n: Int) {
         Task { @MainActor in
             let k = await TMDB.shared.seasonTrailer(tvID: tmdb?.id ?? 0, season: n)
-            TrailerLauncher.open(key: k, query: TrailerLauncher.query(tmdb, shown, series: true, season: n)) { trailer = $0 ?? "" }
+            TrailerLauncher.open(keys: k, query: TrailerLauncher.query(tmdb, shown, series: true, season: n)) { trailer = $0 ?? "" }
         }
     }
     private enum SField: Hashable { case resume, firstEpisode, season }
@@ -486,7 +486,7 @@ struct SeriesDetailView: View {
                         Button {
                             // several seasons: ask which season's trailer
                             if trailerSeasons(seasons) > 1 { askSeason = true }
-                            else { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown, series: true)) { trailer = $0 ?? "" } }
+                            else { TrailerLauncher.open(keys: tmdb?.trailers ?? [], query: TrailerLauncher.query(tmdb, shown, series: true)) { trailer = $0 ?? "" } }
                         } label: {
                             Label(L.t("trailer"), systemImage: "film")
                         }.buttonStyle(.bordered)

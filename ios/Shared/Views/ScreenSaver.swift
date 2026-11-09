@@ -84,6 +84,59 @@ enum TrailerLauncher {
     /// every answer is remembered, also "nothing found").
     /// Does a video title name season n ("Season 2", "S02", "الموسم الثاني", "الجزء 2", "2. Sezon")?
     /// Season 1 is often just "the trailer": fine as long as no other season is named.
+    /// Episode a video previews ("8. Bölüm 2. Fragman", "Episode 8", "الحلقة 8" → 8), 0 when it is not about one episode.
+    static func episodeOf(_ title: String) -> Int {
+        let t = norm(title)
+        if t.range(of: "الحلقه الاخيره|final episode|final bölüm|finali|son bölüm", options: .regularExpression) != nil { return 99 }
+        let pattern = "s\\d+ ?e(\\d+)|(\\d+) bölüm|bölüm (\\d+)|episode (\\d+)|(?:^| )ep ?(\\d+)|(?:^| )e(\\d+)(?: |$)|(?:الحلقه|حلقه) ([0-9\\u0660-\\u0669]+)"
+        if let re = try? NSRegularExpression(pattern: pattern), let m = re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) {
+            for i in 1..<m.numberOfRanges {
+                guard let r = Range(m.range(at: i), in: t) else { continue }
+                let digits = String(t[r].map { c -> Character in
+                    if let v = c.unicodeScalars.first?.value, (0x660...0x669).contains(v) { return Character(String(v - 0x660)) }
+                    return c
+                })
+                return Int(digits) ?? 0
+            }
+        }
+        let ord = ["الاول": 1, "الاولي": 1, "الثاني": 2, "الثانيه": 2, "الثالث": 3, "الثالثه": 3, "الرابع": 4, "الرابعه": 4, "الخامس": 5, "الخامسه": 5,
+                   "السادس": 6, "السادسه": 6, "السابع": 7, "السابعه": 7, "الثامن": 8, "الثامنه": 8, "التاسع": 9, "التاسعه": 9, "العاشر": 10, "العاشره": 10]
+        let words = t.split(separator: " ").map(String.init)
+        for (i, w) in words.enumerated() where (w == "الحلقه" || w == "حلقه") && i + 1 < words.count {
+            if let n = ord[words[i + 1]] { return n }
+        }
+        return 0
+    }
+
+    /// The videos that really play here: public, embeddable, not blocked in the viewer's country
+    /// ("The uploader has not made this video available in your country"). One API unit for up to 50 ids.
+    static func usable(_ ids: [String]) async -> [String] {
+        let ids = ids.filter { !$0.isEmpty }
+        let apiKey = CloudConfig.youtubeKey
+        guard !apiKey.isEmpty, !ids.isEmpty else { return ids }
+        let d = UserDefaults.standard
+        let ask = ids.filter { d.object(forKey: "ytok|" + $0) == nil }
+        if !ask.isEmpty {
+            var c = URLComponents(string: "https://www.googleapis.com/youtube/v3/videos")!
+            c.queryItems = [.init(name: "part", value: "status,contentDetails"), .init(name: "id", value: ask.joined(separator: ",")), .init(name: "key", value: apiKey)]
+            guard let url = c.url, let (data, resp) = try? await URLSession.shared.data(from: url),
+                  (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ids }   // can't tell: try them
+            let cc = (Locale.current.regionCode ?? "SA").uppercased()
+            var seen = Set<String>()
+            for it in (o["items"] as? [[String: Any]]) ?? [] {
+                let id = jstr(it["id"]); seen.insert(id)
+                let st = it["status"] as? [String: Any] ?? [:]
+                let rr = (it["contentDetails"] as? [String: Any])?["regionRestriction"] as? [String: Any] ?? [:]
+                let blocked = ((rr["blocked"] as? [String])?.contains(cc) ?? false) || ((rr["allowed"] as? [String]).map { !$0.contains(cc) } ?? false)
+                let ok = jstr(st["privacyStatus"]) != "private" && (st["embeddable"] as? Bool ?? true) && !blocked && jstr(st["uploadStatus"]) != "rejected"
+                d.set(ok, forKey: "ytok|" + id)
+            }
+            for id in ask where !seen.contains(id) { d.set(false, forKey: "ytok|" + id) }   // deleted / private
+        }
+        return ids.filter { d.bool(forKey: "ytok|" + $0) }
+    }
+
     static func namesSeason(_ title: String, _ n: Int) -> Bool {
         let t = norm(title)
         let ar = ["", "الاول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر"]
@@ -103,7 +156,7 @@ enum TrailerLauncher {
     static func search(_ query: String, names: [String], season: Int = 0) async -> String {
         let apiKey = CloudConfig.youtubeKey
         guard !apiKey.isEmpty, !query.isEmpty else { return "" }
-        let cacheKey = "yt2|" + query.lowercased()
+        let cacheKey = "yt3|" + query.lowercased()
         if let hit = UserDefaults.standard.string(forKey: cacheKey) { return hit }
         var c = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
         c.queryItems = [.init(name: "part", value: "snippet"), .init(name: "type", value: "video"), .init(name: "maxResults", value: "10"),
@@ -118,23 +171,31 @@ enum TrailerLauncher {
         // the video title must name this title and look like a trailer / promo (not a song or a commercial)
         let wanted = names.map(norm).filter { $0.count >= 2 }
         func matches(_ t: String, _ pattern: String) -> Bool { t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
-        let best = items.first { i in
+        var good = items.filter { i in
             let t = title(i), n = norm(t)
             return wanted.contains { n.contains($0) }
                 && matches(t, "trailer|teaser|promo|official|اعلان|إعلان|برومو|تريلر|fragman|tanıtım")
                 && !matches(t, "اغنية|أغنية|كليب|music video|lyrics|official video|official audio")
+                && episodeOf(t) <= 1
                 && (season == 0 || namesSeason(t, season))
         }
-        let id = ((best?["id"] as? [String: Any])?["videoId"] as? String) ?? ""
+        // the official / first-episode trailer before other promos
+        let strong = "official trailer|resmi fragman|tanıtım|الاعلان الرسمي|اعلان رسمي|الاعلان الاول|1 bölüm fragman|ilk fragman|teaser trailer"
+        good = good.filter { norm(title($0)).range(of: strong, options: .regularExpression) != nil }
+            + good.filter { norm(title($0)).range(of: strong, options: .regularExpression) == nil }
+        let ids = good.compactMap { ($0["id"] as? [String: Any])?["videoId"] as? String }
+        let id = await usable(ids).first ?? ""
         UserDefaults.standard.set(id, forKey: cacheKey)
         return id
     }
 
     /// TMDB trailer, else a YouTube API search. iPad plays it inside the app (`play`); Apple TV has no web view,
     /// so it opens the video in the YouTube app. Without any video: a YouTube search.
-    @MainActor static func open(key: String?, query: Query, play: @escaping (String?) -> Void) {
+    @MainActor static func open(keys: [String], query: Query, play: @escaping (String?) -> Void) {
         Task { @MainActor in
-            var k = (key ?? "").filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+            // TMDB's trailers first — only one that really plays here (not blocked in this country)
+            let clean = keys.map { $0.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" } }.filter { !$0.isEmpty }
+            var k = await usable(clean).first ?? ""
             if k.isEmpty { k = await search(query.q, names: query.names, season: query.season) }
             #if os(iOS)
             if !k.isEmpty { play(k); return }

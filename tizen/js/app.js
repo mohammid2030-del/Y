@@ -909,7 +909,7 @@
     actions.versions = function () { openTitle('movie', item); };
     actions.play = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: (info && info.image) || item.logo }); };
     actions.restart = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: item.logo, fromStart: true }); };
-    actions.trailer = function () { const tmi = info && info.tm; showTrailer(tmi && tmi.trailer, trailerQuery(tmi, item)); };
+    actions.trailer = function () { const tmi = info && info.tm; showTrailer(tmi && (tmi.trailers || tmi.trailer), trailerQuery(tmi, item)); };
     actions.fav = function (el) {
       const added = toggleFav('movie', item);
       el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
@@ -992,7 +992,7 @@
         actions.trailer = async function () {
           // several seasons: ask which season's trailer
           const max = Math.min(30, Math.max((tm && tm.seasons) || 0, seasons.length ? seasons[seasons.length - 1] : 0));
-          if (max < 2) { showTrailer(tm && tm.trailer, trailerQuery(tm, item)); return; }
+          if (max < 2) { showTrailer(tm && (tm.trailers || tm.trailer), trailerQuery(tm, item)); return; }
           const list = []; for (let n = 1; n <= max; n++) list.push({ value: n, label: t('season', n) });
           const n = await chooseBox(t('trailerSeason'), list, season || max);
           if (n !== undefined) showSeasonTrailer(tm, item, n);
@@ -1103,36 +1103,62 @@
     runSearch();
   }
 
+  /** Search text that ignores Arabic letter variants and diacritics (أ/ا, ة/ه, ى/ي, tashkeel). */
+  function searchNorm(x) {
+    return String(x || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+  }
+  let searchToken = 0;
   function runSearch() {
     const st = S.ui.search, box = $('#results');
     if (!box) return;
-    const q = st.q.trim().toLowerCase();
+    const raw = st.q.trim(), q = searchNorm(raw);
+    const token = ++searchToken;
     if (q.length < 2) { box.innerHTML = `<div class="empty">${esc(t('searchPrompt'))}</div>`; return; }
-    const out = [];
+    const out = [], seen = {};
     ['live', 'movie', 'series'].forEach(function (type) {
       if (st.type && st.type !== type) return;
       const all = (S.data && S.data[type]) || [];
       for (let i = 0; i < all.length && out.length < 300; i++) {
         const it = all[i];
         if (S.hidden[type + '|' + it.cat]) continue;
-        if (it.name.toLowerCase().indexOf(q) >= 0) out.push({ type: type, item: it });
+        if (searchNorm(it.name).indexOf(q) >= 0) { out.push({ type: type, item: it }); seen[type + '|' + it.id] = 1; }
       }
     });
     out.sort(function (a, b) {
-      const ai = a.item.name.toLowerCase().indexOf(q) === 0 ? 0 : 1, bi = b.item.name.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+      const ai = searchNorm(a.item.name).indexOf(q) === 0 ? 0 : 1, bi = searchNorm(b.item.name).indexOf(q) === 0 ? 0 : 1;
       return ai - bi;
     });
-    if (!out.length) { box.innerHTML = `<div class="empty">${esc(t('noResults'))}</div>`; return; }
-    box.innerHTML = out.map(function (r, i) {
-      return `<button data-f data-i="${i}" data-action="openResult" class="poster${r.type === 'live' ? ' channel' : ''}">
-        <span class="pimg">${img(r.item.logo)}</span><span class="ptitle">${esc(r.item.name)}</span>
-        <span class="psub">${esc(r.type === 'live' ? t('live') : r.type === 'movie' ? t('movies') : t('series'))}</span></button>`;
-    }).join('');
+    function draw() {
+      if (!out.length) { box.innerHTML = `<div class="empty">${esc(t('noResults'))}</div>`; return; }
+      box.innerHTML = out.map(function (r, i) {
+        return `<button data-f data-i="${i}" data-action="openResult" class="poster${r.type === 'live' ? ' channel' : ''}">
+          <span class="pimg">${img(r.poster || r.item.logo)}</span><span class="ptitle">${esc(r.label || r.item.name)}</span>
+          <span class="psub">${esc(r.type === 'live' ? t('live') : r.type === 'movie' ? t('movies') : t('series'))}</span></button>`;
+      }).join('');
+    }
+    draw();
     actions.openResult = function (el) {
       const r = out[parseInt(el.getAttribute('data-i'), 10)];
       if (r.type === 'live') playLive(r.item, [r.item]);
       else openTitle(r.type, r.item);
     };
+    // titles known by another name: ask TMDB (Arabic / English / original names) and show the ones in the subscription
+    if (st.type === 'live' || !Library.ready() || !(window.Tmdb && Tmdb.enabled && Tmdb.enabled())) return;
+    Tmdb.searchAll(raw).then(function (hits) {
+      if (token !== searchToken || !$('#results')) return;
+      let added = 0;
+      hits.forEach(function (w) {
+        if (st.type && st.type !== w.type) return;
+        const m = Library.find(w.type, w);
+        if (!m || seen[w.type + '|' + m.id]) return;
+        seen[w.type + '|' + m.id] = 1; added++;
+        out.unshift({ type: w.type, item: m, label: w.title || m.name, poster: w.poster });
+      });
+      if (!added) return;
+      const had = focusId(Nav.current);
+      draw();
+      if (had) refocusId(had);
+    });
   }
 
   // ---- settings
@@ -2002,12 +2028,8 @@
   /** One season's trailer: TMDB season videos, else a YouTube search that must name that season. */
   async function showSeasonTrailer(tm, item, n) {
     toast(t('findingTrailer'));
-    let k = tm && tm.id ? await Tmdb.seasonTrailer(tm.id, n) : '';
-    if (!k && YouTube.enabled()) {
-      const q = trailerQuery(tm, item, n);
-      k = await YouTube.find(q.q, q.names, YouTube.seasonTest(n));
-    }
-    if (k) embedTrailer(String(k).replace(/[^A-Za-z0-9_-]/g, '')); else toast(t('noTrailer'));
+    const keys = tm && tm.id ? await Tmdb.seasonTrailer(tm.id, n) : [];
+    showTrailer(keys, trailerQuery(tm, item, n), YouTube.seasonTest(n));
   }
   function trailerQuery(tm, item, seasonNo) {
     const name = (tm && (tm.original || tm.title)) || Clean.title(item.name);
@@ -2032,11 +2054,13 @@
   // In-app player: YouTube's official embedded player on a small web page (docs/trailer.html on GitHub Pages),
   // because YouTube refuses embeds from apps without a web address. Falls back to the YouTube app.
   const PLAYER_PAGE = 'https://mohammid2030-del.github.io/Y/trailer.html';
-  async function showTrailer(key, query) {
-    let k = String(key || '').replace(/[^A-Za-z0-9_-]/g, '');
+  async function showTrailer(keys, query, check) {
+    // TMDB's trailers first — only one that really plays here (not blocked in this country, embeddable)
+    const list = [].concat(keys || []).map(function (x) { return String(x || '').replace(/[^A-Za-z0-9_-]/g, ''); }).filter(Boolean);
+    let k = (await YouTube.usable(list))[0] || '';
     if (!k && query && YouTube.enabled()) {
       toast(t('findingTrailer'));
-      k = await YouTube.find(query.q, query.names);
+      k = await YouTube.find(query.q, query.names, check);
     }
     if (k) { embedTrailer(k); return; }
     toast(t('noTrailer'));   // nothing that really is this title's trailer: say so instead of showing a random video
@@ -2057,19 +2081,20 @@
       if (box.parentNode) box.parentNode.removeChild(box);
       if (screen === prev) screen.back = prevBack;
     }
-    function toApp() { close(); launchYouTube('v=' + k, function () { toast(t('noTrailer')); }); }
+    // why the in-app player gave up (shown briefly, then the YouTube app): no-player / not-playing / YouTube error code
+    function toApp(why) { close(); toast(t('trailerInYouTube') + (why ? ' (' + why + ')' : '')); launchYouTube('v=' + k, function () { toast(t('noTrailer')); }); }
     function onMsg(e) {
       let d = null; try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
       if (!d || d.nova !== 'trailer') return;
-      if (d.type === 'ready' && !readyAt) { readyAt = Date.now(); setTimeout(function () { if (!playing && !closed) toApp(); }, 9000); }
+      if (d.type === 'ready' && !readyAt) { readyAt = Date.now(); setTimeout(function () { if (!playing && !closed) toApp('not-playing'); }, 9000); }
       if (d.type === 'ready' || d.type === 'playing') { started = true; const w = box.querySelector('.trailer-wait'); if (w) w.remove(); }
       if (d.type === 'playing') playing = true;
       if (d.type === 'ended') close();
-      if (d.type === 'error') toApp();   // the video doesn't allow embedding (or the page isn't up): YouTube app
+      if (d.type === 'error') toApp('yt-' + d.extra);   // the video doesn't allow embedding (or the page isn't up): YouTube app
     }
     window.addEventListener('message', onMsg);
     // nothing from the player in 12 s: open it in the YouTube app instead
-    const guard = setTimeout(function () { if (!started && !closed) toApp(); }, 12000);
+    const guard = setTimeout(function () { if (!started && !closed) toApp('no-player'); }, 15000);
     // keep the remote's BACK key with the app even if the embedded player grabs focus
     function refocus() { setTimeout(function () { try { window.focus(); } catch (e) { /* */ } }, 50); }
     window.addEventListener('blur', refocus);

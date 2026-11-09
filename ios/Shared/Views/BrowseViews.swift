@@ -216,7 +216,22 @@ struct SearchView: View {
                 }
                 return out
             }.value
-            if !Task.isCancelled { results = out }
+            if Task.isCancelled { return }
+            results = out
+            // titles known by another name: ask TMDB (Arabic / English / original names) and show the ones in the subscription
+            guard state.tmdbOn else { return }
+            let hits = await TMDB.shared.searchAll(q)
+            if Task.isCancelled { return }
+            var seen = Set(out.map(\.id)), extra: [SearchHit] = []
+            for w in hits {
+                let kind: MediaKind = w.isTV ? .series : .movie
+                var found = state.catalog.items(kind).first { $0.tmdb == String(w.id) }
+                if found == nil { found = await state.findInCatalog(w)?.1 }
+                guard let m = found else { continue }
+                let h = SearchHit(kind: kind, item: m)
+                if seen.insert(h.id).inserted { extra.append(h) }
+            }
+            if !Task.isCancelled, !extra.isEmpty { results = extra + out }
         }
     }
 
