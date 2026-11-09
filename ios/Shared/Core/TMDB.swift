@@ -16,6 +16,8 @@ struct TMDBInfo {
     var backdrop = "", poster = "", logo = "", trailer = ""
     /// Usable trailers best first (never an episode preview); `trailer` is the first.
     var trailers: [String] = []
+    /// The work's original language (tr, ar, en…): its trailer comes first.
+    var originalLanguage = ""
     /// Logo in the app language only, and whether TMDB has the title + story in the app language.
     var logoLocal = "", localText = false
     /// The film series this movie belongs to (TMDB collection), 0 when none.
@@ -204,6 +206,7 @@ actor TMDB {
         info.year = String(jstr(o[tv ? "first_air_date" : "release_date"]).prefix(4))
         info.runtime = tv ? jint((o["episode_run_time"] as? [Any])?.first) : jint(o["runtime"])
         info.seasons = jint(o["number_of_seasons"])
+        info.originalLanguage = jstr(o["original_language"]).lowercased()
         if let col = o["belongs_to_collection"] as? [String: Any] { info.collectionID = jint(col["id"]); info.collectionName = jstr(col["name"]) }
         info.genres = ((o["genres"] as? [[String: Any]]) ?? []).map { jstr($0["name"]) }.filter { !$0.isEmpty }
         let bd = pick("backdrops", [nil]); info.backdrop = img(bd.isEmpty ? jstr(o["backdrop_path"]) : bd, "w1280")
@@ -279,6 +282,28 @@ actor TMDB {
                                  year: String(jstr(d[tv ? "first_air_date" : "release_date"]).prefix(4)))
             }
         return p
+    }
+
+    private var videoLists: [String: [String]] = [:]
+    /// Trailers / teasers of a title or of one season, original language first (a Turkish series' Turkish trailer,
+    /// never a dubbed one first), then the app language, then English; never an episode preview.
+    func trailers(tv: Bool, id: Int, original: String, season: Int) async -> [String] {
+        guard !key.isEmpty, id > 0 else { return [] }
+        let path = season > 0 ? "tv/\(id)/season/\(season)/videos" : "\(tv ? "tv" : "movie")/\(id)/videos"
+        let langs = [original, lang, "en"].filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let ck = "\(path)|\(langs.joined(separator: ","))"
+        if let hit = videoLists[ck] { return hit }
+        guard let o = try? await get(path, ["language": original.isEmpty ? lang : original, "include_video_language": langs.joined(separator: ",") + ",null"]) else { return [] }
+        func rank(_ v: [String: Any]) -> Double {
+            let li = langs.firstIndex(of: jstr(v["iso_639_1"])) ?? 3
+            return Double(li * 10 + (jstr(v["type"]) == "Trailer" ? 0 : 1)) - ((v["official"] as? Bool) == true ? 0.5 : 0)
+        }
+        let list = ((o["results"] as? [[String: Any]]) ?? [])
+            .filter { jstr($0["site"]) == "YouTube" && ["Trailer", "Teaser"].contains(jstr($0["type"])) && TrailerLauncher.episodeOf(jstr($0["name"])) <= 1 }
+            .sorted { rank($0) < rank($1) }
+        let out = list.prefix(8).map { jstr($0["key"]) }.filter { !$0.isEmpty }
+        videoLists[ck] = out
+        return out
     }
 
     private var seasonVideos: [String: [String]] = [:]

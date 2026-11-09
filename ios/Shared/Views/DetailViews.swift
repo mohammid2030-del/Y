@@ -421,7 +421,7 @@ struct MovieDetailView: View {
                     .buttonStyle(.bordered)
             }
             // YouTube app: TMDB trailer, or a YouTube search when TMDB has none (Arabic / Turkish titles)
-            Button { TrailerLauncher.open(keys: tmdb?.trailers ?? [], query: TrailerLauncher.query(tmdb, shown, series: false)) { trailer = $0 ?? "" } } label: {
+            Button { TrailerLauncher.open(tm: tmdb, item: shown, series: false) { trailer = $0 ?? "" } } label: {
                 Label(L.t("trailer"), systemImage: "film")
             }.buttonStyle(.bordered)
             if state.variants(.movie, item).count > 1 {
@@ -451,11 +451,9 @@ struct SeriesDetailView: View {
     private func trailerSeasons(_ have: [Int]) -> Int { min(30, max(tmdb?.seasons ?? 0, have.last ?? 0)) }
     /// One season's trailer: TMDB season videos, else a YouTube search that must name that season.
     private func openSeasonTrailer(_ n: Int) {
-        Task { @MainActor in
-            let k = await TMDB.shared.seasonTrailer(tvID: tmdb?.id ?? 0, season: n)
-            TrailerLauncher.open(keys: k, query: TrailerLauncher.query(tmdb, shown, series: true, season: n)) { trailer = $0 ?? "" }
-        }
+        TrailerLauncher.open(tm: tmdb, item: shown, series: true, season: n) { trailer = $0 ?? "" }
     }
+
     private enum SField: Hashable { case resume, firstEpisode, season }
     #if os(tvOS)
     @FocusState private var sFocus: SField?
@@ -486,7 +484,7 @@ struct SeriesDetailView: View {
                         Button {
                             // several seasons: ask which season's trailer
                             if trailerSeasons(seasons) > 1 { askSeason = true }
-                            else { TrailerLauncher.open(keys: tmdb?.trailers ?? [], query: TrailerLauncher.query(tmdb, shown, series: true)) { trailer = $0 ?? "" } }
+                            else { TrailerLauncher.open(tm: tmdb, item: shown, series: true) { trailer = $0 ?? "" } }
                         } label: {
                             Label(L.t("trailer"), systemImage: "film")
                         }.buttonStyle(.bordered)

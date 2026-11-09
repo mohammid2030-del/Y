@@ -909,7 +909,7 @@
     actions.versions = function () { openTitle('movie', item); };
     actions.play = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: (info && info.image) || item.logo }); };
     actions.restart = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: item.logo, fromStart: true }); };
-    actions.trailer = function () { const tmi = info && info.tm; showTrailer(tmi && (tmi.trailers || tmi.trailer), trailerQuery(tmi, item)); };
+    actions.trailer = function () { showTrailer(info && info.tm, item, 0); };
     actions.fav = function (el) {
       const added = toggleFav('movie', item);
       el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
@@ -992,7 +992,7 @@
         actions.trailer = async function () {
           // several seasons: ask which season's trailer
           const max = Math.min(30, Math.max((tm && tm.seasons) || 0, seasons.length ? seasons[seasons.length - 1] : 0));
-          if (max < 2) { showTrailer(tm && (tm.trailers || tm.trailer), trailerQuery(tm, item)); return; }
+          if (max < 2) { showTrailer(tm, item, 0); return; }
           const list = []; for (let n = 1; n <= max; n++) list.push({ value: n, label: t('season', n) });
           const n = await chooseBox(t('trailerSeason'), list, season || max);
           if (n !== undefined) showSeasonTrailer(tm, item, n);
@@ -2026,22 +2026,25 @@
   const YOUTUBE_APP = '111299001912';
   /** What to search on YouTube, and the names the video's title must contain (so we never pick an unrelated clip). */
   /** One season's trailer: TMDB season videos, else a YouTube search that must name that season. */
-  async function showSeasonTrailer(tm, item, n) {
-    toast(t('findingTrailer'));
-    const keys = tm && tm.id ? await Tmdb.seasonTrailer(tm.id, n) : [];
-    showTrailer(keys, trailerQuery(tm, item, n), YouTube.seasonTest(n));
-  }
+  async function showSeasonTrailer(tm, item, n) { showTrailer(tm, item, n); }
+  /**
+   * What to search on YouTube, in the work's original language (Turkish series → "<Turkish name> fragman"),
+   * and the names the video's title must contain.
+   */
   function trailerQuery(tm, item, seasonNo) {
     const name = (tm && (tm.original || tm.title)) || Clean.title(item.name);
     const year = String((tm && tm.year) || item.year || '').slice(0, 4);
     const series = !!(tm && tm.seasons) || (curDetail && curDetail.type === 'series');
     const arabic = /[\u0600-\u06FF]/.test(name);
-    // "اعلان" alone also means a TV commercial — say what it is: مسلسل / فيلم + برومو / اعلان رسمي
-    const q = seasonNo ? (arabic ? 'مسلسل ' + name + ' الموسم ' + seasonNo + ' برومو' : name + ' season ' + seasonNo + ' official trailer')
-      : arabic ? (series ? 'مسلسل ' + name + ' برومو' : 'فيلم ' + name + ' ' + year + ' اعلان رسمي')
-      : name + ' ' + year + (series ? ' series' : '') + ' official trailer';
+    const lang = (tm && tm.lang) || (arabic ? 'ar' : '');
+    let q;
+    if (lang === 'tr') q = seasonNo ? name + ' ' + seasonNo + '. sezon fragman' : name + (series ? ' 1. bölüm fragmanı' : ' fragman');
+    else if (lang === 'ar' || arabic) {
+      // "اعلان" alone also means a TV commercial — say what it is: مسلسل / فيلم + برومو / اعلان رسمي
+      q = seasonNo ? 'مسلسل ' + name + ' الموسم ' + seasonNo + ' برومو' : series ? 'مسلسل ' + name + ' برومو' : 'فيلم ' + name + ' ' + year + ' اعلان رسمي';
+    } else q = seasonNo ? name + ' season ' + seasonNo + ' official trailer' : name + ' ' + year + (series ? ' series' : '') + ' official trailer';
     const names = [name, tm && tm.title, Clean.title(item.name)].filter(Boolean);
-    return { q: q.replace(/\s+/g, ' ').trim(), names: names };
+    return { q: q.replace(/\s+/g, ' ').trim(), names: names, season: seasonNo || 0, lang: lang, series: series };
   }
   function launchYouTube(values, onFail) {
     try {
@@ -2054,16 +2057,17 @@
   // In-app player: YouTube's official embedded player on a small web page (docs/trailer.html on GitHub Pages),
   // because YouTube refuses embeds from apps without a web address. Falls back to the YouTube app.
   const PLAYER_PAGE = 'https://mohammid2030-del.github.io/Y/trailer.html';
-  async function showTrailer(keys, query, check) {
-    // TMDB's trailers first — only one that really plays here (not blocked in this country, embeddable)
-    const list = [].concat(keys || []).map(function (x) { return String(x || '').replace(/[^A-Za-z0-9_-]/g, ''); }).filter(Boolean);
-    let k = (await YouTube.usable(list))[0] || '';
-    if (!k && query && YouTube.enabled()) {
-      toast(t('findingTrailer'));
-      k = await YouTube.find(query.q, query.names, check);
-    }
+  /** The title's (or season's) official trailer: TMDB's in the original language first, else a checked YouTube search. */
+  async function showTrailer(tm, item, seasonNo) {
+    toast(t('findingTrailer'));
+    const q = trailerQuery(tm, item, seasonNo);
+    const type = curDetail && curDetail.type === 'series' ? 'series' : (tm && tm.seasons ? 'series' : 'movie');
+    let keys = tm && tm.id ? await Tmdb.trailers(type, tm.id, tm.lang, seasonNo) : [];
+    if (!seasonNo && tm && tm.trailers) keys = keys.concat(tm.trailers.filter(function (k) { return keys.indexOf(k) < 0; }));
+    keys = keys.map(function (x) { return String(x || '').replace(/[^A-Za-z0-9_-]/g, ''); }).filter(Boolean);
+    const k = await YouTube.pick(keys, q);
     if (k) { embedTrailer(k); return; }
-    toast(t('noTrailer'));   // nothing that really is this title's trailer: say so instead of showing a random video
+    toast(t('noTrailer'));   // nothing that really is this title's official trailer: say so instead of showing a random video
   }
   function embedTrailer(k) {
     const prev = screen;

@@ -279,7 +279,8 @@
               seasons: o.number_of_seasons || 0,
               collection: o.belongs_to_collection && o.belongs_to_collection.id ? { id: o.belongs_to_collection.id, name: o.belongs_to_collection.name || '' } : null,
               trailer: trailer,
-              trailers: trailers
+              trailers: trailers,
+              lang: String(o.original_language || '').toLowerCase()   // original language (tr, ar, en…): its trailer first
             };
             if (!info.trailer && l !== 'en') {
               return tmdbGet(t + '/' + id + '/videos', { language: 'en-US' }).then(function (v) {
@@ -308,6 +309,28 @@
         });
         searchCache[ck] = out;
         return out;
+      }, function () { return []; });
+    },
+
+    /**
+     * Trailers / teasers of a title or of one season, in the work's original language first (a Turkish series' Turkish
+     * trailer, never a dubbed one first), then the app language, then English; never an episode preview.
+     */
+    trailers: function (type, id, orig, season) {
+      if (!tmdbKey || !id) return Promise.resolve([]);
+      var l = lang(), o2 = String(orig || '').toLowerCase();
+      var path = season ? 'tv/' + id + '/season/' + season + '/videos' : (type === 'series' ? 'tv/' : 'movie/') + id + '/videos';
+      var ck = 'v|' + path + '|' + o2 + '|' + l;
+      if (ck in seasonVidCache) return Promise.resolve(seasonVidCache[ck]);
+      var langs = [o2, l, 'en'].filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+      return tmdbGet(path, { language: o2 || l, include_video_language: langs.join(',') + ',null' }).then(function (r) {
+        var list = ((r && r.results) || []).filter(function (v) { return v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser') && episodeOf(v.name) <= 1; });
+        var lr = function (v) { var i = langs.indexOf(v.iso_639_1); return i < 0 ? 3 : i; };
+        var rank = function (v) { return lr(v) * 10 + (v.type === 'Trailer' ? 0 : 1) - (v.official ? 0.5 : 0); };
+        list.sort(function (a, b) { return rank(a) - rank(b); });
+        var k = list.slice(0, 8).map(function (v) { return v.key; });
+        seasonVidCache[ck] = k;
+        return k;
       }, function () { return []; });
     },
 
@@ -549,106 +572,152 @@
   global.Matches = Matches;
 
   /**
-   * YouTube Data API: finds a trailer when TMDB has none (Arabic / Turkish titles). 100 searches a day for the
-   * whole project, so every answer is remembered (also "nothing found") and never searched again.
+   * Trailers from YouTube's official sources only. TMDB's trailers are checked first, else one YouTube Data API search
+   * (100 a day for the whole project; every answer remembered). A video is accepted only when it:
+   *  - names this title and looks like a trailer / promo (never a song, a Short, a full episode, a fan edit or a review),
+   *  - is not the preview of a later episode ("19. Bölüm Fragmanı", "الحلقة 8") and, for a season, names that season,
+   *  - is not dubbed or in another language than the work's original one (Turkish series → Turkish trailer),
+   *  - really plays here (public, embeddable, not blocked in the viewer's country).
+   * Official channels (the series' own channel, the broadcaster / studio / platform) come first.
    */
-  var ytCache = null;
-  /** Title comparison that ignores Arabic letter variants, diacritics and punctuation. */
+  /** Comparison text: lower case, no accents (ö → o, ş → s, ı → i), no Arabic diacritics / letter variants, no punctuation. */
   function ytNorm(s) {
-    return String(s || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
-      .replace(/[^a-z0-9\u0600-\u06FF\u00C0-\u024F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    var t = String(s || '').toLowerCase().replace(/ı/g, 'i');
+    try { t = t.normalize('NFD'); } catch (e) { /* old engines */ }
+    return t.replace(/[̀-ًͯ-ٰٟـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+      .replace(/[^a-z0-9À-ɏ؀-ۿ]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
   var ORD = { 'الاول': 1, 'الاولي': 1, 'الثاني': 2, 'الثانيه': 2, 'الثالث': 3, 'الثالثه': 3, 'الرابع': 4, 'الرابعه': 4, 'الخامس': 5, 'الخامسه': 5,
     'السادس': 6, 'السادسه': 6, 'السابع': 7, 'السابعه': 7, 'الثامن': 8, 'الثامنه': 8, 'التاسع': 9, 'التاسعه': 9, 'العاشر': 10, 'العاشره': 10 };
-  /** Episode a video is a preview of ("8. Bölüm 2. Fragman", "Episode 8", "الحلقة 8" → 8), 0 when it is not about one episode. */
+  /** Episode a video previews ("8. Bölüm 2. Fragman", "Episode 8", "الحلقة 8" → 8), 0 when it is not about one episode. */
   function episodeOf(title) {
     var t = ytNorm(title);
-    if (/الحلقه الاخيره|final episode|final bölüm|finali|son bölüm/.test(t)) return 99;
-    var m = t.match(/s\d+ ?e(\d+)|(\d+) bölüm|bölüm (\d+)|episode (\d+)|(?:^| )ep ?(\d+)|(?:^| )e(\d+)(?: |$)|(?:الحلقه|حلقه) ([0-9\u0660-\u0669]+)/);
+    if (/الحلقه الاخيره|final episode|final bolum|finali|son bolum/.test(t)) return 99;
+    var m = t.match(/s\d+ ?e(\d+)|(\d+) bolum|bolum (\d+)|episode (\d+)|(?:^| )ep ?(\d+)|(?:^| )e(\d+)(?: |$)|(?:الحلقه|حلقه) ([0-9٠-٩]+)|(\d+) (?:الحلقه|حلقه)/);
     if (m) {
-      for (var i = 1; i < m.length; i++) if (m[i]) return parseInt(m[i].replace(/[\u0660-\u0669]/g, function (d) { return String(d.charCodeAt(0) - 0x660); }), 10) || 0;
+      for (var i = 1; i < m.length; i++) if (m[i]) return parseInt(m[i].replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x660); }), 10) || 0;
     }
     var a = t.match(/(?:الحلقه|حلقه) (\S+)/);
     return a && ORD[a[1]] ? ORD[a[1]] : 0;
   }
-  /** Viewer's country for YouTube region blocks ("SA" when unknown). */
+  /** Does a video title name season n ("Season 2", "S02", "الموسم الثاني", "الجزء 2", "2. Sezon")? */
+  function seasonTest(n) {
+    var ar = ['', 'الاول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
+    function re(k) {
+      var num = '(?:0?' + k + '|' + String(k).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }) + (ar[k] ? '|' + ar[k] : '') + ')';
+      return new RegExp('(?:season|sezon|الموسم|موسم|الجزء|جزء)\\s*' + num + '(?![0-9])|(?:^|\\s)s0?' + k + '(?![0-9])|(?:^|\\s)' + k + '\\s*sezon', 'i');
+    }
+    var mine = re(n), others = [];
+    for (var k = 1; k <= 30; k++) if (k !== n) others.push(re(k));
+    return function (title) {
+      var t = ytNorm(title);
+      if (mine.test(t)) return true;
+      return n === 1 && !others.some(function (r) { return r.test(t); });   // season 1 is often just "the trailer"
+    };
+  }
+  var TRAILER = /trailer|teaser|promo|official|اعلان|برومو|تريلر|fragman|tanitim|bande annonce|trailer oficial/;
+  var MUSIC = /اغنيه|كليب|music video|lyrics|official video|official audio|soundtrack|jenerik|dizi muzig|muzigi|(?:^| )ost(?: |$)|(?:^| )mv(?: |$)|sarki/;
+  var UNOFFICIAL = /fan ?made|(?:^| )fan(?: |$)|concept|reaction|tepki|parod|(?:^| )edit(?: |$)|review|recap|explained|breakdown|ozet|inceleme|مراجعه|تحليل|ملخص|ردة فعل|رده فعل|حالات|ستوري|shorts|(?:^| )short(?: |$)|status|tiktok|ai trailer|fake|اعلان مزيف|(?:^| )kamera arkasi|behind the scenes|kolaj/;
+  var DUBBED = /dublaj|dubbed|(?:^| )dub(?: |$)|doblad|doblaje|مدبلج|بالعربي|باللهجه|النسخه العربيه|arabic version|hindi|urdu|turkce dublaj/;
+  var SUBBED = /مترجم|altyazili|subtitled|translated|traduit|legendado/;
+  var STRONG = /official trailer|resmi fragman|tanitim|الاعلان الرسمي|اعلان رسمي|الاعلان الاول|(?:^| )1 bolum fragman|ilk fragman|teaser trailer|ilk tanitim/;
+  var OFFICIAL_CH = /(?:^| )(?:atv|show tv|showtv|kanal d|star tv|fox|now|now tv|trt ?1|trt|tv ?8|beyaz tv|kanal 7|netflix|disney|prime video|amazon|hbo|max|apple tv|paramount|warner|universal|sony pictures|lionsgate|marvel|a24|20th century|focus features|neon|mubi|ay yapim|ox yapim|tims|mf yapim|gold film|blu ?tv|exxen|gain|tabii|mbc|shahid|osn|rotana|watch it|yango|tod|شاهد|روتانا|ام بي سي)(?: |$)/;
   function country() {
     var m = String(navigator.language || '').match(/[-_]([A-Za-z]{2})$/);
     return m ? m[1].toUpperCase() : 'SA';
   }
-  var ytOk = null;
-  global.YouTube = {
-    episodeOf: episodeOf,
-    /**
-     * The videos (ids) that really play here: public, embeddable and not blocked in the viewer's country
-     * ("The uploader has not made this video available in your country"). One API unit for up to 50 ids.
-     */
-    usable: async function (ids) {
-      ids = (ids || []).filter(Boolean);
-      if (!this.enabled() || !ids.length) return ids;
-      if (!ytOk) ytOk = (await Store.get('ytOk1')) || {};
-      var ask = ids.filter(function (id) { return ytOk[id] === undefined; });
-      if (ask.length) {
-        var r = null;
-        try {
-          r = await Api.json('https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id=' + ask.join(',') +
-            '&key=' + encodeURIComponent(NOVA_CONFIG.yt), 10000);
-        } catch (e) { return ids; }   // can't tell (quota / offline): try them
+  function isoSeconds(d) {
+    var m = String(d || '').match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    return m ? (+(m[1] || 0)) * 86400 + (+(m[2] || 0)) * 3600 + (+(m[3] || 0)) * 60 + (+(m[4] || 0)) : 0;
+  }
+  var ytCache = null, ytFacts = null;
+  /** Title, channel, length, audio language and "plays here" of videos (one API unit for up to 50 ids, remembered). */
+  async function facts(ids) {
+    if (!ytFacts) ytFacts = (await Store.get('ytFacts1')) || {};
+    var ask = ids.filter(function (id) { return !ytFacts[id]; });
+    if (ask.length && global.YouTube.enabled()) {
+      var r = null;
+      try {
+        r = await Api.json('https://www.googleapis.com/youtube/v3/videos?part=snippet,status,contentDetails&id=' + ask.slice(0, 50).join(',') +
+          '&key=' + encodeURIComponent(NOVA_CONFIG.yt), 10000);
+      } catch (e) { r = null; }
+      if (r) {
         var cc = country(), seen = {};
-        ((r && r.items) || []).forEach(function (it) {
-          var st = it.status || {}, rr = (it.contentDetails && it.contentDetails.regionRestriction) || {};
+        (r.items || []).forEach(function (it) {
+          var st = it.status || {}, cd = it.contentDetails || {}, sn = it.snippet || {}, rr = cd.regionRestriction || {};
           var blocked = (rr.blocked && rr.blocked.indexOf(cc) >= 0) || (rr.allowed && rr.allowed.indexOf(cc) < 0);
-          ytOk[it.id] = st.privacyStatus !== 'private' && st.embeddable !== false && !blocked && st.uploadStatus !== 'rejected';
+          ytFacts[it.id] = {
+            t: sn.title || '', c: sn.channelTitle || '', d: isoSeconds(cd.duration),
+            a: String(sn.defaultAudioLanguage || '').slice(0, 2).toLowerCase(),
+            ok: st.privacyStatus !== 'private' && st.embeddable !== false && !blocked && st.uploadStatus !== 'rejected'
+          };
           seen[it.id] = 1;
         });
-        ask.forEach(function (id) { if (!seen[id]) ytOk[id] = false; });   // deleted / private
-        Store.set('ytOk1', ytOk);
+        ask.slice(0, 50).forEach(function (id) { if (!seen[id]) ytFacts[id] = { ok: false }; });   // deleted / private
+        Store.set('ytFacts1', ytFacts);
       }
-      return ids.filter(function (id) { return ytOk[id]; });
-    },
+    }
+    return ytFacts;
+  }
+  /** Is this video an official-looking trailer of the work in its original language that plays here? */
+  function acceptable(f, q, needName) {
+    if (!f || !f.ok) return false;
+    if (f.d && (f.d < 45 || f.d > 600)) return false;          // Shorts / full episodes
+    var t = ytNorm(f.t), ch = ytNorm(f.c);
+    if (MUSIC.test(t) || UNOFFICIAL.test(t) || UNOFFICIAL.test(ch) || DUBBED.test(t)) return false;
+    if (episodeOf(f.t) > 1) return false;
+    if (q.season && !seasonTest(q.season)(f.t)) return false;
+    if (q.lang && f.a && f.a !== q.lang) return false;          // audio in another language than the original
+    if (needName) {
+      var wanted = (q.names || []).map(ytNorm).filter(function (n) { return n.length >= 2; });
+      if (!wanted.some(function (n) { return t.indexOf(n) >= 0; }) || !TRAILER.test(t)) return false;
+    }
+    return true;
+  }
+  /** Higher = more official: the series' own channel, the broadcaster / studio, the original language. */
+  function score(f, q) {
+    var t = ytNorm(f.t), ch = ytNorm(f.c), s = 0;
+    var wanted = (q.names || []).map(ytNorm).filter(function (n) { return n.length >= 3; });
+    if (wanted.some(function (n) { return ch.indexOf(n) >= 0; })) s += 4;
+    if (OFFICIAL_CH.test(ch)) s += 3;
+    if (/official|resmi|رسمي/.test(ch)) s += 1;
+    if (STRONG.test(t)) s += 2;
+    if (q.lang === 'tr' && /fragman|tanitim/.test(t)) s += 1;
+    if (q.lang === 'ar' && /[؀-ۿ]/.test(t)) s += 1;
+    if (q.lang && q.lang !== 'ar' && q.lang !== 'tr' && /trailer|teaser/.test(t)) s += 1;
+    if (SUBBED.test(t) && !OFFICIAL_CH.test(ch)) s -= 3;          // re-uploads with subtitles
+    return s;
+  }
+  global.YouTube = {
+    episodeOf: episodeOf,
+    seasonTest: seasonTest,
     enabled: function () { return !!(global.NOVA_CONFIG && NOVA_CONFIG.yt); },
-    /** Does a video title name season n ("Season 2", "S02", "الموسم الثاني", "الجزء 2", "2. Sezon")? */
-    seasonTest: function (n) {
-      var ar = ['', 'الاول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
-      function re(k) {
-        var num = '(?:0?' + k + '|' + String(k).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }) + (ar[k] ? '|' + ar[k] : '') + ')';
-        return new RegExp('(?:season|sezon|الموسم|موسم|الجزء|جزء)\\s*' + num + '(?![0-9])|(?:^|\\s)s0?' + k + '(?![0-9])|(?:^|\\s)' + k + '\\s*sezon', 'i');
+    /** The best official trailer: one of TMDB's [keys] that passes the checks, else a YouTube search. '' when none. */
+    pick: async function (keys, q) {
+      keys = (keys || []).filter(Boolean);
+      if (!this.enabled()) return keys[0] || '';
+      var fk = await facts(keys);
+      var good = keys.filter(function (k) { return acceptable(fk[k], q, false); });
+      if (good.length) {
+        good.sort(function (a, b) { return score(fk[b], q) - score(fk[a], q); });
+        return good[0];
       }
-      var mine = re(n), others = [];
-      for (var k = 1; k <= 30; k++) if (k !== n) others.push(re(k));
-      return function (title) {
-        var t = ytNorm(title);
-        if (mine.test(t)) return true;
-        // season 1 is often just "the trailer": fine as long as no other season is named
-        return n === 1 && !others.some(function (r) { return r.test(t); });
-      };
-    },
-    find: async function (query, names, check) {
-      if (!this.enabled() || !query) return '';
-      if (!ytCache) ytCache = (await Store.get('ytTrailers3')) || {};
-      var key = query.toLowerCase();
+      if (!q || !q.q) return '';
+      if (!ytCache) ytCache = (await Store.get('ytTrailers4')) || {};
+      var key = q.q.toLowerCase() + '|' + (q.lang || '');
       if (ytCache[key] !== undefined) return ytCache[key];
-      var url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&videoEmbeddable=true&safeSearch=moderate' +
-        '&q=' + encodeURIComponent(query) + '&key=' + encodeURIComponent(NOVA_CONFIG.yt);
+      var url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&videoEmbeddable=true&safeSearch=moderate' +
+        (q.lang ? '&relevanceLanguage=' + q.lang : '') + '&q=' + encodeURIComponent(q.q) + '&key=' + encodeURIComponent(NOVA_CONFIG.yt);
       var r;
       try { r = await Api.json(url, 12000); } catch (e) { return ''; }   // quota used up / offline: try again another time
-      var items = (r && r.items) || [];
-      // the video title must name this title (any of its names), and look like a trailer / promo
-      var wanted = (names || []).map(ytNorm).filter(function (n) { return n.length >= 2; });
-      var words = /trailer|teaser|promo|official|اعلان|إعلان|برومو|تريلر|الاعلان الرسمي|fragman|tanıtım/i;
-      var music = /اغنية|أغنية|كليب|music video|lyrics|official video|official audio|\bmv\b/i;
-      function names_ok(it) { var tt = ytNorm((it.snippet && it.snippet.title) || ''); return wanted.some(function (n) { return tt.indexOf(n) >= 0; }); }
-      var good = items.filter(function (it) {
-        var tt = (it.snippet && it.snippet.title) || '';
-        return names_ok(it) && words.test(tt) && !music.test(tt) && episodeOf(tt) <= 1 && (!check || check(tt));
-      });
-      // the official trailer / first-episode trailer before other promos
-      var strong = /official trailer|resmi fragman|tanıtım|الاعلان الرسمي|اعلان رسمي|الاعلان الاول|1 bölüm fragman|ilk fragman|teaser trailer/;
-      good.sort(function (a, b) { return (strong.test(ytNorm(a.snippet.title)) ? 0 : 1) - (strong.test(ytNorm(b.snippet.title)) ? 0 : 1); });
-      var ok = await this.usable(good.map(function (it) { return it.id && it.id.videoId; }));
+      var ids = ((r && r.items) || []).map(function (it) { return it.id && it.id.videoId; }).filter(Boolean);
+      var f = await facts(ids);
+      var ok = ids.filter(function (id) { return acceptable(f[id], q, true); });
+      // most official first; YouTube's order among equals
+      ok.sort(function (a, b) { return score(f[b], q) - score(f[a], q); });
       var id = ok[0] || '';
       ytCache[key] = id;
-      Store.set('ytTrailers3', ytCache);
+      Store.set('ytTrailers4', ytCache);
       return id;
     }
   };

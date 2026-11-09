@@ -107,35 +107,26 @@ class DetailExtras(
             val max = minOf(30, maxOf(tm?.seasons ?: 0, seasonsHave.maxOrNull() ?: 0))
             if (max > 1) { askSeasons = max; return }
         }
-        play(context, tm?.trailers.orEmpty(), youtube?.query(tm, c.name, c.year, series))
+        open(context, tm, c, series, 0)
     }
 
     fun seasonTrailer(context: android.content.Context, tm: com.nova.iptv.data.tmdb.TmdbInfo?, c: ContentEntity, n: Int) {
         askSeasons = 0
+        open(context, tm, c, true, n)
+    }
+
+    /** The official trailer: TMDB's in the original language first, else a checked YouTube search; says so when none. */
+    private fun open(context: android.content.Context, tm: com.nova.iptv.data.tmdb.TmdbInfo?, c: ContentEntity, series: Boolean, season: Int) {
         trailerJob?.cancel()
         trailerJob = scope.launch {
             android.widget.Toast.makeText(context, R.string.trailer_finding, android.widget.Toast.LENGTH_SHORT).show()
-            val keys = if (tm != null) tmdb.seasonTrailers(tm.id, n) else emptyList()
-            open(context, keys, youtube?.query(tm, c.name, c.year, true, n))
+            var keys = if (tm != null) tmdb.trailers(series, tm.id, tm.originalLanguage, season) else emptyList()
+            if (season == 0 && tm != null) keys = (keys + tm.trailers).distinct()
+            val yt = youtube
+            val k = if (yt != null) yt.find(keys, yt.query(tm, c.name, c.year, series, season)) else keys.firstOrNull().orEmpty()
+            if (k.isNotEmpty()) com.nova.iptv.player.TrailerActivity.start(context, k)
+            else android.widget.Toast.makeText(context, R.string.trailer_none, android.widget.Toast.LENGTH_SHORT).show()
         }
-    }
-
-    private fun play(context: android.content.Context, keys: List<String>, q: com.nova.iptv.data.tmdb.YouTubeTrailers.Query?) {
-        trailerJob?.cancel()
-        trailerJob = scope.launch {
-            if (keys.isEmpty()) android.widget.Toast.makeText(context, R.string.trailer_finding, android.widget.Toast.LENGTH_SHORT).show()
-            open(context, keys, q)
-        }
-    }
-
-    private suspend fun open(context: android.content.Context, keys: List<String>, q: com.nova.iptv.data.tmdb.YouTubeTrailers.Query?) {
-        val k = when {
-            youtube != null && q != null -> youtube.find(keys, q)
-            else -> keys.firstOrNull().orEmpty()
-        }
-        // nothing that really is this title's trailer: say so instead of showing a random video
-        if (k.isNotEmpty()) com.nova.iptv.player.TrailerActivity.start(context, k)
-        else android.widget.Toast.makeText(context, R.string.trailer_none, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     // ---- movie series parts (TMDB collection)

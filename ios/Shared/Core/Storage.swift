@@ -40,6 +40,8 @@ enum Storage {
         }
         // any other oversized value (> 512 KB) would put the app at risk again
         for (k, v) in defaults.dictionaryRepresentation() where (v as? Data)?.count ?? 0 > 512_000 { defaults.removeObject(forKey: k) }
+        // trailer answers used to be kept here one key each: they live in a cache file now
+        for k in defaults.dictionaryRepresentation().keys where k.hasPrefix("yt|") || k.hasPrefix("yt2|") || k.hasPrefix("yt3|") || k.hasPrefix("ytok|") { defaults.removeObject(forKey: k) }
     }
 
     static func string(_ key: String) -> String? { defaults.string(forKey: key) }

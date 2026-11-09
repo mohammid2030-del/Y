@@ -72,6 +72,8 @@ data class TmdbInfo(
     /** The film series this movie belongs to (TMDB collection), 0 when none. */
     val collectionId: Int = 0,
     val collectionName: String = "",
+    /** The work's original language (tr, ar, en…): its trailer comes first. */
+    val originalLanguage: String = "",
 ) {
     val ratingText: String get() = if (rating > 0) String.format(Locale.US, "%.1f", rating) else ""
 }
@@ -365,6 +367,7 @@ class TmdbRepository @Inject constructor(
             logoLocal = img(pick("logos", listOf(lang)), "w500"),
             localText = o.str("overview").isNotBlank() && !foreignScript(o.str(if (isTv) "name" else "title")),
             collectionId = o.get("belongs_to_collection")?.takeIf { it.isJsonObject }?.asJsonObject?.int("id") ?: 0,
+            originalLanguage = o.str("original_language").lowercase(),
             collectionName = o.get("belongs_to_collection")?.takeIf { it.isJsonObject }?.asJsonObject?.str("name").orEmpty(),
         )
     }
@@ -378,6 +381,31 @@ class TmdbRepository @Inject constructor(
         return results.orEmpty().mapNotNull { it.obj() }
             .filter { it.str("site") == "YouTube" && it.str("type") in types && YouTubeTrailers.episodeOf(it.str("name")) <= 1 }
             .sortedBy { rank(it) }.take(6).map { it.str("key") }.filter { it.isNotBlank() }
+    }
+
+    private val videoListCache = LruCache<String, List<String>>(80)
+    /**
+     * Trailers / teasers of a title or of one season, original language first (a Turkish series' Turkish trailer,
+     * never a dubbed one first), then the app language, then English; never an episode preview.
+     */
+    suspend fun trailers(isTv: Boolean, id: Int, original: String, season: Int): List<String> {
+        if (!_enabled.value || id <= 0) return emptyList()
+        val path = if (season > 0) "tv/$id/season/$season/videos" else "${if (isTv) "tv" else "movie"}/$id/videos"
+        val langs = listOf(original, lang(), "en").filter { it.isNotBlank() }.distinct()
+        val ck = "$path|${langs.joinToString(",")}"
+        videoListCache.get(ck)?.let { return it }
+        val out = runCatching {
+            request(path, mapOf("language" to original.ifBlank { lang() }, "include_video_language" to langs.joinToString(",") + ",null")).arr("results")
+                .mapNotNull { it.obj() }
+                .filter { it.str("site") == "YouTube" && it.str("type") in setOf("Trailer", "Teaser") && YouTubeTrailers.episodeOf(it.str("name")) <= 1 }
+                .sortedBy { v ->
+                    val li = langs.indexOf(v.str("iso_639_1")).let { if (it < 0) 3 else it }
+                    li * 10.0 + (if (v.str("type") == "Trailer") 0 else 1) - (if (v.get("official")?.let { runCatching { it.asBoolean }.getOrNull() } == true) 0.5 else 0.0)
+                }
+                .take(8).map { it.str("key") }.filter { it.isNotBlank() }
+        }.getOrNull() ?: return emptyList()
+        videoListCache.put(ck, out)
+        return out
     }
 
     private val seasonVideoCache = LruCache<String, List<String>>(60)
