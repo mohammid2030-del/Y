@@ -90,7 +90,7 @@
 
   /** Built in slices so the TV stays responsive. */
   async function build(data) {
-    var out = { shelves: {}, shelfOf: {}, key: {}, q: {}, titleTmdb: {}, variants: {}, catName: {} };
+    var out = { shelves: {}, shelfOf: {}, key: {}, q: {}, titleTmdb: {}, variants: {}, catName: {}, byNorm: {}, clean: {}, gk: {}, groups: {}, gver: {} };
     var types = ['movie', 'series'];
     for (var ti = 0; ti < types.length; ti++) {
       var type = types[ti];
@@ -115,7 +115,10 @@
         var m = items[i];
         var c = Clean.full(m.name);
         var y = /^\d{4}/.test(m.year || '') ? String(m.year).slice(0, 4) : c.year;
-        (byTitle[normalize(c.title)] = byTitle[normalize(c.title)] || []).push([m, y]);
+        var nt = normalize(c.title);
+        (byTitle[nt] = byTitle[nt] || []).push([m, y]);
+        (out.byNorm[type + '|' + nt] = out.byNorm[type + '|' + nt] || []).push(m);
+        out.clean[type + '|' + m.id] = y;
         out.q[type + '|' + m.id] = quality(m.name);
         if (i % 1500 === 1499) await wait();
       }
@@ -142,8 +145,28 @@
     return out;
   }
 
+  /** Group keys of every title + TMDB groups, worked out once per TMDB update (no full scans per page). */
+  function ensureGroups(type, all) {
+    var v = global.Tmdb && Tmdb.idsVersion ? Tmdb.idsVersion() : 0;
+    if (idx.gver[type] === v && idx.gk[type]) return;
+    var gk = {}, groups = {};
+    idx.gk[type] = null;
+    for (var i = 0; i < all.length; i++) {
+      var k = rawGroupKey(type, all[i]);
+      gk[all[i].id] = k;
+      if (k.indexOf('tmdb:') === 0) (groups[k] = groups[k] || []).push(all[i]);
+    }
+    idx.gk[type] = gk; idx.groups[type] = groups; idx.gver[type] = v;
+  }
+
   function groupKey(type, m) {
     if (!idx) return m.id;
+    var v = global.Tmdb && Tmdb.idsVersion ? Tmdb.idsVersion() : 0;
+    if (idx.gk[type] && idx.gver[type] === v && idx.gk[type][m.id]) return idx.gk[type][m.id];
+    return rawGroupKey(type, m);
+  }
+
+  function rawGroupKey(type, m) {
     var tk = idx.key[type + '|' + m.id] || m.id;
     if (m.tmdb) return 'tmdb:' + m.tmdb;
     var t = idx.titleTmdb[type + '|' + tk];
@@ -181,14 +204,28 @@
     shelves: function (type) { return (idx && idx.shelves[type]) || []; },
     browse: function (type, all, shelf, cat) {
       if (!idx) return [];
+      ensureGroups(type, all);
       var src = cat ? all.filter(function (m) { return m.cat === cat; }) : all.filter(function (m) { return idx.shelfOf[type + '|' + m.cat] === shelf; });
       return collapse(type, src);
     },
     collapse: collapse,
+    /** A title from an actor's list, if the subscription has it (instant lookup). */
+    find: function (type, w) {
+      if (!idx) return null;
+      var names = [w.title, w.original].filter(Boolean).map(function (n) { return normalize(Clean.full(n).title); });
+      var hits = [];
+      names.forEach(function (n) { hits = hits.concat(idx.byNorm[type + '|' + n] || []); });
+      var same = hits.filter(function (m) {
+        var y = idx.clean[type + '|' + m.id];
+        return !w.year || !y || Math.abs(parseInt(y, 10) - parseInt(w.year, 10)) <= 1;
+      })[0];
+      return same || hits[0] || null;
+    },
     variants: function (type, all, m) {
       if (!idx) return [m];
+      ensureGroups(type, all);
       var g = groupKey(type, m), list;
-      if (g.indexOf('tmdb:') === 0) list = all.filter(function (x) { return groupKey(type, x) === g; });
+      if (g.indexOf('tmdb:') === 0) list = idx.groups[type][g] || [m];
       else list = idx.variants[type + '|' + g] || [m];
       return (list.length ? list : [m]).slice();
     },

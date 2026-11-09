@@ -292,6 +292,7 @@ final class AppState: ObservableObject {
         indexJob?.cancel()
         index = nil
         browseCache = [:]
+        groupsCache = [:]
         let cat = catalog
         indexJob = Task { [weak self] in
             let idx = await Task.detached(priority: .userInitiated) { CatalogIndex.build(cat) }.value
@@ -346,6 +347,21 @@ final class AppState: ObservableObject {
     }
 
     private var variantsCache: [String: [MediaItem]] = [:]
+    private var groupsCache: [String: (version: Int, map: [String: [MediaItem]])] = [:]
+
+    /// Every TMDB-identified title → its copies, built once per catalog / TMDB update
+    /// (scanning the whole catalog on each detail page made opening a title slow).
+    private func tmdbGroups(_ kind: MediaKind) -> [String: [MediaItem]] {
+        let v = TMDBIDs.shared.version
+        if let c = groupsCache[kind.rawValue], c.version == v { return c.map }
+        var map: [String: [MediaItem]] = [:]
+        for m in catalog.items(kind) {
+            let g = groupKey(kind, m)
+            if g.hasPrefix("tmdb:") { map[g, default: []].append(m) }
+        }
+        groupsCache[kind.rawValue] = (v, map)
+        return map
+    }
 
     /// Every copy of the same title in the library (4K / HD / dubbed / subtitled, other names), best first.
     func variants(_ kind: MediaKind, _ item: MediaItem) -> [MediaItem] {
@@ -355,7 +371,7 @@ final class AppState: ObservableObject {
         if let hit = variantsCache[ck] { return hit }
         var list: [MediaItem]
         if g.hasPrefix("tmdb:") {
-            list = catalog.items(kind).filter { groupKey(kind, $0) == g }
+            list = tmdbGroups(kind)[g] ?? [item]
         } else {
             list = idx.variants["\(kind.rawValue)|\(g)"] ?? [item]
         }

@@ -50,6 +50,7 @@
   var TMDB = 'https://api.themoviedb.org/3/';
   var tmdbKey = '';
   var infoCache = {}, posterCache = {}, seasonCache = {};
+  var cleanMemo = {}, idsVer = 0;   // cleaning titles is costly on a TV CPU
   var posterStore = null, posterDirty = false, posterTimer = null;
   var queue = [], active = 0;
 
@@ -139,18 +140,22 @@
           if (f && foreignScript(v.title)) {
             // no Arabic title on TMDB → show the English one instead of Cyrillic / CJK
             return tmdbGet((isTv ? 'tv/' : 'movie/') + f.id, { language: 'en-US' }).then(function (en) {
-              v.title = (en && (en.name || en.title)) || v.title; posterCache[key] = v; savePosters(); return v;
+              v.title = (en && (en.name || en.title)) || v.title; posterCache[key] = v; savePosters(); idsVer++; return v;
             }, function () { posterCache[key] = v; savePosters(); return v; });
           }
           posterCache[key] = v; savePosters();
+          if (v.id) idsVer++;
           return v;
         });
       });
     },
 
+    /** Bumps whenever TMDB identifies another title (so the library can merge copies again). */
+    idsVersion: function () { return idsVer; },
+
     /** TMDB id already known for a title (no network). */
     idFor: function (type, name, year) {
-      var c = cleanFull(name);
+      var c = cleanMemo[name] || (cleanMemo[name] = cleanFull(name));
       var y = /^\d{4}/.test(year || '') ? String(year).slice(0, 4) : c.year;
       var a = posterCache[type + '|ar|' + c.title + '|' + y], b = posterCache[type + '|en|' + c.title + '|' + y];
       return (a && a.id) || (b && b.id) || 0;

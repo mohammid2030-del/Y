@@ -740,11 +740,9 @@
     bio.innerHTML = info && info.bio ? `<button data-f data-m="bio" class="set-row plot" style="white-space:normal;text-align:start">${esc(info.bio.slice(0, 700))}${info.bio.length > 700 ? '…' : ''}</button>` : '';
     const works = (info && info.known) || [];
     function find(w) {
-      const type = w.tv ? 'series' : 'movie', list = (S.data && S.data[type]) || [];
-      const names = [w.title, w.original].filter(Boolean).map(function (n) { return Clean.title(n).toLowerCase(); });
-      const hits = list.filter(function (m) { return names.indexOf(Clean.title(m.name).toLowerCase()) >= 0; });
-      const same = hits.filter(function (m) { return !w.year || !m.year || String(m.year).slice(0, 4) === w.year; })[0];
-      return same || hits[0] ? { type: type, item: same || hits[0] } : null;
+      const type = w.tv ? 'series' : 'movie';
+      const item = Library.ready() ? Library.find(type, w) : null;
+      return item ? { type: type, item: item } : null;
     }
     const found = works.map(find);
     known.innerHTML = works.length ? `<h3>${esc(t('knownFor'))}</h3><div class="known-row" data-group>${works.map(function (w, i) {
