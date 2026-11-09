@@ -222,7 +222,9 @@ label { display: block; margin: 14px 0; color: var(--muted); font-size: 24px; }
 /* ---------- discover ---------- */
 .disc { height: 1080px; overflow-y: auto; padding-bottom: 60px; }
 .hero { position: relative; height: 700px; overflow: hidden; }
-.hbg { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-size: cover; background-position: center 25%; transition: background-image .4s; }
+.hbg { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-size: cover; background-position: center 25%; }
+.hbg.fadein, .hbody.fadein { animation: fadeIn .9s ease both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .hshade { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
   background: linear-gradient(rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 30%, rgba(7,7,11,.75) 78%, var(--bg) 100%); }
 .hshade:after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; right: 0; background: linear-gradient(90deg, rgba(7,7,11,.85), rgba(7,7,11,0) 60%); }
@@ -393,3 +395,27 @@ label { display: block; margin: 14px 0; color: var(--muted); font-size: 24px; }
 .known-row { white-space: nowrap; overflow: hidden; padding: 10px 2px; }
 .known-row .poster { display: inline-block; vertical-align: top; margin: 0 10px; }
 .known-row .poster.na { opacity: .5; }
+
+/* ---- screensaver */
+.saver { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999; background: #000; overflow: hidden; animation: fadeIn 1.2s ease both; }
+.saver.out { animation: none; opacity: 0; transition: opacity .35s; }
+.sv-layer { position: absolute; top: -2%; left: -2%; right: -2%; bottom: -2%; background-size: cover; background-position: center 30%; opacity: 0; transition: opacity 1.8s ease; }
+.sv-layer.on { opacity: 1; animation: kenburns 12s ease-out both; }
+@keyframes kenburns { from { transform: scale(1); } to { transform: scale(1.08) translate(-1%, -1%); } }
+.sv-shade { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(0deg, rgba(0,0,0,.92) 0%, rgba(0,0,0,.55) 38%, rgba(0,0,0,0) 65%), linear-gradient(90deg, rgba(0,0,0,.35), rgba(0,0,0,0) 60%); }
+html[dir="rtl"] .sv-shade, body[dir="rtl"] .sv-shade, .rtl .sv-shade { background: linear-gradient(0deg, rgba(0,0,0,.92) 0%, rgba(0,0,0,.55) 38%, rgba(0,0,0,0) 65%), linear-gradient(270deg, rgba(0,0,0,.35), rgba(0,0,0,0) 60%); }
+.sv-info { position: absolute; left: 0; right: 0; bottom: 96px; padding: 0 120px; opacity: 0; }
+.sv-info.in { animation: svUp 1.1s .35s ease both; }
+@keyframes svUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+.sv-info > * { max-width: 1000px; }
+.sv-type { display: inline-block; padding: 6px 18px; border-radius: 20px; background: rgba(255,255,255,.16); font-size: 24px; font-weight: 700; letter-spacing: .5px; }
+.sv-logo { display: block; max-width: 620px; max-height: 190px; margin: 22px 0 14px; filter: drop-shadow(0 6px 24px rgba(0,0,0,.6)); }
+.sv-info h1 { font-size: 76px; line-height: 1.1; margin: 18px 0 10px; text-shadow: 0 4px 30px rgba(0,0,0,.7); }
+.sv-meta { font-size: 28px; color: rgba(255,255,255,.85); margin-bottom: 14px; }
+.sv-rate { color: #ffd34d; font-weight: 800; }
+.sv-plot { font-size: 28px; line-height: 1.55; color: rgba(255,255,255,.88); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sv-clock { position: absolute; top: 54px; right: 80px; font-size: 54px; font-weight: 300; color: rgba(255,255,255,.9); text-shadow: 0 2px 16px rgba(0,0,0,.6); }
+html[dir="rtl"] .sv-clock { right: auto; left: 80px; }
+.sv-brand { position: absolute; top: 58px; left: 80px; opacity: .85; }
+html[dir="rtl"] .sv-brand { left: auto; right: 80px; }

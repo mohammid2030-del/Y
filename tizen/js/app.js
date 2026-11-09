@@ -1662,13 +1662,125 @@
     if (Matches.prefs().show) loadMatches(false);
   }
 
+  // ------------------------------------------------------------------ screensaver
+  // After a minute without the remote (and nothing playing), the TV shows the library's movies and series
+  // full-screen from TMDB: backdrop, logo/title, type, year, genres, rating and story — a new one every 10 s.
+  const Saver = (function () {
+    const IDLE = 60000, SLIDE = 10000;
+    let box = null, slideTimer = null, layer = 0, shown = 0, preparing = null, recent = [];
+    function canStart() {
+      return Tmdb.enabled() && S.data && screen && screen.name !== 'player' && !box &&
+        !document.querySelector('.trailer') && Nav.idleFor && Nav.idleFor() >= IDLE;
+    }
+    function randomEntry() {
+      const types = ['movie', 'series'], type = types[Math.floor(Math.random() * 2)];
+      const list = (S.data[type] || []).filter(function (x) { return !S.hidden[type + '|' + x.cat]; });
+      if (!list.length) return null;
+      // favour recent additions a little, but keep it varied
+      const pool = Math.random() < 0.5 ? list.slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0); }).slice(0, 300) : list;
+      const it = pool[Math.floor(Math.random() * pool.length)];
+      return recent.indexOf(type + it.id) >= 0 ? null : { type: type, item: it };
+    }
+    function preload(url) {
+      return new Promise(function (res) { const im = new Image(); im.onload = function () { res(true); }; im.onerror = function () { res(false); }; im.src = url; });
+    }
+    /** Finds a title with full TMDB artwork + story (tries a few). */
+    async function prepare() {
+      for (let tries = 0; tries < 8; tries++) {
+        const e = randomEntry(); if (!e) continue;
+        const tm = await Tmdb.details(e.type, e.item.tmdb, e.item.name, e.item.year).catch(function () { return null; });
+        if (!tm || !tm.backdrop || !tm.overview) continue;
+        if (!(await preload(tm.backdrop))) continue;
+        if (tm.logo) await preload(tm.logo);
+        recent.push(e.type + e.item.id); if (recent.length > 40) recent.shift();
+        return { e: e, tm: tm };
+      }
+      return null;
+    }
+    function show(d) {
+      if (!box) return;
+      layer = 1 - layer;
+      const L = box.querySelectorAll('.sv-layer'), info = box.querySelector('.sv-info');
+      const cur = L[layer], old = L[1 - layer];
+      cur.style.backgroundImage = "url('" + d.tm.backdrop + "')";
+      cur.classList.remove('on'); void cur.offsetWidth; cur.classList.add('on');   // restart the slow zoom
+      old.classList.remove('on');
+      const tm = d.tm, meta = [tm.year, tm.genres.slice(0, 3).join(' · '), tm.seasons ? t('seasonsCount', tm.seasons) : ''].filter(Boolean).join('   •   ');
+      info.classList.remove('in'); void info.offsetWidth;
+      info.innerHTML = `<span class="sv-type">${esc(t(d.e.type === 'movie' ? 'typeMovie' : 'typeSeries'))}</span>
+        ${tm.logo ? `<img class="sv-logo" src="${esc(tm.logo)}">` : `<h1>${esc(tm.title)}</h1>`}
+        <div class="sv-meta">${tm.rating ? `<span class="sv-rate">★ ${esc(tm.rating)}</span>&emsp;•&emsp;` : ''}<bdi>${esc(meta)}</bdi></div>
+        <p class="sv-plot">${esc(tm.overview)}</p>`;
+      info.classList.add('in');
+      shown++;
+    }
+    async function cycle() {
+      if (!box) return;
+      const d = preparing ? await preparing : await prepare();
+      preparing = null;
+      if (!box) return;
+      if (d) show(d);
+      else if (!shown) { stop(); return; }   // nothing with TMDB artwork: don't show an empty screen
+      preparing = prepare();                  // get the next one ready while this one is on screen
+      slideTimer = setTimeout(cycle, SLIDE);
+    }
+    function clock() {
+      if (!box) return;
+      const d = new Date(), c = box.querySelector('.sv-clock');
+      if (c) c.textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+      setTimeout(clock, 15000);
+    }
+    async function start() {
+      const first = await prepare();
+      if (!first || !canStart()) return;
+      box = document.createElement('div');
+      box.className = 'saver';
+      box.innerHTML = '<div class="sv-layer"></div><div class="sv-layer"></div><div class="sv-shade"></div>' +
+        '<div class="sv-clock"></div><div class="sv-brand"><span class="logo small"></span></div><div class="sv-info"></div>';
+      document.body.appendChild(box);
+      shown = 0; preparing = Promise.resolve(first);
+      clock(); cycle();
+    }
+    function stop() {
+      clearTimeout(slideTimer); preparing = null;
+      if (!box) return;
+      const b = box; box = null;
+      b.classList.add('out');
+      setTimeout(function () { if (b.parentNode) b.parentNode.removeChild(b); }, 400);
+    }
+    // any key wakes the app; that key does nothing else
+    window.addEventListener('keydown', function (e) {
+      if (!box) return;
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      if (Nav.touch) Nav.touch();
+      stop();
+    }, true);
+    let checking = false;
+    setInterval(function () {
+      if (checking || !canStart()) return;
+      checking = true; start().then(function () { checking = false; }, function () { checking = false; });
+    }, 5000);
+    return { stop: stop, get active() { return !!box; } };
+  })();
+
+  /** Swaps a background picture only once it has loaded (no flash of an empty frame). */
+  function swapBg(el, url) {
+    if (!el || !url) return;
+    const im = new Image();
+    im.onload = function () { if (document.body.contains(el)) el.style.backgroundImage = "url('" + url + "')"; };
+    im.src = url;
+  }
+
   function renderHero(feat, idx) {
     const box = $('#hero');
     if (!box) return;
     const f = feat[idx], it = f.item, isMovie = f.type === 'movie';
     const focusedIn = Nav.current && box.contains(Nav.current) ? Nav.current.getAttribute('data-action') : null;
-    box.innerHTML = `<div class="hbg" style="background-image:url('${esc(it.logo)}')"></div><div class="hshade"></div>
-      <div class="hbody">
+    const oldBg = box.querySelector('.hbg.cur'), prevImg = oldBg ? oldBg.style.backgroundImage : '';
+    // cross-fade: the previous picture stays underneath while the new one fades in
+    box.innerHTML = `${prevImg ? `<div class="hbg prev" style="background-image:${prevImg.replace(/"/g, '&quot;')}"></div>` : ''}
+      <div class="hbg cur${prevImg ? ' fadein' : ''}" style="background-image:url('${esc(it.logo)}')"></div><div class="hshade"></div>
+      <div class="hbody${prevImg ? ' fadein' : ''}">
         <span class="hbadge">● ${esc(t('newBadge'))} · ${esc(t(isMovie ? 'typeMovie' : 'typeSeries'))}</span>
         <div id="htitle"><h1>${esc(Clean.title(it.name))}</h1></div>
         <div class="hmeta" id="hmeta">${it.rating && it.rating !== '0' ? `<span class="star-inline">★ ${esc(String(it.rating).slice(0, 3))}</span>` : ''}${esc(it.year || '')}</div>
@@ -1688,24 +1800,25 @@
     const info = f.type === 'movie' ? Api.vodInfo(S.sub, it.id) : (S.sub.type === 'xtream' ? Api.seriesInfo(S.sub, it.id).catch(function () { return null; }) : Promise.resolve(null));
     info.then(function (pi) {
       if (!$('#hero') || feat[idx] !== f) return;
-      if (pi && pi.backdrop) $('.hbg').style.backgroundImage = "url('" + pi.backdrop + "')";
+      if (pi && pi.backdrop) swapBg($('.hbg.cur'), pi.backdrop);
       if (pi && pi.plot && !it.plot) $('#hplot').textContent = pi.plot;
       return Tmdb.details(f.type, pi && pi.tmdb, it.name, it.year).then(function (tm) {
         if (!tm || !$('#hero') || feat[idx] !== f) return;
-        if (tm.backdrop) $('.hbg').style.backgroundImage = "url('" + tm.backdrop + "')";
+        if (tm.backdrop) swapBg($('.hbg.cur'), tm.backdrop);
         $('#htitle').innerHTML = tm.logo ? `<img class="hlogo" src="${esc(tm.logo)}">` : `<h1>${esc(tm.title || Clean.title(it.name))}</h1>`;
         $('#hmeta').innerHTML = (tm.rating ? `<span class="star-inline">★ ${esc(tm.rating)}</span>` : '') + esc([tm.year, tm.genres.slice(0, 2).join(' · ')].filter(Boolean).join('   •   '));
         if (tm.overview) $('#hplot').textContent = tm.overview;
       });
     }).catch(function () {});
     clearInterval(heroTimer);
+    // every 5 s, also while Play / Details / + is selected (focus stays on the same button)
     heroTimer = setInterval(function () {
       if (screen.name !== 'home' || S.ui.section !== 'home' || !$('#hero')) { clearInterval(heroTimer); return; }
-      if (Nav.current && $('#hero').contains(Nav.current)) return; // don't rotate under the user's focus
-      if (Nav.idleFor && Nav.idleFor() < 6000) return;              // nor while the remote is in use (repaint is heavy on TVs)
+      if (Nav.idleFor && Nav.idleFor() < 1500) return;              // not in the middle of a key press
+      if (document.querySelector('.modal, .saver')) return;
       const hb = $('#hero'); if (hb && hb.getBoundingClientRect().bottom < 0) return;   // scrolled away
       renderHero(feat, (idx + 1) % feat.length);
-    }, 8000);
+    }, 5000);
   }
 
   // ---- matches strip
@@ -1914,6 +2027,7 @@
     let overlayTimer = null, retries = 0, retryTimer = null, saveTimer = null, epgTimerP = null, numBuf = '', numTimer = null;
     let cur = req, opening = false;
 
+    Saver.stop();
     setScreen('player', function () {
       document.body.classList.add('playing');
       app.innerHTML = `<div class="player-ui">

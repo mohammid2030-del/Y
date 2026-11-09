@@ -10,7 +10,7 @@
 
   var current = null;
   var lastRect = null;        // where focus was, to recover when the focused element is re-rendered
-  var lastKeyAt = 0, lastAnyKey = 0;
+  var lastKeyAt = 0, lastAnyKey = Date.now();
   var lastContent = null;     // last focused element outside the top navigation
   var keyHandler = null;   // screen-level handler, return true to consume
   var backHandler = null;
@@ -314,6 +314,7 @@
     get current() { return current; },
     /** ms since the last remote key — background work waits until the viewer pauses. */
     idleFor: function () { return Date.now() - lastAnyKey; },
+    touch: function () { lastAnyKey = Date.now(); },
     reveal: reveal,
     setKeyHandler: function (fn) { keyHandler = fn; },
     setBackHandler: function (fn) { backHandler = fn; },
