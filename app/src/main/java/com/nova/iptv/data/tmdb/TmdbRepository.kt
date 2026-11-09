@@ -127,10 +127,16 @@ class TmdbRepository @Inject constructor(
         runCatching { diskDir.listFiles()?.forEach { it.delete() } }
     }
 
+    @Volatile private var langCache = ""
+    @Volatile private var langAt = 0L
+    /** App language — cached: asking the system on every title made long lists and the movie page slow. */
     private fun lang(): String {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (langCache.isNotEmpty() && now - langAt < 3000) return langCache
         val tag = AppCompatDelegate.getApplicationLocales().toLanguageTags().substringBefore(',')
         val l = tag.substringBefore('-').ifBlank { Locale.getDefault().language }
-        return if (l == "ar") "ar" else "en"
+        langCache = if (l == "ar") "ar" else "en"; langAt = now
+        return langCache
     }
 
     /**

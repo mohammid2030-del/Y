@@ -77,7 +77,11 @@ class LibraryRepository @Inject constructor(
         val clean: Map<Long, Pair<String, String>>,
         val titleTmdb: Map<String, String>,
         val tmdbCount: Map<String, Int>,
-    )
+    ) {
+        @Volatile var groupsVersion = -1
+        @Volatile var keyOf: Map<Long, String> = emptyMap()
+        @Volatile var groups: Map<String, List<LibItem>> = emptyMap()
+    }
 
     private val lock = Mutex()
     private val cache = HashMap<String, Pair<String, Index>>()
@@ -102,8 +106,30 @@ class LibraryRepository @Inject constructor(
 
     private fun series(idx: Index) = idx.type == ContentType.SERIES
 
-    /** Same title everywhere: provider TMDB id, a sibling copy's id, or an id TMDB gave us; otherwise the cleaned title + year. */
+    /** Group key of every title, worked out once (and again only when TMDB identified more titles). */
+    private fun ensureGroups(idx: Index) {
+        val v = tmdb.idsVersion
+        if (idx.groupsVersion == v) return
+        synchronized(idx) {
+            if (idx.groupsVersion == v) return
+            val keys = HashMap<Long, String>(idx.items.size * 2)
+            val groups = HashMap<String, MutableList<LibItem>>()
+            for (m in idx.items) {
+                val k = rawGroupKey(idx, m)
+                keys[m.id] = k
+                groups.getOrPut(k) { mutableListOf() } += m
+            }
+            idx.keyOf = keys; idx.groups = groups; idx.groupsVersion = v
+        }
+    }
+
     fun groupKey(idx: Index, m: LibItem): String {
+        if (idx.groupsVersion == tmdb.idsVersion) idx.keyOf[m.id]?.let { return it }
+        return rawGroupKey(idx, m)
+    }
+
+    /** Same title everywhere: provider TMDB id, a sibling copy's id, or an id TMDB gave us; otherwise the cleaned title + year. */
+    private fun rawGroupKey(idx: Index, m: LibItem): String {
         if (m.tmdb.isNotEmpty()) return "tmdb:${m.tmdb}"
         val tk = idx.key[m.id] ?: m.id.toString()
         idx.titleTmdb[tk]?.let { return "tmdb:$it" }
@@ -120,6 +146,7 @@ class LibraryRepository @Inject constructor(
     }
 
     fun collapse(idx: Index, source: List<LibItem>): List<LibItem> {
+        ensureGroups(idx)
         val best = LinkedHashMap<String, LibItem>()
         for (m in source) {
             val k = groupKey(idx, m)
@@ -135,9 +162,9 @@ class LibraryRepository @Inject constructor(
 
     /** Every copy of the same title, Arabic first (dubbed, subtitled, Arabic), then best quality. */
     fun versions(idx: Index, item: LibItem): List<Version> {
+        ensureGroups(idx)
         val g = groupKey(idx, item)
-        val list = if (g.startsWith("tmdb:")) idx.items.filter { groupKey(idx, it) == g }
-        else idx.variants[g] ?: listOf(item)
+        val list = idx.groups[g] ?: idx.variants[g] ?: listOf(item)
         return list.ifEmpty { listOf(item) }.map { m ->
             val cat = idx.categories[m.categoryId]?.name.orEmpty()
             val (label, rank) = language(m.name, cat)
@@ -148,7 +175,7 @@ class LibraryRepository @Inject constructor(
     suspend fun versionsOf(subId: Long, type: String, contentId: Long): List<Version> {
         val idx = index(subId, type)
         val item = idx.byId[contentId] ?: return emptyList()
-        return versions(idx, item)
+        return withContext(Dispatchers.Default) { versions(idx, item) }
     }
 
     /** Asks TMDB about titles it hasn't seen yet (cached), so copies merge and genre filters work. */
@@ -172,7 +199,9 @@ class LibraryRepository @Inject constructor(
     fun tmdbVersion() = tmdb.idsVersion
 
     /** A title a person is known for, if this subscription has it: the content row id. */
-    suspend fun find(subId: Long, work: com.nova.iptv.data.tmdb.KnownWork): Long? {
+    suspend fun find(subId: Long, work: com.nova.iptv.data.tmdb.KnownWork): Long? = withContext(Dispatchers.Default) { findIn(subId, work) }
+
+    private suspend fun findIn(subId: Long, work: com.nova.iptv.data.tmdb.KnownWork): Long? {
         val idx = index(subId, if (work.isTv) ContentType.SERIES else ContentType.MOVIE)
         val tid = work.id.toString()
         idx.items.firstOrNull { it.tmdb == tid }?.let { return best(idx, it).id }
@@ -184,13 +213,15 @@ class LibraryRepository @Inject constructor(
         }
         if (hits.isNotEmpty()) return best(idx, hits.first()).id
         // titles TMDB already identified with this id
-        return idx.items.firstOrNull { tmdb.knownId(work.isTv, it.name, it.year) == work.id }?.let { best(idx, it).id }
+        ensureGroups(idx)
+        return idx.groups["tmdb:${work.id}"]?.firstOrNull()?.let { best(idx, it).id }
     }
 
     private fun best(idx: Index, m: LibItem): LibItem = versions(idx, m).firstOrNull()?.item ?: m
 
     /** Copies count for the card badge without scanning the whole library (title-key copies + TMDB-id copies seen). */
     fun versionCountFast(idx: Index, item: LibItem): Int {
+        if (idx.groupsVersion == tmdb.idsVersion) idx.groups[groupKey(idx, item)]?.let { return it.size }
         val g = groupKey(idx, item)
         if (!g.startsWith("tmdb:")) return idx.variants[g]?.size ?: 1
         val tk = idx.key[item.id]
