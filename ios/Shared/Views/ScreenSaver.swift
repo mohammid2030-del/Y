@@ -97,11 +97,15 @@ enum TrailerLauncher {
             if !k.isEmpty { play(k); return }
             #endif
             let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            var urls: [URL] = !k.isEmpty
-                ? ["youtube://watch?v=\(k)", "youtube://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
-                : ["youtube://results?search_query=\(q)", "youtube://www.youtube.com/results?search_query=\(q)", "https://www.youtube.com/results?search_query=\(q)"].compactMap(URL.init)
             #if os(tvOS)
-            urls.removeAll { $0.scheme == "https" }   // no browser on Apple TV
+            // Apple TV's YouTube app plays a video only with youtube://watch/<id> (other forms just open its home page).
+            // It has no search link, so without a video we say so instead of dropping the viewer on YouTube's home.
+            guard !k.isEmpty else { play(nil); return }
+            let urls: [URL] = ["youtube://watch/\(k)", "youtube://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
+            #else
+            let urls: [URL] = !k.isEmpty
+                ? ["youtube://watch?v=\(k)", "youtube://www.youtube.com/watch?v=\(k)", "https://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
+                : ["youtube://results?search_query=\(q)", "youtube://www.youtube.com/results?search_query=\(q)", "https://www.youtube.com/results?search_query=\(q)"].compactMap(URL.init)
             #endif
             func attempt(_ i: Int) {
                 guard i < urls.count else { play(nil); return }
