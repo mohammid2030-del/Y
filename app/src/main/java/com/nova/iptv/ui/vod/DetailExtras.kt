@@ -85,7 +85,7 @@ class DetailExtras(private val library: LibraryRepository, private val tmdb: Tmd
             if (personLoading != p) return@launch   // cancelled
             personLoading = null
             person = info
-            info?.known?.forEach { w -> launch { found["${w.isTv}|${w.id}"] = runCatching { library.find(subId, w) }.getOrNull() } }
+            info?.known?.forEach { w -> found["${w.isTv}|${w.id}"] = runCatching { library.find(subId, w) }.getOrNull() }
         }
     }
 

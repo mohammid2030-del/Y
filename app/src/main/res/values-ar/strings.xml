@@ -325,6 +325,6 @@
     <string name="g_war">حرب</string>
     <string name="g_documentary">وثائقي</string>
     <string name="known_for">اشتهر بـ</string>
-    <string name="not_in_library">غير موجود في اشتراكك</string>
+    <string name="not_in_library">غير متوفر</string>
     <string name="born">مواليد %1$s</string>
 </resources>

@@ -77,6 +77,7 @@ class LibraryRepository @Inject constructor(
         val clean: Map<Long, Pair<String, String>>,
         val titleTmdb: Map<String, String>,
         val tmdbCount: Map<String, Int>,
+        val byNorm: Map<String, List<LibItem>>,
     ) {
         @Volatile var groupsVersion = -1
         @Volatile var keyOf: Map<Long, String> = emptyMap()
@@ -207,9 +208,9 @@ class LibraryRepository @Inject constructor(
         idx.items.firstOrNull { it.tmdb == tid }?.let { return best(idx, it).id }
         val names = listOf(work.title, work.original).filter { it.isNotBlank() }.map { normalize(cleanFull(it).first) }.toSet()
         val y = work.year.toIntOrNull()
-        val hits = idx.items.filter { m ->
-            val c = idx.clean[m.id] ?: return@filter false
-            normalize(c.first) in names && (y == null || c.second.toIntOrNull()?.let { kotlin.math.abs(it - y) <= 1 } != false)
+        // O(1) lookup by normalized title (scanning the whole library per title froze the actor page)
+        val hits = names.flatMap { idx.byNorm[it].orEmpty() }.filter { m ->
+            y == null || idx.clean[m.id]?.second?.toIntOrNull()?.let { kotlin.math.abs(it - y) <= 1 } != false
         }
         if (hits.isNotEmpty()) return best(idx, hits.first()).id
         // titles TMDB already identified with this id
@@ -373,7 +374,8 @@ class LibraryRepository @Inject constructor(
             }
             val tmdbCount = HashMap<String, Int>()
             items.forEach { if (it.tmdb.isNotEmpty()) tmdbCount[it.tmdb] = (tmdbCount[it.tmdb] ?: 0) + 1 }
-            return Index(type, items, items.associateBy { it.id }, catMap, shelves, shelfOf, key, variants, quality, clean, titleTmdb, tmdbCount)
+            val byNorm = byTitle.mapValues { (_, l) -> l.map { it.first } }
+            return Index(type, items, items.associateBy { it.id }, catMap, shelves, shelfOf, key, variants, quality, clean, titleTmdb, tmdbCount, byNorm)
         }
     }
 }

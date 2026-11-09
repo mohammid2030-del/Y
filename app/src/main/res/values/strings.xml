@@ -326,6 +326,6 @@
     <string name="g_war">War</string>
     <string name="g_documentary">Documentary</string>
     <string name="known_for">Known for</string>
-    <string name="not_in_library">Not in your subscription</string>
+    <string name="not_in_library">Not available</string>
     <string name="born">Born %1$s</string>
 </resources>
