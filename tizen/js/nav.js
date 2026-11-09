@@ -92,7 +92,8 @@
         else if (r.top < topLimit) dy = r.top - topLimit;
         else if (r.bottom > bottomLimit) dy = Math.min(r.bottom - bottomLimit, r.top - topLimit);
       }
-      if (p.scrollWidth > p.clientWidth + 1) {
+      // sideways only inside rows (cast, posters, chips) — never shift a whole page sideways
+      if (p.scrollWidth > p.clientWidth + 1 && !(p.scrollHeight > p.clientHeight + 1)) {
         var l = pr.left + 50, rr = pr.right - 50;
         if (r.left < l) dx = r.left - l; else if (r.right > rr) dx = Math.min(r.right - rr, r.left - l);
       }
