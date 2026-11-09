@@ -1991,11 +1991,17 @@
 
   // ---- trailer: opens in the TV's YouTube app (TMDB trailer, or a YouTube search for Arabic / Turkish titles TMDB lacks)
   const YOUTUBE_APP = '111299001912';
+  /** What to search on YouTube, and the names the video's title must contain (so we never pick an unrelated clip). */
   function trailerQuery(tm, item) {
     const name = (tm && (tm.original || tm.title)) || Clean.title(item.name);
-    const year = (tm && tm.year) || item.year || '';
+    const year = String((tm && tm.year) || item.year || '').slice(0, 4);
+    const series = !!(tm && tm.seasons) || (curDetail && curDetail.type === 'series');
     const arabic = /[\u0600-\u06FF]/.test(name);
-    return (name + ' ' + String(year).slice(0, 4) + ' ' + (arabic ? 'اعلان' : 'trailer')).replace(/\s+/g, ' ').trim();
+    // "اعلان" alone also means a TV commercial — say what it is: مسلسل / فيلم + برومو / اعلان رسمي
+    const q = arabic ? (series ? 'مسلسل ' + name + ' برومو' : 'فيلم ' + name + ' ' + year + ' اعلان رسمي')
+      : name + ' ' + year + (series ? ' series' : '') + ' official trailer';
+    const names = [name, tm && tm.title, Clean.title(item.name)].filter(Boolean);
+    return { q: q.replace(/\s+/g, ' ').trim(), names: names };
   }
   function launchYouTube(values, onFail) {
     try {
@@ -2012,11 +2018,10 @@
     let k = String(key || '').replace(/[^A-Za-z0-9_-]/g, '');
     if (!k && query && YouTube.enabled()) {
       toast(t('findingTrailer'));
-      k = await YouTube.find(query);
+      k = await YouTube.find(query.q, query.names);
     }
     if (k) { embedTrailer(k); return; }
-    if (query) { launchYouTube('search_query=' + encodeURIComponent(query), function () { toast(t('noTrailer')); }); return; }
-    toast(t('noTrailer'));
+    toast(t('noTrailer'));   // nothing that really is this title's trailer: say so instead of showing a random video
   }
   function embedTrailer(k) {
     const prev = screen;

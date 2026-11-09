@@ -517,23 +517,33 @@
    * whole project, so every answer is remembered (also "nothing found") and never searched again.
    */
   var ytCache = null;
+  /** Title comparison that ignores Arabic letter variants, diacritics and punctuation. */
+  function ytNorm(s) {
+    return String(s || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+      .replace(/[^a-z0-9\u0600-\u06FF\u00C0-\u024F]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
   global.YouTube = {
     enabled: function () { return !!(global.NOVA_CONFIG && NOVA_CONFIG.yt); },
-    find: async function (query) {
+    find: async function (query, names) {
       if (!this.enabled() || !query) return '';
-      if (!ytCache) ytCache = (await Store.get('ytTrailers')) || {};
+      if (!ytCache) ytCache = (await Store.get('ytTrailers2')) || {};
       var key = query.toLowerCase();
       if (ytCache[key] !== undefined) return ytCache[key];
-      var url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=6&videoEmbeddable=true&safeSearch=moderate' +
+      var url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&videoEmbeddable=true&safeSearch=moderate' +
         '&q=' + encodeURIComponent(query) + '&key=' + encodeURIComponent(NOVA_CONFIG.yt);
       var r;
       try { r = await Api.json(url, 12000); } catch (e) { return ''; }   // quota used up / offline: try again another time
       var items = (r && r.items) || [];
-      var words = /trailer|teaser|official|promo|اعلان|إعلان|برومو|تريلر|fragman|tanıtım/i;
-      var best = items.filter(function (it) { return words.test((it.snippet && it.snippet.title) || ''); })[0] || items[0];
+      // the video title must name this title (any of its names), and look like a trailer / promo
+      var wanted = (names || []).map(ytNorm).filter(function (n) { return n.length >= 2; });
+      var words = /trailer|teaser|promo|official|اعلان|إعلان|برومو|تريلر|الاعلان الرسمي|fragman|tanıtım/i;
+      var music = /اغنية|أغنية|كليب|music video|lyrics|official video|official audio|\bmv\b/i;
+      function names_ok(it) { var tt = ytNorm((it.snippet && it.snippet.title) || ''); return wanted.some(function (n) { return tt.indexOf(n) >= 0; }); }
+      var good = items.filter(function (it) { var tt = (it.snippet && it.snippet.title) || ''; return names_ok(it) && words.test(tt) && !music.test(tt); });
+      var best = good[0];
       var id = best && best.id && best.id.videoId ? best.id.videoId : '';
       ytCache[key] = id;
-      Store.set('ytTrailers', ytCache);
+      Store.set('ytTrailers2', ytCache);
       return id;
     }
   };

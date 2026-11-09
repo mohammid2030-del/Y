@@ -56,22 +56,38 @@ final class ActivityMonitor: NSObject, UIGestureRecognizerDelegate {
 /// Opens a trailer in the YouTube app (Apple TV and iPad); when TMDB has no trailer — common for
 /// Arabic and Turkish titles — opens a YouTube search for "<title> <year> إعلان / trailer".
 enum TrailerLauncher {
-    static func query(_ tm: TMDBInfo?, _ item: MediaItem) -> String {
+    struct Query { let q: String; let names: [String] }
+
+    /// What to search on YouTube, and the names the video's title must contain (never an unrelated clip).
+    static func query(_ tm: TMDBInfo?, _ item: MediaItem, series: Bool) -> Query {
         let name = (tm.map { $0.original.isEmpty ? $0.title : $0.original }) ?? Clean.title(item.name)
         let year = tm?.year ?? String(item.year.prefix(4))
         let arabic = name.range(of: "[\\u0600-\\u06FF]", options: .regularExpression) != nil
-        return "\(name) \(year) \(arabic ? "اعلان" : "trailer")".replacingOccurrences(of: "  ", with: " ")
+        // "اعلان" alone also means a TV commercial — say what it is
+        let q = arabic ? (series ? "مسلسل \(name) برومو" : "فيلم \(name) \(year) اعلان رسمي")
+                       : "\(name) \(year)\(series ? " series" : "") official trailer"
+        let names = [name, tm?.title ?? "", Clean.title(item.name)].filter { !$0.isEmpty }
+        return Query(q: q.split(separator: " ").joined(separator: " "), names: names)
+    }
+
+    static func norm(_ s: String) -> String {
+        var t = s.lowercased().folding(options: [.diacriticInsensitive], locale: nil)
+        t = t.replacingOccurrences(of: "[\\u064B-\\u0652\\u0640]", with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: "[أإآ]", with: "ا", options: .regularExpression)
+            .replacingOccurrences(of: "ة", with: "ه").replacingOccurrences(of: "ى", with: "ي")
+        t = t.replacingOccurrences(of: "[^\\p{L}\\p{N}]+", with: " ", options: .regularExpression)
+        return t.split(separator: " ").joined(separator: " ")
     }
 
     /// Finds a trailer on YouTube when TMDB has none (YouTube Data API, 100 searches a day for the project:
     /// every answer is remembered, also "nothing found").
-    static func search(_ query: String) async -> String {
+    static func search(_ query: String, names: [String]) async -> String {
         let apiKey = CloudConfig.youtubeKey
         guard !apiKey.isEmpty, !query.isEmpty else { return "" }
-        let cacheKey = "yt|" + query.lowercased()
+        let cacheKey = "yt2|" + query.lowercased()
         if let hit = UserDefaults.standard.string(forKey: cacheKey) { return hit }
         var c = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
-        c.queryItems = [.init(name: "part", value: "snippet"), .init(name: "type", value: "video"), .init(name: "maxResults", value: "6"),
+        c.queryItems = [.init(name: "part", value: "snippet"), .init(name: "type", value: "video"), .init(name: "maxResults", value: "10"),
                         .init(name: "videoEmbeddable", value: "true"), .init(name: "safeSearch", value: "moderate"),
                         .init(name: "q", value: query), .init(name: "key", value: apiKey)]
         guard let url = c.url, let res = try? await URLSession.shared.data(from: url) else { return "" }
@@ -80,8 +96,15 @@ enum TrailerLauncher {
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }   // quota / offline: try another time
         let items = (o["items"] as? [[String: Any]]) ?? []
         func title(_ i: [String: Any]) -> String { ((i["snippet"] as? [String: Any])?["title"] as? String) ?? "" }
-        let words = try? NSRegularExpression(pattern: "trailer|teaser|official|promo|اعلان|إعلان|برومو|تريلر|fragman|tanıtım", options: .caseInsensitive)
-        let best = items.first { i in let t = title(i); return words?.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil } ?? items.first
+        // the video title must name this title and look like a trailer / promo (not a song or a commercial)
+        let wanted = names.map(norm).filter { $0.count >= 2 }
+        func matches(_ t: String, _ pattern: String) -> Bool { t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
+        let best = items.first { i in
+            let t = title(i), n = norm(t)
+            return wanted.contains { n.contains($0) }
+                && matches(t, "trailer|teaser|promo|official|اعلان|إعلان|برومو|تريلر|fragman|tanıtım")
+                && !matches(t, "اغنية|أغنية|كليب|music video|lyrics|official video|official audio")
+        }
         let id = ((best?["id"] as? [String: Any])?["videoId"] as? String) ?? ""
         UserDefaults.standard.set(id, forKey: cacheKey)
         return id
@@ -89,23 +112,22 @@ enum TrailerLauncher {
 
     /// TMDB trailer, else a YouTube API search. iPad plays it inside the app (`play`); Apple TV has no web view,
     /// so it opens the video in the YouTube app. Without any video: a YouTube search.
-    @MainActor static func open(key: String?, query: String, play: @escaping (String?) -> Void) {
+    @MainActor static func open(key: String?, query: Query, play: @escaping (String?) -> Void) {
         Task { @MainActor in
             var k = (key ?? "").filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-            if k.isEmpty { k = await search(query) }
+            if k.isEmpty { k = await search(query.q, names: query.names) }
             #if os(iOS)
             if !k.isEmpty { play(k); return }
             #endif
-            let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
             #if os(tvOS)
             // Apple TV's YouTube app plays a video only with youtube://watch/<id> (other forms just open its home page).
             // It has no search link, so without a video we say so instead of dropping the viewer on YouTube's home.
             guard !k.isEmpty else { play(nil); return }
             let urls: [URL] = ["youtube://watch/\(k)", "youtube://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
             #else
-            let urls: [URL] = !k.isEmpty
-                ? ["youtube://watch?v=\(k)", "youtube://www.youtube.com/watch?v=\(k)", "https://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
-                : ["youtube://results?search_query=\(q)", "youtube://www.youtube.com/results?search_query=\(q)", "https://www.youtube.com/results?search_query=\(q)"].compactMap(URL.init)
+            // no real trailer found: say so (a YouTube search used to land on unrelated videos)
+            guard !k.isEmpty else { play(nil); return }
+            let urls: [URL] = ["youtube://watch?v=\(k)", "youtube://www.youtube.com/watch?v=\(k)", "https://www.youtube.com/watch?v=\(k)"].compactMap(URL.init)
             #endif
             func attempt(_ i: Int) {
                 guard i < urls.count else { play(nil); return }

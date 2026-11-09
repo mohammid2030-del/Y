@@ -421,7 +421,7 @@ struct MovieDetailView: View {
                     .buttonStyle(.bordered)
             }
             // YouTube app: TMDB trailer, or a YouTube search when TMDB has none (Arabic / Turkish titles)
-            Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown)) { trailer = $0 ?? "" } } label: {
+            Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown, series: false)) { trailer = $0 ?? "" } } label: {
                 Label(L.t("trailer"), systemImage: "film")
             }.buttonStyle(.bordered)
             if state.variants(.movie, item).count > 1 {
@@ -474,7 +474,7 @@ struct SeriesDetailView: View {
                             .focused($sFocus, equals: .resume)
                             #endif
                         }
-                        Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown)) { trailer = $0 ?? "" } } label: {
+                        Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown, series: true)) { trailer = $0 ?? "" } } label: {
                             Label(L.t("trailer"), systemImage: "film")
                         }.buttonStyle(.bordered)
                         if state.variants(.series, item).count > 1 {
