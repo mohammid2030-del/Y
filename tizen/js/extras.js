@@ -49,7 +49,7 @@
   // ------------------------------------------------------------------ TMDB
   var TMDB = 'https://api.themoviedb.org/3/';
   var tmdbKey = '';
-  var infoCache = {}, posterCache = {}, seasonCache = {};
+  var infoCache = {}, posterCache = {}, seasonCache = {}, seasonVidCache = {};
   var cleanMemo = {}, idsVer = 0, inflight = {}, idsLog = [];
   /** A title TMDB just identified — the library merges its copies incrementally from this log. */
   function noteId(type, title, y, id) { if (!id) return; idsLog.push([type, title, y, id]); idsVer = idsLog.length; }   // cleaning titles is costly on a TV CPU
@@ -120,7 +120,7 @@
       try { await tmdbGet('configuration', {}, k); } catch (e) { return false; }
       tmdbKey = k;
       await Store.set('tmdbKey', await Store.encrypt(k));
-      infoCache = {}; posterCache = {}; seasonCache = {};
+      infoCache = {}; posterCache = {}; seasonCache = {}; seasonVidCache = {};
       await Store.set('tmdbPosters2', {});
       return true;
     },
@@ -289,6 +289,22 @@
           });
         });
       }).then(function (info) { infoCache[key] = info; return info; }, function () { return null; });
+    },
+
+    /** Trailer / teaser of one season of a series (TMDB season videos), '' when TMDB has none. */
+    seasonTrailer: function (tvId, n) {
+      if (!tmdbKey || !tvId) return Promise.resolve('');
+      var ck = tvId + '|' + n + '|' + lang();
+      if (ck in seasonVidCache) return Promise.resolve(seasonVidCache[ck]);
+      var l = lang();
+      return tmdbGet('tv/' + tvId + '/season/' + n + '/videos', { language: l, include_video_language: l + ',en,null' }).then(function (o) {
+        var list = ((o && o.results) || []).filter(function (v) { return v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'); });
+        var rank = function (v) { return (v.type === 'Trailer' ? 0 : 10) + (v.iso_639_1 === l ? 0 : v.iso_639_1 === 'en' ? 1 : 2) - (v.official ? 0.5 : 0); };
+        list.sort(function (a, b) { return rank(a) - rank(b); });
+        var k = (list[0] || {}).key || '';
+        seasonVidCache[ck] = k;
+        return k;
+      }, function () { return ''; });
     },
 
     season: function (tvId, season) {
@@ -524,7 +540,23 @@
   }
   global.YouTube = {
     enabled: function () { return !!(global.NOVA_CONFIG && NOVA_CONFIG.yt); },
-    find: async function (query, names) {
+    /** Does a video title name season n ("Season 2", "S02", "الموسم الثاني", "الجزء 2", "2. Sezon")? */
+    seasonTest: function (n) {
+      var ar = ['', 'الاول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
+      function re(k) {
+        var num = '(?:0?' + k + '|' + String(k).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }) + (ar[k] ? '|' + ar[k] : '') + ')';
+        return new RegExp('(?:season|sezon|الموسم|موسم|الجزء|جزء)\\s*' + num + '(?![0-9])|(?:^|\\s)s0?' + k + '(?![0-9])|(?:^|\\s)' + k + '\\s*sezon', 'i');
+      }
+      var mine = re(n), others = [];
+      for (var k = 1; k <= 30; k++) if (k !== n) others.push(re(k));
+      return function (title) {
+        var t = ytNorm(title);
+        if (mine.test(t)) return true;
+        // season 1 is often just "the trailer": fine as long as no other season is named
+        return n === 1 && !others.some(function (r) { return r.test(t); });
+      };
+    },
+    find: async function (query, names, check) {
       if (!this.enabled() || !query) return '';
       if (!ytCache) ytCache = (await Store.get('ytTrailers2')) || {};
       var key = query.toLowerCase();
@@ -539,7 +571,7 @@
       var words = /trailer|teaser|promo|official|اعلان|إعلان|برومو|تريلر|الاعلان الرسمي|fragman|tanıtım/i;
       var music = /اغنية|أغنية|كليب|music video|lyrics|official video|official audio|\bmv\b/i;
       function names_ok(it) { var tt = ytNorm((it.snippet && it.snippet.title) || ''); return wanted.some(function (n) { return tt.indexOf(n) >= 0; }); }
-      var good = items.filter(function (it) { var tt = (it.snippet && it.snippet.title) || ''; return names_ok(it) && words.test(tt) && !music.test(tt); });
+      var good = items.filter(function (it) { var tt = (it.snippet && it.snippet.title) || ''; return names_ok(it) && words.test(tt) && !music.test(tt) && (!check || check(tt)); });
       var best = good[0];
       var id = best && best.id && best.id.videoId ? best.id.videoId : '';
       ytCache[key] = id;

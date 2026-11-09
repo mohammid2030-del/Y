@@ -277,6 +277,25 @@ actor TMDB {
         return p
     }
 
+    private var seasonVideos: [String: String] = [:]
+    /// Trailer / teaser of one season (TMDB season videos), "" when TMDB has none.
+    func seasonTrailer(tvID: Int, season: Int) async -> String {
+        guard !key.isEmpty, tvID > 0 else { return "" }
+        let ck = "\(tvID)|\(season)|\(lang)"
+        if let hit = seasonVideos[ck] { return hit }
+        let l = lang
+        guard let o = try? await get("tv/\(tvID)/season/\(season)/videos", ["language": l, "include_video_language": "\(l),en,null"]) else { return "" }
+        func rank(_ v: [String: Any]) -> Double {
+            (jstr(v["type"]) == "Trailer" ? 0 : 10) + (jstr(v["iso_639_1"]) == l ? 0 : jstr(v["iso_639_1"]) == "en" ? 1 : 2) - ((v["official"] as? Bool) == true ? 0.5 : 0)
+        }
+        let list = ((o["results"] as? [[String: Any]]) ?? [])
+            .filter { jstr($0["site"]) == "YouTube" && ["Trailer", "Teaser"].contains(jstr($0["type"])) }
+            .sorted { rank($0) < rank($1) }
+        let k = list.first.map { jstr($0["key"]) } ?? ""
+        seasonVideos[ck] = k
+        return k
+    }
+
     func season(tvID: Int, season: Int) async -> [Int: TMDBEpisode] {
         guard !key.isEmpty, tvID > 0 else { return [:] }
         let sk = "\(tvID)|\(season)|\(lang)"

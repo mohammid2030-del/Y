@@ -56,18 +56,19 @@ final class ActivityMonitor: NSObject, UIGestureRecognizerDelegate {
 /// Opens a trailer in the YouTube app (Apple TV and iPad); when TMDB has no trailer — common for
 /// Arabic and Turkish titles — opens a YouTube search for "<title> <year> إعلان / trailer".
 enum TrailerLauncher {
-    struct Query { let q: String; let names: [String] }
+    struct Query { let q: String; let names: [String]; var season = 0 }
 
     /// What to search on YouTube, and the names the video's title must contain (never an unrelated clip).
-    static func query(_ tm: TMDBInfo?, _ item: MediaItem, series: Bool) -> Query {
+    static func query(_ tm: TMDBInfo?, _ item: MediaItem, series: Bool, season: Int = 0) -> Query {
         let name = (tm.map { $0.original.isEmpty ? $0.title : $0.original }) ?? Clean.title(item.name)
         let year = tm?.year ?? String(item.year.prefix(4))
         let arabic = name.range(of: "[\\u0600-\\u06FF]", options: .regularExpression) != nil
         // "اعلان" alone also means a TV commercial — say what it is
-        let q = arabic ? (series ? "مسلسل \(name) برومو" : "فيلم \(name) \(year) اعلان رسمي")
+        let q = season > 0 ? (arabic ? "مسلسل \(name) الموسم \(season) برومو" : "\(name) season \(season) official trailer")
+              : arabic ? (series ? "مسلسل \(name) برومو" : "فيلم \(name) \(year) اعلان رسمي")
                        : "\(name) \(year)\(series ? " series" : "") official trailer"
         let names = [name, tm?.title ?? "", Clean.title(item.name)].filter { !$0.isEmpty }
-        return Query(q: q.split(separator: " ").joined(separator: " "), names: names)
+        return Query(q: q.split(separator: " ").joined(separator: " "), names: names, season: season)
     }
 
     static func norm(_ s: String) -> String {
@@ -81,7 +82,25 @@ enum TrailerLauncher {
 
     /// Finds a trailer on YouTube when TMDB has none (YouTube Data API, 100 searches a day for the project:
     /// every answer is remembered, also "nothing found").
-    static func search(_ query: String, names: [String]) async -> String {
+    /// Does a video title name season n ("Season 2", "S02", "الموسم الثاني", "الجزء 2", "2. Sezon")?
+    /// Season 1 is often just "the trailer": fine as long as no other season is named.
+    static func namesSeason(_ title: String, _ n: Int) -> Bool {
+        let t = norm(title)
+        let ar = ["", "الاول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر"]
+        func says(_ k: Int) -> Bool {
+            let east = Array("٠١٢٣٤٥٦٧٨٩")
+            let digits = String(String(k).compactMap { $0.wholeNumberValue.map { east[$0] } })
+            var num = "(?:0?\(k)|\(digits)"
+            if k < ar.count { num += "|" + ar[k] }
+            num += ")"
+            let p = "(?:season|sezon|الموسم|موسم|الجزء|جزء)\\s*\(num)(?![0-9])|(?:^|\\s)s0?\(k)(?![0-9])|(?:^|\\s)\(k)\\s*sezon"
+            return t.range(of: p, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        if says(n) { return true }
+        return n == 1 && !(2...30).contains { says($0) }
+    }
+
+    static func search(_ query: String, names: [String], season: Int = 0) async -> String {
         let apiKey = CloudConfig.youtubeKey
         guard !apiKey.isEmpty, !query.isEmpty else { return "" }
         let cacheKey = "yt2|" + query.lowercased()
@@ -104,6 +123,7 @@ enum TrailerLauncher {
             return wanted.contains { n.contains($0) }
                 && matches(t, "trailer|teaser|promo|official|اعلان|إعلان|برومو|تريلر|fragman|tanıtım")
                 && !matches(t, "اغنية|أغنية|كليب|music video|lyrics|official video|official audio")
+                && (season == 0 || namesSeason(t, season))
         }
         let id = ((best?["id"] as? [String: Any])?["videoId"] as? String) ?? ""
         UserDefaults.standard.set(id, forKey: cacheKey)
@@ -115,7 +135,7 @@ enum TrailerLauncher {
     @MainActor static func open(key: String?, query: Query, play: @escaping (String?) -> Void) {
         Task { @MainActor in
             var k = (key ?? "").filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-            if k.isEmpty { k = await search(query.q, names: query.names) }
+            if k.isEmpty { k = await search(query.q, names: query.names, season: query.season) }
             #if os(iOS)
             if !k.isEmpty { play(k); return }
             #endif

@@ -989,7 +989,14 @@
           el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
         };
         actions.reload = load;
-        actions.trailer = function () { showTrailer(tm && tm.trailer, trailerQuery(tm, item)); };
+        actions.trailer = async function () {
+          // several seasons: ask which season's trailer
+          const max = Math.min(30, Math.max((tm && tm.seasons) || 0, seasons.length ? seasons[seasons.length - 1] : 0));
+          if (max < 2) { showTrailer(tm && tm.trailer, trailerQuery(tm, item)); return; }
+          const list = []; for (let n = 1; n <= max; n++) list.push({ value: n, label: t('season', n) });
+          const n = await chooseBox(t('trailerSeason'), list, season || max);
+          if (n !== undefined) showSeasonTrailer(tm, item, n);
+        };
         actions.person = function (el) { const c = tm && tm.cast[parseInt(el.getAttribute('data-i'), 10)]; if (c) showPerson(c); };
         actions.versions = function () { openTitle('series', item); };
         // keep the remote where it was when the page refreshes with more data (TMDB, episodes)
@@ -1992,13 +1999,24 @@
   // ---- trailer: opens in the TV's YouTube app (TMDB trailer, or a YouTube search for Arabic / Turkish titles TMDB lacks)
   const YOUTUBE_APP = '111299001912';
   /** What to search on YouTube, and the names the video's title must contain (so we never pick an unrelated clip). */
-  function trailerQuery(tm, item) {
+  /** One season's trailer: TMDB season videos, else a YouTube search that must name that season. */
+  async function showSeasonTrailer(tm, item, n) {
+    toast(t('findingTrailer'));
+    let k = tm && tm.id ? await Tmdb.seasonTrailer(tm.id, n) : '';
+    if (!k && YouTube.enabled()) {
+      const q = trailerQuery(tm, item, n);
+      k = await YouTube.find(q.q, q.names, YouTube.seasonTest(n));
+    }
+    if (k) embedTrailer(String(k).replace(/[^A-Za-z0-9_-]/g, '')); else toast(t('noTrailer'));
+  }
+  function trailerQuery(tm, item, seasonNo) {
     const name = (tm && (tm.original || tm.title)) || Clean.title(item.name);
     const year = String((tm && tm.year) || item.year || '').slice(0, 4);
     const series = !!(tm && tm.seasons) || (curDetail && curDetail.type === 'series');
     const arabic = /[\u0600-\u06FF]/.test(name);
     // "اعلان" alone also means a TV commercial — say what it is: مسلسل / فيلم + برومو / اعلان رسمي
-    const q = arabic ? (series ? 'مسلسل ' + name + ' برومو' : 'فيلم ' + name + ' ' + year + ' اعلان رسمي')
+    const q = seasonNo ? (arabic ? 'مسلسل ' + name + ' الموسم ' + seasonNo + ' برومو' : name + ' season ' + seasonNo + ' official trailer')
+      : arabic ? (series ? 'مسلسل ' + name + ' برومو' : 'فيلم ' + name + ' ' + year + ' اعلان رسمي')
       : name + ' ' + year + (series ? ' series' : '') + ' official trailer';
     const names = [name, tm && tm.title, Clean.title(item.name)].filter(Boolean);
     return { q: q.replace(/\s+/g, ' ').trim(), names: names };
