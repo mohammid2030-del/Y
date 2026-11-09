@@ -826,6 +826,15 @@
     if (info) redraw();
     const tm = await Tmdb.details('movie', info && info.tmdb, item.name, item.year);
     if (tm) { info = Object.assign({}, info || {}, { tm: tm }); redraw(); }
+    // other parts of the series (Fast & Furious 1, 2, 3…) — the ones you have open straight away
+    if (tm && tm.collection) {
+      const col = await Tmdb.collection(tm.collection.id);
+      if (col && col.parts.length > 1 && screen.name === 'detail' && curDetail && curDetail.item === item) {
+        col.parts.forEach(function (w) { w.found = Library.ready() ? Library.find('movie', w) : null; });
+        info = Object.assign({}, info, { parts: col });
+        redraw();
+      }
+    }
   }
 
   function detailHtml(item, info) {
@@ -857,7 +866,19 @@
           ${tm && tm.cast.length ? castRow(tm.cast) : info && info.cast ? `<p class="muted">${esc(info.cast)}</p>` : ''}
           ${(tm && tm.creators.length) || (info && info.director) ? `<p class="muted">${esc(t('director'))}: ${esc((tm && tm.creators.join('، ')) || info.director)}</p>` : ''}
         </div>
-      </div></div>`;
+      </div>
+      ${partsRow(info && info.parts, tm && tm.id)}</div>`;
+  }
+
+  /** Every part of the film series, in order; the ones in the subscription open directly. */
+  function partsRow(col, currentId) {
+    if (!col || !col.parts || col.parts.length < 2) return '';
+    return `<section class="parts"><h3>${esc(t('partsOf', col.name || ''))}</h3><div class="known-row" data-group>${col.parts.map(function (w, i) {
+      const here = w.id === currentId, ok = !!w.found;
+      return `<button data-f data-action="part" data-i="${i}" class="poster${ok || here ? '' : ' na'}${here ? ' current' : ''}">
+        <span class="pimg"><img src="${esc(w.poster)}">${here ? `<span class="rate">${esc(t('nowShowing'))}</span>` : ok ? '<span class="rate">▶</span>' : ''}</span>
+        <span class="ptitle">${esc(w.title)}</span><span class="psub">${esc(w.year)}</span></button>`;
+    }).join('')}</div></section>`;
   }
 
   function versionCount(type, item) {
@@ -877,6 +898,13 @@
   }
 
   function bindMovie(item, info) {
+    actions.part = function (el) {
+      const w = info && info.parts && info.parts.parts[parseInt(el.getAttribute('data-i'), 10)];
+      if (!w || (info.tm && w.id === info.tm.id)) return;
+      if (!w.found) { toast(t('notInSub', w.title)); return; }
+      const from = curDetail;
+      openTitle('movie', w.found, function () { if (from) detailStack.push(from); });
+    };
     actions.person = function (el) { const c = info && info.tm && info.tm.cast[parseInt(el.getAttribute('data-i'), 10)]; if (c) showPerson(c); };
     actions.versions = function () { openTitle('movie', item); };
     actions.play = function () { playVod({ kind: 'movie', item: item, title: item.name, logo: (info && info.image) || item.logo }); };

@@ -137,6 +137,66 @@ struct DetailBackdrop: View {
     }
 }
 
+/// Every part of a film series ("Fast & Furious 1, 2, 3…"); the ones in the subscription open directly.
+struct PartsRow: View {
+    let collectionID: Int
+    let currentID: Int
+    @EnvironmentObject var state: AppState
+    @State private var name = ""
+    @State private var parts: [KnownWork] = []
+    @State private var found: [Int: MediaItem] = [:]
+    var body: some View {
+        if parts.count > 1 {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: L.t("partsOf", name))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: Theme.isTV ? 28 : 14) {
+                        ForEach(parts) { w in card(w) }
+                    }
+                    .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 24 : 4)
+                }
+            }
+        } else {
+            Color.clear.frame(height: 1).task(id: collectionID) { await load() }
+        }
+    }
+
+    @ViewBuilder private func card(_ w: KnownWork) -> some View {
+        let here = w.id == currentID
+        let label = VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                RemoteImage(url: w.poster).frame(width: Theme.isTV ? 200 : 110, height: Theme.isTV ? 300 : 165)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(here ? Theme.blue : .clear, lineWidth: 4))
+                if here {
+                    Text(L.t("nowShowing")).font(.caption2.weight(.bold)).padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Theme.blue, in: Capsule()).padding(8)
+                }
+            }
+            Text(w.title).font(.caption.weight(.semibold)).lineLimit(2)
+            Text(w.year).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(width: Theme.isTV ? 200 : 110)
+        .foregroundStyle(.white)
+        .opacity(here || found[w.id] != nil ? 1 : 0.45)
+        if !here, let item = found[w.id] {
+            NavigationLink(value: Route.movie(item)) { label }.buttonStyle(LiftButtonStyle(radius: 14))
+        } else {
+            label
+        }
+    }
+
+    private func load() async {
+        guard let c = await TMDB.shared.collection(collectionID), c.parts.count > 1 else { return }
+        var f: [Int: MediaItem] = [:]
+        for w in c.parts where w.id != currentID {
+            if let hit = state.catalog.items(.movie).first(where: { $0.tmdb == String(w.id) }) { f[w.id] = hit; continue }
+            if let hit = await state.findInCatalog(w) { f[w.id] = hit.1 }
+        }
+        name = c.name; found = f; parts = c.parts
+    }
+}
+
 struct CastRow: View {
     let cast: [TMDBPerson]
     @EnvironmentObject var state: AppState
@@ -320,6 +380,7 @@ struct MovieDetailView: View {
                 else if let c = info?.cast, !c.isEmpty { Text(L.t("cast") + ": " + c).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.pad) }
                 let crew = tmdb?.creators.joined(separator: "، ") ?? info?.director ?? ""
                 if !crew.isEmpty { Text(L.t("director") + ": " + crew).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, Theme.pad) }
+                if let t = tmdb, t.collectionID > 0 { PartsRow(collectionID: t.collectionID, currentID: t.id) }
             }
             .padding(.bottom, 40)
         }

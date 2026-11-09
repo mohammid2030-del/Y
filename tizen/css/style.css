@@ -421,3 +421,7 @@ html[dir="rtl"] .sv-clock { right: auto; left: 80px; }
 html[dir="rtl"] .sv-brand { left: auto; right: 80px; }
 
 .trailer .trailer-wait { position: absolute; top: 50%; left: 50%; margin: -30px 0 0 -30px; }
+
+.parts { margin: 10px 0 30px; }
+.parts h3 { font-size: 30px; margin: 0 0 6px; }
+.parts .poster.current .pimg { outline: 3px solid var(--primary); }

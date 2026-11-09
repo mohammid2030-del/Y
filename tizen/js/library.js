@@ -255,6 +255,8 @@
     /** A title from an actor's list, if the subscription has it (instant lookup). */
     find: function (type, w) {
       if (!idx) return null;
+      // exact TMDB match first (provider id or a title TMDB already identified)
+      if (w.id && idx.groups[type] && idx.groups[type]['tmdb:' + w.id] && idx.groups[type]['tmdb:' + w.id].length) return idx.groups[type]['tmdb:' + w.id][0];
       var names = [w.title, w.original].filter(Boolean).map(function (n) { return normalize(Clean.full(n).title); });
       var hits = [];
       names.forEach(function (n) { hits = hits.concat(idx.byNorm[type + '|' + n] || []); });

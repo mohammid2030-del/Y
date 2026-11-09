@@ -187,6 +187,24 @@
     },
 
     /** Biography and best-known titles of a cast member. */
+    /** The other parts of a film series (TMDB collection), in release order. */
+    collection: function (id) {
+      if (!tmdbKey || !id) return Promise.resolve(null);
+      var key = 'col|' + lang() + '|' + id;
+      if (infoCache[key] !== undefined) return Promise.resolve(infoCache[key]);
+      return tmdbGet('collection/' + id, { language: lang() }).then(function (o) {
+        var parts = (o.parts || []).filter(function (d) { return d.release_date || d.poster_path; })
+          .sort(function (a, b) { return String(a.release_date || '9999').localeCompare(String(b.release_date || '9999')); })
+          .map(function (d) {
+            var title = d.title || '';
+            return { id: d.id, tv: false, poster: img(d.poster_path, 'w342'), title: title, original: d.original_title || '', year: String(d.release_date || '').slice(0, 4) };
+          });
+        var out = { name: o.name || '', parts: parts };
+        infoCache[key] = out;
+        return out;
+      }, function () { return null; });
+    },
+
     person: function (id) {
       if (!tmdbKey || !id) return Promise.resolve(null);
       var l = lang();
@@ -257,6 +275,7 @@
               cast: ((o.credits && o.credits.cast) || []).slice(0, 12).map(function (p) { return { id: p.id, name: p.name, role: p.character || '', photo: img(p.profile_path, 'w185') }; }),
               creators: isTv ? (o.created_by || []).map(function (p) { return p.name; }) : crew.filter(function (p) { return p.job === 'Director'; }).map(function (p) { return p.name; }),
               seasons: o.number_of_seasons || 0,
+              collection: o.belongs_to_collection && o.belongs_to_collection.id ? { id: o.belongs_to_collection.id, name: o.belongs_to_collection.name || '' } : null,
               trailer: trailer
             };
             if (!info.trailer && l !== 'en') {

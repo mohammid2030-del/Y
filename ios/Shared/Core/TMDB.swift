@@ -16,6 +16,8 @@ struct TMDBInfo {
     var backdrop = "", poster = "", logo = "", trailer = ""
     /// Logo in the app language only, and whether TMDB has the title + story in the app language.
     var logoLocal = "", localText = false
+    /// The film series this movie belongs to (TMDB collection), 0 when none.
+    var collectionID = 0, collectionName = ""
     var cast: [TMDBPerson] = []
     var creators: [String] = []
 }
@@ -200,6 +202,7 @@ actor TMDB {
         info.year = String(jstr(o[tv ? "first_air_date" : "release_date"]).prefix(4))
         info.runtime = tv ? jint((o["episode_run_time"] as? [Any])?.first) : jint(o["runtime"])
         info.seasons = jint(o["number_of_seasons"])
+        if let col = o["belongs_to_collection"] as? [String: Any] { info.collectionID = jint(col["id"]); info.collectionName = jstr(col["name"]) }
         info.genres = ((o["genres"] as? [[String: Any]]) ?? []).map { jstr($0["name"]) }.filter { !$0.isEmpty }
         let bd = pick("backdrops", [nil]); info.backdrop = img(bd.isEmpty ? jstr(o["backdrop_path"]) : bd, "w1280")
         let ps = pick("posters", [lang]); info.poster = img(ps.isEmpty ? jstr(o["poster_path"]) : ps, "w500")
@@ -234,6 +237,24 @@ actor TMDB {
     }
 
     /// Biography and best-known titles of a cast member.
+    private var collections: [String: (String, [KnownWork])] = [:]
+
+    /// Every part of a film series, in release order.
+    func collection(_ id: Int) async -> (name: String, parts: [KnownWork])? {
+        guard !key.isEmpty, id > 0 else { return nil }
+        let ck = "\(lang)|\(id)"
+        if let hit = collections[ck] { return hit }
+        guard let o = try? await get("collection/\(id)", ["language": lang]) else { return nil }
+        let parts = ((o["parts"] as? [[String: Any]]) ?? [])
+            .filter { !jstr($0["release_date"]).isEmpty || !jstr($0["poster_path"]).isEmpty }
+            .sorted { (jstr($0["release_date"]).isEmpty ? "9999" : jstr($0["release_date"])) < (jstr($1["release_date"]).isEmpty ? "9999" : jstr($1["release_date"])) }
+            .map { d in KnownWork(id: jint(d["id"]), poster: img(jstr(d["poster_path"]), "w342"), title: jstr(d["title"]),
+                                  original: jstr(d["original_title"]), isTV: false, year: String(jstr(d["release_date"]).prefix(4))) }
+        let out = (jstr(o["name"]), parts)
+        collections[ck] = out
+        return out
+    }
+
     func person(_ id: Int) async -> TMDBPersonInfo? {
         guard !key.isEmpty, id > 0,
               let o = try? await get("person/\(id)", ["language": lang, "append_to_response": "combined_credits"]) else { return nil }
