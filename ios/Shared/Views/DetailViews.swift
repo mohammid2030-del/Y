@@ -340,7 +340,11 @@ struct MovieDetailView: View {
             if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .movie, tmdbID: info?.tmdb ?? "", name: shown.name, year: shown.year) }
         }
         #if os(iOS)
-        .sheet(item: Binding(get: { trailer.map { TrailerID(key: $0) } }, set: { trailer = $0?.key })) { t in TrailerSheet(key: t.key) }
+        .sheet(item: Binding(get: { trailer.flatMap { $0.isEmpty ? nil : TrailerID(key: $0) } }, set: { trailer = $0?.key })) { t in TrailerSheet(key: t.key) }
+        #else
+        .alert(L.t("youtubeMissing"), isPresented: Binding(get: { trailer != nil }, set: { if !$0 { trailer = nil } })) {
+            Button(L.t("ok")) { trailer = nil }
+        }
         #endif
     }
 
@@ -355,11 +359,10 @@ struct MovieDetailView: View {
                 Button { state.playMovie(shown, fromStart: true) } label: { Label(L.t("startOver"), systemImage: "arrow.counterclockwise") }
                     .buttonStyle(.bordered)
             }
-            #if os(iOS)
-            if let key = tmdb?.trailer, !key.isEmpty {
-                Button { trailer = key } label: { Label(L.t("trailer"), systemImage: "film") }.buttonStyle(.bordered)
-            }
-            #endif
+            // YouTube app: TMDB trailer, or a YouTube search when TMDB has none (Arabic / Turkish titles)
+            Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown)) { trailer = $0 ?? "" } } label: {
+                Label(L.t("trailer"), systemImage: "film")
+            }.buttonStyle(.bordered)
             if state.variants(.movie, item).count > 1 {
                 Button { showVersions = true } label: { Label(Versions.label(.movie, shown, state), systemImage: "rectangle.stack") }
                     .buttonStyle(.bordered).lineLimit(1)
@@ -410,11 +413,9 @@ struct SeriesDetailView: View {
                             .focused($sFocus, equals: .resume)
                             #endif
                         }
-                        #if os(iOS)
-                        if let key = tmdb?.trailer, !key.isEmpty {
-                            Button { trailer = key } label: { Label(L.t("trailer"), systemImage: "film") }.buttonStyle(.bordered)
-                        }
-                        #endif
+                        Button { TrailerLauncher.open(key: tmdb?.trailer, query: TrailerLauncher.query(tmdb, shown)) { trailer = $0 ?? "" } } label: {
+                            Label(L.t("trailer"), systemImage: "film")
+                        }.buttonStyle(.bordered)
                         if state.variants(.series, item).count > 1 {
                             Button { showVersions = true } label: { Label(Versions.label(.series, shown, state), systemImage: "rectangle.stack") }
                                 .buttonStyle(.bordered).lineLimit(1)
@@ -492,7 +493,11 @@ struct SeriesDetailView: View {
             tmEpisodes = await TMDB.shared.season(tvID: id, season: season)
         }
         #if os(iOS)
-        .sheet(item: Binding(get: { trailer.map { TrailerID(key: $0) } }, set: { trailer = $0?.key })) { t in TrailerSheet(key: t.key) }
+        .sheet(item: Binding(get: { trailer.flatMap { $0.isEmpty ? nil : TrailerID(key: $0) } }, set: { trailer = $0?.key })) { t in TrailerSheet(key: t.key) }
+        #else
+        .alert(L.t("youtubeMissing"), isPresented: Binding(get: { trailer != nil }, set: { if !$0 { trailer = nil } })) {
+            Button(L.t("ok")) { trailer = nil }
+        }
         #endif
     }
 

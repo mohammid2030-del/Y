@@ -16,7 +16,17 @@ struct NovaApp: App {
 
 struct RootView: View {
     @EnvironmentObject var state: AppState
+    @StateObject private var saver = ScreenSaver()
     var body: some View {
+        content
+            // screensaver: TMDB backdrops after a minute without the remote
+            .fullScreenCover(isPresented: Binding(get: { saver.active }, set: { if !$0 { saver.stop() } })) {
+                ScreenSaverView(saver: saver)
+            }
+            .onAppear { saver.attach(state); ActivityMonitor.shared.install() }
+    }
+
+    private var content: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
             switch state.phase {

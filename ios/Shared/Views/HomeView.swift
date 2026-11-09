@@ -84,7 +84,7 @@ struct HeroView: View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: backdrop.isEmpty ? item.logo : backdrop, maxPixel: 1920)
                 .frame(maxWidth: .infinity).frame(height: height).clipped()
-                .id(backdrop + item.id).transition(.opacity)
+                .id(backdrop + item.id).transition(.opacity.animation(.easeInOut(duration: 0.9)))
             LinearGradient(colors: [.black.opacity(0.55), .clear, Theme.bg.opacity(0.85), Theme.bg],
                            startPoint: .top, endPoint: .bottom)
             LinearGradient(colors: [Theme.bg.opacity(0.85), .clear], startPoint: .leading, endPoint: .trailing)
@@ -144,10 +144,22 @@ struct HeroView: View {
         .frame(height: height)
         .task(id: index) { await loadInfo(kind, item) }
         .task {
+            // every 5 s, also while Play / Details / + is selected — focus stays on the same kind of button
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if userIsHere { continue }   // never swap the hero under the user's focus
-                withAnimation(.easeInOut(duration: 0.6)) { index = (index + 1) % max(1, items.count) }
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                let next = (index + 1) % max(1, items.count)
+                await prefetch(next)
+                if Task.isCancelled { return }
+                if ActivityMonitor.shared.idle < 1.5 { continue }   // not in the middle of a press
+                #if os(tvOS)
+                if heroFocus == .primary && items[next].0 != .movie { heroFocus = .details }   // series have no Play button
+                #endif
+                let (nk, ni) = items[next]
+                let h = await resolve(nk, ni)   // already prepared by prefetch: picture and text change together
+                withAnimation(.easeInOut(duration: 0.9)) {
+                    index = next
+                    backdrop = h.backdrop; logo = h.logo; title = h.title; meta = h.meta; plot = h.plot
+                }
             }
         }
         #if os(iOS)
@@ -157,23 +169,48 @@ struct HeroView: View {
         #endif
     }
 
-    private func loadInfo(_ kind: MediaKind, _ item: MediaItem) async {
-        backdrop = ""; logo = ""; title = ""; plot = item.plot
-        meta = [item.rating.isEmpty || item.rating == "0" ? "" : "★ " + String(item.rating.prefix(3)), item.year].filter { !$0.isEmpty }.joined(separator: "   •   ")
+    private struct HeroInfo { var backdrop = "", logo = "", title = "", meta = "", plot = "" }
+    @MainActor private static var resolved: [String: HeroInfo] = [:]
+
+    /// Everything the hero shows for a title (provider + TMDB), remembered so the next slide switches instantly.
+    private func resolve(_ kind: MediaKind, _ item: MediaItem) async -> HeroInfo {
+        let key = kind.rawValue + item.id
+        if let hit = Self.resolved[key] { return hit }
+        var h = HeroInfo(plot: item.plot)
+        h.meta = [item.rating.isEmpty || item.rating == "0" ? "" : "★ " + String(item.rating.prefix(3)), item.year].filter { !$0.isEmpty }.joined(separator: "   •   ")
         var tmdbID = ""
         if let sub = state.active, sub.kind == .xtream {
             if kind == .movie, let i = await state.xtream(for: sub).vodInfo(item.id) {
-                backdrop = i.backdrop; tmdbID = i.tmdb; if plot.isEmpty { plot = i.plot }
+                h.backdrop = i.backdrop; tmdbID = i.tmdb; if h.plot.isEmpty { h.plot = i.plot }
             } else if kind == .series, let i = try? await state.xtream(for: sub).seriesInfo(item.id) {
-                backdrop = i.backdrop; tmdbID = i.tmdb; if plot.isEmpty { plot = i.plot }
+                h.backdrop = i.backdrop; tmdbID = i.tmdb; if h.plot.isEmpty { h.plot = i.plot }
             }
         }
-        guard state.tmdbOn, let t = await TMDB.shared.details(kind: kind, tmdbID: tmdbID, name: item.name, year: item.year) else { return }
-        withAnimation {
-            if !t.backdrop.isEmpty { backdrop = t.backdrop }
-            logo = t.logo; title = t.title
-            if !t.overview.isEmpty { plot = t.overview }
-            meta = [t.rating.isEmpty ? "" : "★ " + t.rating, t.year, t.genres.prefix(2).joined(separator: " · ")].filter { !$0.isEmpty }.joined(separator: "   •   ")
+        if state.tmdbOn, let t = await TMDB.shared.details(kind: kind, tmdbID: tmdbID, name: item.name, year: item.year) {
+            if !t.backdrop.isEmpty { h.backdrop = t.backdrop }
+            h.logo = t.logo; h.title = t.title
+            if !t.overview.isEmpty { h.plot = t.overview }
+            h.meta = [t.rating.isEmpty ? "" : "★ " + t.rating, t.year, t.genres.prefix(2).joined(separator: " · ")].filter { !$0.isEmpty }.joined(separator: "   •   ")
+        }
+        if Self.resolved.count > 60 { Self.resolved.removeAll() }
+        Self.resolved[key] = h
+        return h
+    }
+
+    /// Gets the next slide's text and picture ready before it is shown (no empty frame while switching).
+    private func prefetch(_ i: Int) async {
+        guard items.indices.contains(i) else { return }
+        let (k, it) = items[i]
+        let h = await resolve(k, it)
+        let url = h.backdrop.isEmpty ? it.logo : h.backdrop
+        if !url.isEmpty { _ = await ImagePipeline.shared.load(url, maxPixel: 1920) }
+        if !h.logo.isEmpty { _ = await ImagePipeline.shared.load(h.logo, maxPixel: 900) }
+    }
+
+    private func loadInfo(_ kind: MediaKind, _ item: MediaItem) async {
+        let h = await resolve(kind, item)
+        withAnimation(.easeInOut(duration: 0.9)) {
+            backdrop = h.backdrop; logo = h.logo; title = h.title; meta = h.meta; plot = h.plot
         }
     }
 }

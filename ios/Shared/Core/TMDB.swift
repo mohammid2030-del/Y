@@ -14,6 +14,8 @@ struct TMDBInfo {
     var votes = 0, runtime = 0, seasons = 0
     var genres: [String] = []
     var backdrop = "", poster = "", logo = "", trailer = ""
+    /// Logo in the app language only, and whether TMDB has the title + story in the app language.
+    var logoLocal = "", localText = false
     var cast: [TMDBPerson] = []
     var creators: [String] = []
 }
@@ -163,7 +165,8 @@ actor TMDB {
         let t = tv ? "tv" : "movie"
         guard let o = try? await get("\(t)/\(id)", ["language": lang,
                                                      "append_to_response": "credits,images,videos",
-                                                     "include_image_language": "\(lang),en,null"]) else { return nil }
+                                                     "include_image_language": "\(lang),en,null",
+                                                     "include_video_language": "\(lang),ar,en,tr,null"]) else { return nil }
         var en: [String: Any]? = nil
         if lang != "en" && (jstr(o["overview"]).isEmpty || jstr(o[tv ? "name" : "title"]).isEmpty) {
             en = try? await get("\(t)/\(id)", ["language": "en-US"])
@@ -201,6 +204,8 @@ actor TMDB {
         let bd = pick("backdrops", [nil]); info.backdrop = img(bd.isEmpty ? jstr(o["backdrop_path"]) : bd, "w1280")
         let ps = pick("posters", [lang]); info.poster = img(ps.isEmpty ? jstr(o["poster_path"]) : ps, "w500")
         info.logo = img(pick("logos", [lang, "en", nil]), "w500")
+        info.logoLocal = img(pick("logos", [lang]), "w500")
+        info.localText = !jstr(o["overview"]).isEmpty && !TMDB.foreignScript(jstr(o[tv ? "name" : "title"]))
         let credits = o["credits"] as? [String: Any] ?? [:]
         info.cast = ((credits["cast"] as? [[String: Any]]) ?? []).prefix(15).map {
             TMDBPerson(name: jstr($0["name"]), role: jstr($0["character"]), photo: img(jstr($0["profile_path"]), "w185"), id: jint($0["id"]))
@@ -211,8 +216,14 @@ actor TMDB {
             var list: [[String: Any]] = []
             if let v = dict?["videos"] as? [String: Any], let r = v["results"] as? [[String: Any]] { list = r }
             else if let r = dict?["results"] as? [[String: Any]] { list = r }
-            let vids = list.filter { jstr($0["site"]) == "YouTube" && ["Trailer", "Teaser"].contains(jstr($0["type"])) }
-            return jstr((vids.first { jstr($0["type"]) == "Trailer" } ?? vids.first)?["key"])
+            // trailer in the app language first, then English / any; trailer > teaser > clip > featurette
+            let types = ["Trailer": 0, "Teaser": 1, "Clip": 2, "Featurette": 3]
+            func rank(_ v: [String: Any]) -> Double {
+                let l = jstr(v["iso_639_1"])
+                return Double((types[jstr(v["type"])] ?? 9) * 10 + (l == lang ? 0 : l == "en" ? 1 : 2)) - ((v["official"] as? Bool) == true ? 0.5 : 0)
+            }
+            let vids = list.filter { jstr($0["site"]) == "YouTube" && types[jstr($0["type"])] != nil }.sorted { rank($0) < rank($1) }
+            return jstr(vids.first?["key"])
         }
         info.trailer = trailerKey(o)
         if info.trailer.isEmpty && lang != "en" {
