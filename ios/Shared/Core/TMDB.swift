@@ -33,7 +33,7 @@ final class TMDBIDs: @unchecked Sendable {
     private var ver = 0
 
     init() {
-        for (k, v) in Storage.load("tmdbCards3", as: [String: TMDBCard].self) ?? [:] where v.id > 0 { map[TMDBIDs.strip(k)] = v.id }
+        for (k, v) in Storage.loadFile("tmdbCards3", as: [String: TMDBCard].self) ?? [:] where v.id > 0 { map[TMDBIDs.strip(k)] = v.id }
     }
 
     /// "series|ar|Zmora|2026" → "series|Zmora|2026" (the id is the same in every language).
@@ -58,7 +58,7 @@ actor TMDB {
     static let shared = TMDB()
 
     private var key: String = Keychain.get("tmdbKey") ?? ""
-    private var cards: [String: TMDBCard] = Storage.load("tmdbCards3", as: [String: TMDBCard].self) ?? [:]
+    private var cards: [String: TMDBCard] = Storage.loadFile("tmdbCards3", as: [String: TMDBCard].self) ?? [:]
     private var infos: [String: TMDBInfo] = [:]
     private var seasons: [String: [Int: TMDBEpisode]] = [:]
     private var dirty = 0
@@ -73,14 +73,14 @@ actor TMDB {
         key = k
         Keychain.set(k, for: "tmdbKey")
         cards = [:]; infos = [:]; seasons = [:]
-        Storage.save("tmdbCards3", cards)
+        Storage.saveFile("tmdbCards3", cards)
         return true
     }
 
     func removeKey() {
         key = ""; cards = [:]; infos = [:]
         Keychain.set(nil, for: "tmdbKey")
-        Storage.save("tmdbCards3", cards)
+        Storage.saveFile("tmdbCards3", cards)
     }
 
     private func get(_ path: String, _ params: [String: String], key override: String? = nil) async throws -> [String: Any] {
@@ -147,7 +147,7 @@ actor TMDB {
         cards[ck] = card
         if card.id > 0 { TMDBIDs.shared.set(ck, card.id) }
         dirty += 1
-        if dirty % 20 == 0 { Storage.save("tmdbCards3", cards) }
+        if dirty % 20 == 0 { Storage.saveFile("tmdbCards3", cards) }
         return card.id == 0 ? nil : card
     }
 

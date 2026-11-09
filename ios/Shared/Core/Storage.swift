@@ -17,6 +17,31 @@ enum Storage {
         if let data = try? encoder.encode(value) { defaults.set(data, forKey: key) }
     }
 
+    // MARK: large caches — files, never UserDefaults (Apple TV aborts the app when its defaults pass 4 MB)
+
+    static func loadFile<T: Decodable>(_ key: String, as type: T.Type) -> T? {
+        if let data = try? Data(contentsOf: cacheDir.appendingPathComponent(key + ".json")) { return try? decoder.decode(T.self, from: data) }
+        return nil
+    }
+
+    private static let fileQueue = DispatchQueue(label: "nova.storage.files", qos: .utility)
+    static func saveFile<T: Encodable>(_ key: String, _ value: T) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        let url = cacheDir.appendingPathComponent(key + ".json")
+        fileQueue.async { try? data.write(to: url, options: .atomic) }
+    }
+
+    /// Moves caches that older builds kept in UserDefaults into files (run first thing at launch).
+    static func moveLargeOutOfDefaults() {
+        for key in ["tmdbCards3", "tmdbCards2", "tmdbCards"] {
+            guard let data = defaults.data(forKey: key) else { continue }
+            if key == "tmdbCards3" { try? data.write(to: cacheDir.appendingPathComponent(key + ".json"), options: .atomic) }
+            defaults.removeObject(forKey: key)
+        }
+        // any other oversized value (> 512 KB) would put the app at risk again
+        for (k, v) in defaults.dictionaryRepresentation() where (v as? Data)?.count ?? 0 > 512_000 { defaults.removeObject(forKey: k) }
+    }
+
     static func string(_ key: String) -> String? { defaults.string(forKey: key) }
     static func setString(_ key: String, _ value: String?) { defaults.set(value, forKey: key) }
 

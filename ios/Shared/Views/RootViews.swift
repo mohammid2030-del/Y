@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct NovaApp: App {
     @StateObject private var state = AppState()
-    init() { CrashLog.install() }
+    init() { CrashLog.install(); Storage.moveLargeOutOfDefaults() }
     var body: some Scene {
         WindowGroup {
             RootView()
