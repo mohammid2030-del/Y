@@ -1686,12 +1686,16 @@
     }
     /** Finds a title with full TMDB artwork + story (tries a few). */
     async function prepare() {
-      for (let tries = 0; tries < 8; tries++) {
+      for (let tries = 0; tries < 16; tries++) {
         const e = randomEntry(); if (!e) continue;
-        const tm = await Tmdb.details(e.type, e.item.tmdb, e.item.name, e.item.year).catch(function () { return null; });
+        let tm = await Tmdb.details(e.type, e.item.tmdb, e.item.name, e.item.year).catch(function () { return null; });
         if (!tm || !tm.backdrop || !tm.overview) continue;
+        // Arabic app: only titles TMDB has in Arabic (title + story), no English fallbacks
+        if (I18n.lang === 'ar' && !(tm.localText && /[\u0600-\u06FF]/.test(tm.overview) && /[\u0600-\u06FF]/.test(tm.title))) continue;
         if (!(await preload(tm.backdrop))) continue;
-        if (tm.logo) await preload(tm.logo);
+        const logo = I18n.lang === 'ar' ? tm.logoLocal : tm.logo;
+        if (logo) await preload(logo);
+        tm = Object.assign({}, tm, { saverLogo: logo });
         recent.push(e.type + e.item.id); if (recent.length > 40) recent.shift();
         return { e: e, tm: tm };
       }
@@ -1708,8 +1712,8 @@
       const tm = d.tm, meta = [tm.year, tm.genres.slice(0, 3).join(' · '), tm.seasons ? t('seasonsCount', tm.seasons) : ''].filter(Boolean).join('   •   ');
       info.classList.remove('in'); void info.offsetWidth;
       info.innerHTML = `<span class="sv-type">${esc(t(d.e.type === 'movie' ? 'typeMovie' : 'typeSeries'))}</span>
-        ${tm.logo ? `<img class="sv-logo" src="${esc(tm.logo)}">` : `<h1>${esc(tm.title)}</h1>`}
-        <div class="sv-meta">${tm.rating ? `<span class="sv-rate">★ ${esc(tm.rating)}</span>&emsp;•&emsp;` : ''}<bdi>${esc(meta)}</bdi></div>
+        ${tm.saverLogo ? `<img class="sv-logo" src="${esc(tm.saverLogo)}">` : `<h1>${esc(tm.title)}</h1>`}
+        <div class="sv-meta">${tm.rating && tm.votes >= 20 ? `<span class="sv-rate">★ ${esc(tm.rating)}</span>&emsp;•&emsp;` : ''}<bdi>${esc(meta)}</bdi></div>
         <p class="sv-plot">${esc(tm.overview)}</p>`;
       info.classList.add('in');
       shown++;

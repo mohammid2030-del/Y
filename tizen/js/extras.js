@@ -252,6 +252,8 @@
               backdrop: img(pick('backdrops', [null]) || o.backdrop_path, 'w1280'),
               poster: img(pick('posters', [l]) || o.poster_path, 'w500'),
               logo: img(pick('logos', [l, 'en', null]), 'w500'),
+              logoLocal: img(pick('logos', [l]), 'w500'),               // logo in the app language only
+              localText: !!o.overview && !foreignScript(o.title || o.name || ''),   // TMDB has the story in the app language
               cast: ((o.credits && o.credits.cast) || []).slice(0, 12).map(function (p) { return { id: p.id, name: p.name, role: p.character || '', photo: img(p.profile_path, 'w185') }; }),
               creators: isTv ? (o.created_by || []).map(function (p) { return p.name; }) : crew.filter(function (p) { return p.job === 'Director'; }).map(function (p) { return p.name; }),
               seasons: o.number_of_seasons || 0,
