@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct NovaApp: App {
     @StateObject private var state = AppState()
+    init() { CrashLog.install() }
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -24,7 +25,10 @@ struct RootView: View {
                 ScreenSaverView(saver: saver)
             }
             .onAppear { saver.attach(state); ActivityMonitor.shared.install() }
+            // why the app closed last time (shown once, so it can be photographed and reported)
+            .fullScreenCover(isPresented: $showCrash) { CrashReportView { showCrash = false; CrashLog.clear() } }
     }
+    @State private var showCrash = CrashLog.pending != nil
 
     private var content: some View {
         ZStack {
@@ -257,5 +261,28 @@ struct SyncView: View {
         }
         .padding(40)
         .task(id: subID) { await state.sync(subID) }
+    }
+}
+
+struct CrashReportView: View {
+    let done: () -> Void
+    private var lines: String {
+        let all = (CrashLog.pending ?? "").split(separator: "\n").map { $0.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ") }
+        return all.prefix(44).joined(separator: "\n")
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L.isArabic ? "أُغلق التطبيق بشكل مفاجئ آخر مرة — صوّر هذه الشاشة وأرسلها لإصلاح السبب" : "The app closed unexpectedly last time — take a photo of this screen to report it")
+                .font(.headline)
+            ScrollView {
+                Text(lines).font(.system(size: Theme.isTV ? 17 : 10, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.layoutDirection, .leftToRight)
+            }
+            Button(L.t("ok"), action: done)
+        }
+        .padding(Theme.isTV ? 60 : 20)
+        .background(Theme.bg.ignoresSafeArea())
+        .environment(\.layoutDirection, .leftToRight)
     }
 }

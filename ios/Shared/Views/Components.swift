@@ -64,7 +64,8 @@ final class ImagePipeline: @unchecked Sendable {
             return ImagePipeline.downsample(data, maxPixel: maxPixel)
         }
         if let img {
-            let cost = Int(img.size.width * img.size.height * img.scale * img.scale * 4)
+            let px = img.size.width * img.size.height * img.scale * img.scale * 4
+            let cost = px.isFinite ? Int(min(px, 1e9)) : 0
             cache.setObject(img, forKey: k as NSString, cost: cost)
         }
         return img

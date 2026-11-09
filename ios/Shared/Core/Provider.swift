@@ -51,7 +51,13 @@ func jstr(_ v: Any?) -> String {
     default: return ""
     }
 }
-func jint(_ v: Any?) -> Int { Int(jstr(v)) ?? Int(Double(jstr(v)) ?? 0) }
+/// Never traps: providers send things like "1e30", "inf" or "NaN" in number fields.
+func jint(_ v: Any?) -> Int {
+    let s = jstr(v).trimmingCharacters(in: .whitespaces)
+    if let i = Int(s) { return i }
+    guard let d = Double(s), d.isFinite, abs(d) < 9.0e18 else { return 0 }
+    return Int(d)
+}
 func jlist(_ v: Any?) -> [[String: Any]] {
     if let a = v as? [[String: Any]] { return a }
     if let d = v as? [String: Any] { return d.values.compactMap { $0 as? [String: Any] } }

@@ -121,6 +121,15 @@ jobs:
           done
           rm -f "$KEY"
 
+      - name: Keep debug symbols (to read crash reports)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsyms
+          path: ios/build/*.xcarchive/dSYMs
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Report status on the commit
         if: success()
         env:
