@@ -2082,6 +2082,8 @@
       if (closed) return; closed = true;
       window.removeEventListener('blur', refocus); window.removeEventListener('message', onMsg);
       clearTimeout(guard);
+      // unload YouTube's player first: the TV has one video decoder and a lingering player keeps it (sound but no picture later)
+      const fr = box.querySelector('iframe'); if (fr) { try { fr.src = 'about:blank'; } catch (e) { /* */ } }
       if (box.parentNode) box.parentNode.removeChild(box);
       if (screen === prev) screen.back = prevBack;
     }
@@ -2136,7 +2138,7 @@
 
     Saver.stop();
     setScreen('player', function () {
-      document.body.classList.add('playing');
+      document.body.classList.add('playing'); document.documentElement.classList.add('playing');
       app.innerHTML = `<div class="player-ui">
         <div class="osd top" id="osd-top"></div>
         <div class="center-msg" id="center-msg"></div>
@@ -2390,7 +2392,7 @@
       clearTimeout(overlayTimer); clearTimeout(retryTimer); clearInterval(saveTimer); clearTimeout(epgTimerP); clearTimeout(numTimer);
       ['time', 'buffering', 'subtitle', 'ended', 'error'].forEach(function (n) { Player.on(n, null); });
       Player.stop();
-      document.body.classList.remove('playing');
+      document.body.classList.remove('playing'); document.documentElement.classList.remove('playing');
       if (opening) { /* ignore late callbacks */ }
       returnTo();
     }

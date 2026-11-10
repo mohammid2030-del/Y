@@ -20,7 +20,10 @@ h3 { margin: 0; }
 #html5-player { display: none; }
 body.playing #html5-player { display: block; }
 #app { position: relative; z-index: 1; width: 1920px; height: 1080px; background: var(--bg); }
-body.playing, body.playing #app { background: transparent; }
+/* AVPlay draws the video on a plane BEHIND the page: everything above it must be see-through while playing,
+   the root <html> too (its background paints the whole canvas — that hid the picture and left only the sound) */
+html.playing, body.playing, body.playing #app { background: transparent !important; }
+body.playing .saver, body.playing .trailer { display: none !important; }
 
 /* ---------- focus ---------- */
 [data-f] { outline: none; transition: transform .12s ease, box-shadow .12s ease, background-color .12s; }
