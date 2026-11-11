@@ -929,7 +929,7 @@
     curDetail = { type: 'series', item: item };
     let firstRender = true, autoFid = null;
     let info = null, season = keepSeason || null, error = null, tm = null, tmEps = {}, tmSeason = null;
-    let aiState = { s: '', p: 0 }, aiTimer = 0;
+    let aiState = { s: '', p: 0, pending: false }, aiTimer = 0;
     if (seriesAiTimer) { clearInterval(seriesAiTimer); seriesAiTimer = 0; }
     function render() {
       // until the viewer moves, keep landing on the main action (Play / Continue / first episode) as data arrives
@@ -962,7 +962,8 @@
                 <button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>
                 <button data-f data-action="fav" class="btn">${isFav('series', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
                 ${versionCount('series', item) > 1 ? `<button data-f data-action="versions" class="btn vbtn">⧉ ${esc(Library.label('series', item))}</button>` : ''}
-                ${info && aiEpisode() && cloudPath('aisubs') && S.sub && S.sub.type === 'xtream' ? `<button data-f data-action="aiSubs" id="aibtn" class="btn">🈯 ${esc(aiLabel())}</button>` : ''}
+                ${info && aiEpisode() && cloudPath('aisubs') && S.sub && S.sub.type === 'xtream' ? `<button data-f data-action="aiSubs" id="aibtn" class="btn">🈯 ${esc(aiLabel())}</button>
+                  <button data-f data-action="aiStop" id="aistop" class="btn" style="${aiState.pending ? '' : 'display:none'}">⏹ ${esc(t('aiStop'))}</button>` : ''}
               </div>
               <p class="plot short">${esc((tm && tm.overview) || (info && info.plot) || item.plot || '')}</p>
               ${tm && tm.cast.length ? castRow(tm.cast) : ''}
@@ -1015,18 +1016,33 @@
           const ep = aiEpisode(), b = cloudPath('aisubs/eps/' + Cloud.safe(item.id) + '/' + Cloud.safe(ep));
           if (!ep || !b) return;
           Promise.all([Cloud.get(b + '/s'), Cloud.get(b + '/p'), Cloud.get(cloudPath('aisubs/req/' + Cloud.safe(item.id)))]).then(function (r) {
-            aiState = { s: r[0] || (r[2] ? 'queued' : ''), p: Number(r[1]) || 0 };
-            const el = $('#aibtn'); if (el) el.textContent = '🈯 ' + aiLabel();
+            const pending = !!r[2];
+            let st = r[0] || (pending ? 'queued' : '');
+            if (st === 'working' && !pending) st = '';
+            aiState = { s: st, p: Number(r[1]) || 0, pending: pending };
+            aiShow();
           }).catch(function () {});
         }
         actions.aiSubs = function () {
           if (aiState.s === 'queued' || aiState.s === 'working') return;
           const ep = aiEpisode(); if (!ep) return;
           cloudPut('aisubs/req/' + Cloud.safe(item.id), { ep: ep, t: Math.floor(Date.now() / 1000) });
-          if (aiState.s !== 'done') aiState = { s: 'queued', p: 0 };
-          const el = $('#aibtn'); if (el) el.textContent = '🈯 ' + aiLabel();
+          aiState = aiState.s !== 'done' ? { s: 'queued', p: 0, pending: true } : Object.assign({}, aiState, { pending: true });
+          aiShow();
           toast(t('aiQueuedHint'));
         };
+        actions.aiStop = function () {
+          cloudPut('aisubs/req/' + Cloud.safe(item.id), null);
+          const st = aiState.s === 'queued' || aiState.s === 'working' ? '' : aiState.s;
+          aiState = { s: st, p: st ? aiState.p : 0, pending: false };
+          const b = $('#aibtn');
+          aiShow();
+          if (b) Nav.focus(b);
+        };
+        function aiShow() {
+          const el = $('#aibtn'); if (el) el.textContent = '🈯 ' + aiLabel();
+          const sb = $('#aistop'); if (sb) sb.style.display = aiState.pending ? '' : 'none';
+        }
         if (info && !aiTimer) {
           aiRefresh();
           aiTimer = seriesAiTimer = setInterval(function () {

@@ -67,6 +67,27 @@ class AiSubtitles @Inject constructor(
         cloud.put("$b/req/${Cloud.safe(seriesId)}", com.google.gson.JsonNull.INSTANCE)
     }
 
+    /** Is this series still asked for (false once someone presses Stop)? */
+    suspend fun requested(subId: Long, seriesId: String): Boolean {
+        val b = base(subId) ?: return false
+        return runCatching { cloud.get("$b/req/${Cloud.safe(seriesId)}") }.getOrNull()?.let { it.isJsonObject && it.asJsonObject.size() > 0 } ?: false
+    }
+
+    /** Forgets an unfinished episode (stopped half way). */
+    suspend fun clear(subId: Long, seriesId: String, episodeId: String) {
+        val b = base(subId) ?: return
+        cloud.put("$b/eps/${Cloud.safe(seriesId)}/${Cloud.safe(episodeId)}", com.google.gson.JsonNull.INSTANCE)
+    }
+
+    /** After a crash: episodes left "working" go back to nothing so the page doesn't show progress forever. */
+    suspend fun clearWorking(subId: Long, seriesId: String) {
+        val b = base(subId) ?: return
+        val o = runCatching { cloud.get("$b/eps/${Cloud.safe(seriesId)}") }.getOrNull()?.takeIf { it.isJsonObject } ?: return
+        for ((ep, v) in o.asJsonObject.entrySet()) {
+            if (v.isJsonObject && v.asJsonObject.get("s")?.asString == "working") cloud.put("$b/eps/${Cloud.safe(seriesId)}/$ep", com.google.gson.JsonNull.INSTANCE)
+        }
+    }
+
     /** "queued" / "working" / "done" / "error" / "" and the progress (0–100). */
     suspend fun state(subId: Long, seriesId: String, episodeId: String): Pair<String, Int> {
         val b = base(subId) ?: return "" to 0

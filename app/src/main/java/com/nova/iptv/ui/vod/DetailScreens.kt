@@ -473,6 +473,11 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, on
                             Spacer(Modifier.width(6.dp))
                             Text(label)
                         }
+                        if (vm.aiPending) {
+                            OutlinedButton(onClick = vm::stopAi, modifier = Modifier.novaFocus()) {
+                                Text(stringResource(R.string.ai_sub_stop))
+                            }
+                        }
                     }
                 }
             }

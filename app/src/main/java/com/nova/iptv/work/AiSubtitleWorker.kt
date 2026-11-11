@@ -60,7 +60,9 @@ class AiSubtitleWorker @AssistedInject constructor(
             for ((seriesId, firstEp) in ai.requests(sub.id)) {
                 if (isStopped) return@withContext Result.retry()
                 any = true
-                val finished = runCatching { series(sub.id, seriesId, firstEp) }.getOrDefault(false)
+                val finished = runCatching { series(sub.id, seriesId, firstEp) }.getOrElse {
+                    runCatching { ai.clearWorking(sub.id, seriesId) }; false
+                }
                 if (finished) ai.cancel(sub.id, seriesId)   // every episode from there on is done
             }
         }
@@ -76,6 +78,7 @@ class AiSubtitleWorker @AssistedInject constructor(
         val from = all.indexOfFirst { it.id == firstEp }.coerceAtLeast(0)
         for (ep in all.drop(from)) {
             if (isStopped) return false
+            if (!ai.requested(subId, seriesId)) return false   // stopped from a series page
             if (ai.state(subId, seriesId, ep.id).first == "done") continue
             if (!freeConnection(subId)) return false   // someone is watching: try again later
             notify("S${ep.season} E${ep.episodeNum}", 0)
@@ -85,16 +88,23 @@ class AiSubtitleWorker @AssistedInject constructor(
             val headers = if (stream.userAgent.isNotBlank()) mapOf("User-Agent" to stream.userAgent) else emptyMap()
             val work = File(dir, ep.id).apply { deleteRecursively(); mkdirs() }
             var lastMark = 0L
+            var cancelled = false
             // 1. the sound (0–60 %)
-            val chunks = AudioChunker.split(stream.url, headers, work, keepGoing = { !isStopped }) { p ->
+            val chunks = AudioChunker.split(stream.url, headers, work, keepGoing = { !isStopped && !cancelled }) { p ->
                 val pct = (p * 60).toInt()
                 if (System.currentTimeMillis() - lastMark > 20_000) {
                     lastMark = System.currentTimeMillis()
                     kotlinx.coroutines.runBlocking {
+                        if (!ai.requested(subId, seriesId)) { cancelled = true; return@runBlocking }
                         notify("S${ep.season} E${ep.episodeNum}", pct)
                         ai.mark(subId, seriesId, ep.id, "working", pct)
                     }
                 }
+            }
+            if (cancelled || !ai.requested(subId, seriesId)) {
+                ai.clear(subId, seriesId, ep.id)
+                work.deleteRecursively()
+                return false
             }
             if (chunks.isNullOrEmpty()) {
                 ai.mark(subId, seriesId, ep.id, if (isStopped) "queued" else "error")

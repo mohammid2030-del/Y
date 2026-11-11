@@ -518,6 +518,7 @@ struct SeriesDetailView: View {
     @State private var askSeason = false
     @State private var aiState = ""
     @State private var aiProgress = 0
+    @State private var aiPending = false
     private var shown: MediaItem { pick ?? item }
     /// The episode the viewer is on (else the first one): AI subtitles start from here.
     private func aiEpisode(_ last: HistoryItem?) -> String? {
@@ -585,12 +586,23 @@ struct SeriesDetailView: View {
                         if state.aiSubsAvailable, let ep = aiEpisode(last) {
                             Button {
                                 state.requestAISubs(seriesID: shown.id, episodeID: ep)
+                                aiPending = true
                                 if aiState != "done" { aiState = "queued"; aiProgress = 0 }
                             } label: {
                                 Label(aiLabel, systemImage: "captions.bubble").lineLimit(1)
                             }
                             .buttonStyle(.bordered)
                             .disabled(aiState == "queued" || aiState == "working")
+                            if aiPending {
+                                Button {
+                                    state.stopAISubs(seriesID: shown.id)
+                                    aiPending = false
+                                    if aiState == "queued" || aiState == "working" { aiState = ""; aiProgress = 0 }
+                                } label: {
+                                    Label(L.t("aiStop"), systemImage: "stop.circle").lineLimit(1)
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
                     }
                 }
@@ -677,8 +689,8 @@ struct SeriesDetailView: View {
                 let last = state.history.values.filter { $0.subID == state.ownerID && $0.kind == .series && $0.stream.id == shown.id }
                     .max { $0.updated < $1.updated }
                 if let ep = aiEpisode(last) {
-                    let (st, pr) = await state.aiSubsState(seriesID: shown.id, episodeID: ep)
-                    aiState = st; aiProgress = pr
+                    let (st, pr, pending) = await state.aiSubsState(seriesID: shown.id, episodeID: ep)
+                    aiState = st; aiProgress = pr; aiPending = pending
                 }
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
             }

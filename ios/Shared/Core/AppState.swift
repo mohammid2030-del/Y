@@ -305,15 +305,22 @@ final class AppState: ObservableObject {
         Task { await Cloud.shared.put(p, ["ep": episodeID, "t": Int(Date().timeIntervalSince1970)]) }
     }
 
-    /// ("" / queued / working / done / error, progress 0–100) for one episode.
-    func aiSubsState(seriesID: String, episodeID: String) async -> (String, Int) {
-        guard let b = cloudPath("aisubs/eps/\(Cloud.safe(seriesID))/\(Cloud.safe(episodeID))") else { return ("", 0) }
+    /// Stops the translation run of this series (the Android device notices within ~20 s).
+    func stopAISubs(seriesID: String) {
+        guard let p = cloudPath("aisubs/req/\(Cloud.safe(seriesID))") else { return }
+        Task { await Cloud.shared.put(p, NSNull()) }
+    }
+
+    /// (state "" / queued / working / done / error, progress 0–100, a run is asked for this series) for one episode.
+    func aiSubsState(seriesID: String, episodeID: String) async -> (String, Int, Bool) {
+        guard let b = cloudPath("aisubs/eps/\(Cloud.safe(seriesID))/\(Cloud.safe(episodeID))"),
+              let r = cloudPath("aisubs/req/\(Cloud.safe(seriesID))") else { return ("", 0, false) }
         let st = jstr(await Cloud.shared.get(b + "/s"))
         let pr = jint(await Cloud.shared.get(b + "/p"))
-        if st.isEmpty, let r = cloudPath("aisubs/req/\(Cloud.safe(seriesID))"), await Cloud.shared.get(r) is [String: Any] {
-            return ("queued", 0)
-        }
-        return (st, pr)
+        let pending = await Cloud.shared.get(r) is [String: Any]
+        if st.isEmpty && pending { return ("queued", 0, true) }
+        if st == "working" && !pending { return ("", 0, false) }
+        return (st, pr, pending)
     }
 
     /// The finished subtitles of one episode, parsed (empty when there are none yet).

@@ -130,6 +130,18 @@ class SeriesDetailViewModel @Inject constructor(
         private set
     var aiProgress by mutableIntStateOf(0)
         private set
+    /** A translation run is asked for this series (shows the Stop button). */
+    var aiPending by mutableStateOf(false)
+        private set
+
+    fun stopAi() {
+        val c = itemFlow.value ?: return
+        viewModelScope.launch {
+            runCatching { aiSubs.cancel(c.subscriptionId, c.remoteId) }
+            aiPending = false
+            if (aiState == "queued" || aiState == "working") { aiState = ""; aiProgress = 0 }
+        }
+    }
 
     private fun aiEpisode(): String? {
         val i = info ?: return null
@@ -144,6 +156,7 @@ class SeriesDetailViewModel @Inject constructor(
         val ep = aiEpisode() ?: return
         viewModelScope.launch {
             runCatching { aiSubs.request(c.subscriptionId, c.remoteId, ep) }
+            aiPending = true
             if (aiState != "done") { aiState = "queued"; aiProgress = 0 }
             com.nova.iptv.work.AiSubtitleWorker.now(appContext)
         }
@@ -158,7 +171,8 @@ class SeriesDetailViewModel @Inject constructor(
                 if (c != null && ep != null) {
                     val (st, pr) = runCatching { aiSubs.state(c.subscriptionId, c.remoteId, ep) }.getOrDefault("" to 0)
                     val pending = runCatching { aiSubs.requests(c.subscriptionId).any { it.first == c.remoteId } }.getOrDefault(false)
-                    aiState = if (st.isBlank() && pending) "queued" else st
+                    aiPending = pending
+                    aiState = if (st.isBlank() && pending) "queued" else if (st == "working" && !pending) "" else st
                     aiProgress = pr
                 }
                 kotlinx.coroutines.delay(15_000)
