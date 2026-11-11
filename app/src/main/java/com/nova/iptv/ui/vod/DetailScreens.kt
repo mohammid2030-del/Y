@@ -479,6 +479,13 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, on
                             }
                         }
                     }
+                    if (vm.aiAvailable && info != null) {
+                        val line = aiStatusLine(vm.aiDetail, vm.aiPending, c.name)
+                        if (line.isNotBlank()) {
+                            Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth())
+                        }
+                    }
                 }
             }
         }
@@ -613,4 +620,29 @@ private fun ExtrasDialogs(
             if (w.isTv) onOpenSeries(id) else onOpenMovie(id)
         }, onDismiss = { extras.closePerson() })
     }
+}
+
+
+/** One plain line: which copy, which episode, how far, or why it is waiting. */
+@Composable
+private fun aiStatusLine(st: com.nova.iptv.data.aisubs.AiSubtitles.Status?, pending: Boolean, copy: String): String {
+    if (st == null) return ""
+    val ctx = LocalContext.current
+    fun ago(sec: Long): String = when {
+        sec < 90 -> ctx.getString(R.string.ai_ago_now)
+        sec < 3600 -> ctx.getString(R.string.ai_ago_min, (sec / 60).toInt())
+        else -> ctx.getString(R.string.ai_ago_h, (sec / 3600).toInt())
+    }
+    val fresh = st.noteAge in 0..1800
+    val what = when {
+        !pending && st.r == "done" -> stringResource(R.string.ai_st_done)
+        !pending && st.r == "error" && fresh -> stringResource(R.string.ai_st_error, st.label, st.m)
+        !pending -> return ""
+        st.r == "working" && fresh -> stringResource(R.string.ai_st_working, st.label, st.p)
+        st.r == "busy" && fresh -> stringResource(R.string.ai_st_busy, st.label, ago(st.noteAge))
+        st.r == "error" && fresh -> stringResource(R.string.ai_st_error, st.label, st.m)
+        st.devAge < 0 -> stringResource(R.string.ai_st_nodevice)
+        else -> stringResource(R.string.ai_st_waiting, st.device.ifBlank { "Android" }, ago(st.devAge))
+    }
+    return stringResource(R.string.ai_st_copy, copy) + " · " + what
 }

@@ -54,7 +54,8 @@ class AiSubtitles @Inject constructor(
     suspend fun requests(subId: Long): List<Pair<String, String>> {
         val b = base(subId) ?: return emptyList()
         val o = runCatching { cloud.get("$b/req") }.getOrNull() ?: return emptyList()
-        return o.objects().entries.sortedByDescending { it.value.num("t") }.map { it.key to it.value.str("ep") }
+        return o.objects().entries.filter { it.value.str("ep").isNotBlank() }
+            .sortedByDescending { it.value.num("t") }.map { it.key to it.value.str("ep") }
     }
 
     suspend fun request(subId: Long, seriesId: String, episodeId: String) {
@@ -67,10 +68,53 @@ class AiSubtitles @Inject constructor(
         cloud.put("$b/req/${Cloud.safe(seriesId)}", com.google.gson.JsonNull.INSTANCE)
     }
 
+    /** The last API problem (shown on the series page so it's clear why a translation stopped). */
+    @Volatile var lastError: String = ""
+
+    private fun errorMessage(body: String): String =
+        runCatching { JsonParser.parseString(body).asJsonObject.getAsJsonObject("error").get("message").asString }.getOrNull()?.take(120) ?: ""
+
+    /**
+     * What the Android device is doing for this series, for every series page to show:
+     * r = "working" (on episode l, p %), "busy" (the subscription's connections are all in use), "error" (m = why),
+     * "done" (reached the last episode), "stopped".
+     */
+    suspend fun note(subId: Long, seriesId: String, r: String, label: String = "", p: Int = 0, m: String = "") {
+        val b = base(subId) ?: return
+        cloud.put("$b/w/${Cloud.safe(seriesId)}", mapOf("r" to r, "l" to label, "p" to p, "m" to m.take(160), "t" to System.currentTimeMillis() / 1000))
+    }
+
+    /** "An Android device with the app looked for work at …" (shown when nothing has started yet). */
+    suspend fun heartbeat(subId: Long) {
+        val b = base(subId) ?: return
+        cloud.put("$b/dev", mapOf("t" to System.currentTimeMillis() / 1000, "n" to android.os.Build.MODEL.orEmpty()))
+    }
+
+    data class Status(
+        val pending: Boolean, val r: String, val label: String, val p: Int, val m: String,
+        /** seconds since the note / since a device last checked (-1 = never) */
+        val noteAge: Long, val devAge: Long, val device: String,
+    )
+
+    suspend fun status(subId: Long, seriesId: String): Status? {
+        val b = base(subId) ?: return null
+        val now = System.currentTimeMillis() / 1000
+        val req = runCatching { cloud.get("$b/req/${Cloud.safe(seriesId)}") }.getOrNull()
+        val w = runCatching { cloud.get("$b/w/${Cloud.safe(seriesId)}") }.getOrNull()
+        val dev = runCatching { cloud.get("$b/dev") }.getOrNull()
+        return Status(
+            pending = req != null && req.str("ep").isNotBlank(),
+            r = w?.str("r").orEmpty(), label = w?.str("l").orEmpty(), p = w?.num("p")?.toInt() ?: 0, m = w?.str("m").orEmpty(),
+            noteAge = w?.num("t")?.toLong()?.takeIf { it > 0 }?.let { now - it } ?: -1,
+            devAge = dev?.num("t")?.toLong()?.takeIf { it > 0 }?.let { now - it } ?: -1,
+            device = dev?.str("n").orEmpty(),
+        )
+    }
+
     /** Is this series still asked for (false once someone presses Stop)? */
     suspend fun requested(subId: Long, seriesId: String): Boolean {
         val b = base(subId) ?: return false
-        return runCatching { cloud.get("$b/req/${Cloud.safe(seriesId)}") }.getOrNull()?.let { it.isJsonObject && it.asJsonObject.size() > 0 } ?: false
+        return runCatching { cloud.get("$b/req/${Cloud.safe(seriesId)}") }.getOrNull()?.let { it.str("ep").isNotBlank() } ?: false
     }
 
     /** Forgets an unfinished episode (stopped half way). */
@@ -127,10 +171,12 @@ class AiSubtitles @Inject constructor(
                 .build()
             val req = Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
                 .header("Authorization", "Bearer ${BuildConfig.OPENAI_API_KEY}").post(body).build()
-            val res = runCatching { http.newCall(req).execute() }.getOrNull() ?: return@withContext null
+            val res = runCatching { http.newCall(req).execute() }.onFailure { lastError = it.message.orEmpty() }.getOrNull()
+                ?: return@withContext null
             res.use { r ->
                 val text = r.body?.string().orEmpty()
-                if (r.code == 400 && model != "whisper-1") return@use   // try the next model
+                if (!r.isSuccessful) lastError = "HTTP ${r.code} ${errorMessage(text)}"
+                if (!r.isSuccessful && r.code != 401 && r.code != 429 && model != "whisper-1") return@use   // try the next model
                 if (!r.isSuccessful) return@withContext null
                 val o = runCatching { JsonParser.parseString(text).asJsonObject }.getOrNull() ?: return@withContext null
                 val segs = o.getAsJsonArray("segments") ?: if (model != "whisper-1") return@use else return@withContext null
@@ -172,7 +218,12 @@ class AiSubtitles @Inject constructor(
                 val req = Request.Builder().url("https://api.openai.com/v1/chat/completions")
                     .header("Authorization", "Bearer ${BuildConfig.OPENAI_API_KEY}")
                     .post(body.toString().toRequestBody("application/json".toMediaType())).build()
-                val text = runCatching { http.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null } }.getOrNull() ?: continue
+                val text = runCatching {
+                    http.newCall(req).execute().use { r ->
+                        val t = r.body?.string()
+                        if (r.isSuccessful) t else { lastError = "HTTP ${r.code} ${errorMessage(t.orEmpty())}"; null }
+                    }
+                }.onFailure { lastError = it.message.orEmpty() }.getOrNull() ?: continue
                 val reply = runCatching {
                     JsonParser.parseString(text).asJsonObject.getAsJsonArray("choices")[0].asJsonObject
                         .getAsJsonObject("message").get("content").asString

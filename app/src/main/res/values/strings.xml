@@ -340,4 +340,14 @@
     <string name="ai_sub_done">AI subtitles ready — translate next</string>
     <string name="ai_sub_retry">Translation failed — retry</string>
     <string name="ai_sub_stop">Stop translating</string>
+    <string name="ai_ago_now">just now</string>
+    <string name="ai_ago_min">%1$d min ago</string>
+    <string name="ai_ago_h">%1$d h ago</string>
+    <string name="ai_st_copy">Copy: %1$s</string>
+    <string name="ai_st_done">All episodes translated</string>
+    <string name="ai_st_error">%1$s failed: %2$s</string>
+    <string name="ai_st_working">Translating %1$s now · %2$d%%</string>
+    <string name="ai_st_busy">Waiting for a free connection to start %1$s (all in use, checked %2$s) — it starts by itself when you stop watching</string>
+    <string name="ai_st_nodevice">No Android device with the app has checked yet — open the app on an Android device on Wi-Fi</string>
+    <string name="ai_st_waiting">Waiting for %1$s (last checked %2$s) — needs Wi-Fi and battery not low</string>
 </resources>

@@ -965,6 +965,7 @@
                 ${info && aiEpisode() && cloudPath('aisubs') && S.sub && S.sub.type === 'xtream' ? `<button data-f data-action="aiSubs" id="aibtn" class="btn">🈯 ${esc(aiLabel())}</button>
                   <button data-f data-action="aiStop" id="aistop" class="btn" style="${aiState.pending ? '' : 'display:none'}">⏹ ${esc(t('aiStop'))}</button>` : ''}
               </div>
+              <p class="muted ailine" id="ailine">${esc(aiState.line || '')}</p>
               <p class="plot short">${esc((tm && tm.overview) || (info && info.plot) || item.plot || '')}</p>
               ${tm && tm.cast.length ? castRow(tm.cast) : ''}
             </div>
@@ -1015,11 +1016,12 @@
         function aiRefresh() {
           const ep = aiEpisode(), b = cloudPath('aisubs/eps/' + Cloud.safe(item.id) + '/' + Cloud.safe(ep));
           if (!ep || !b) return;
-          Promise.all([Cloud.get(b + '/s'), Cloud.get(b + '/p'), Cloud.get(cloudPath('aisubs/req/' + Cloud.safe(item.id)))]).then(function (r) {
-            const pending = !!r[2];
+          Promise.all([Cloud.get(b + '/s'), Cloud.get(b + '/p'), Cloud.get(cloudPath('aisubs/req/' + Cloud.safe(item.id))),
+            Cloud.get(cloudPath('aisubs/w/' + Cloud.safe(item.id))), Cloud.get(cloudPath('aisubs/dev'))]).then(function (r) {
+            const pending = !!(r[2] && r[2].ep);
             let st = r[0] || (pending ? 'queued' : '');
             if (st === 'working' && !pending) st = '';
-            aiState = { s: st, p: Number(r[1]) || 0, pending: pending };
+            aiState = { s: st, p: Number(r[1]) || 0, pending: pending, line: aiDetail(r[3] || {}, r[4] || {}, pending) };
             aiShow();
           }).catch(function () {});
         }
@@ -1034,12 +1036,30 @@
         actions.aiStop = function () {
           cloudPut('aisubs/req/' + Cloud.safe(item.id), null);
           const st = aiState.s === 'queued' || aiState.s === 'working' ? '' : aiState.s;
-          aiState = { s: st, p: st ? aiState.p : 0, pending: false };
+          aiState = { s: st, p: st ? aiState.p : 0, pending: false, line: '' };
           const b = $('#aibtn');
           aiShow();
           if (b) Nav.focus(b);
         };
+        // one line: which copy, what the Android device is doing, or why it waits
+        function aiDetail(w, dev, pending) {
+          const now = Math.floor(Date.now() / 1000);
+          const noteAge = w.t ? now - w.t : -1, devAge = dev.t ? now - dev.t : -1;
+          const ago = function (s) { return s < 90 ? t('aiAgoNow') : s < 3600 ? t('aiAgoMin', Math.floor(s / 60)) : t('aiAgoH', Math.floor(s / 3600)); };
+          const fresh = noteAge >= 0 && noteAge <= 1800;
+          let what = '';
+          if (!pending) {
+            if (w.r === 'done') what = t('aiStDone');
+            else if (w.r === 'error' && fresh) what = t('aiStError', w.l || '', w.m || '');
+          } else if (w.r === 'working' && fresh) what = t('aiStWorking', w.l || '', w.p || 0);
+          else if (w.r === 'busy' && fresh) what = t('aiStBusy', w.l || '', ago(noteAge));
+          else if (w.r === 'error' && fresh) what = t('aiStError', w.l || '', w.m || '');
+          else if (devAge < 0) what = t('aiStNoDevice');
+          else what = t('aiStWaiting', dev.n || 'Android', ago(devAge));
+          return what ? t('aiStCopy', item.name) + ' · ' + what : '';
+        }
         function aiShow() {
+          const ln = $('#ailine'); if (ln) ln.textContent = aiState.line || '';
           const el = $('#aibtn'); if (el) el.textContent = '🈯 ' + aiLabel();
           const sb = $('#aistop'); if (sb) sb.style.display = aiState.pending ? '' : 'none';
         }

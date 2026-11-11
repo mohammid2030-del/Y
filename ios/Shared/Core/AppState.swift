@@ -323,6 +323,30 @@ final class AppState: ObservableObject {
         return (st, pr, pending)
     }
 
+    /// One line: what the Android device is doing for this series, or why it is waiting.
+    func aiSubsDetail(seriesID: String, pending: Bool) async -> String {
+        guard let w = cloudPath("aisubs/w/\(Cloud.safe(seriesID))"), let d = cloudPath("aisubs/dev") else { return "" }
+        let note = await Cloud.shared.get(w) as? [String: Any] ?? [:]
+        let dev = await Cloud.shared.get(d) as? [String: Any] ?? [:]
+        let now = Int(Date().timeIntervalSince1970)
+        let r = jstr(note["r"]), label = jstr(note["l"]), m = jstr(note["m"]), p = jint(note["p"])
+        let noteAge = jint(note["t"]) > 0 ? now - jint(note["t"]) : -1
+        let devAge = jint(dev["t"]) > 0 ? now - jint(dev["t"]) : -1
+        func ago(_ s: Int) -> String { s < 90 ? L.t("aiAgoNow") : s < 3600 ? L.t("aiAgoMin", s / 60) : L.t("aiAgoH", s / 3600) }
+        let fresh = noteAge >= 0 && noteAge <= 1800
+        if !pending {
+            if r == "done" { return L.t("aiStDone") }
+            if r == "error" && fresh { return L.t("aiStError", label, m) }
+            return ""
+        }
+        if r == "working" && fresh { return L.t("aiStWorking", label, p) }
+        if r == "busy" && fresh { return L.t("aiStBusy", label, ago(noteAge)) }
+        if r == "error" && fresh { return L.t("aiStError", label, m) }
+        if devAge < 0 { return L.t("aiStNoDevice") }
+        let name = jstr(dev["n"])
+        return L.t("aiStWaiting", name.isEmpty ? "Android" : name, ago(devAge))
+    }
+
     /// The finished subtitles of one episode, parsed (empty when there are none yet).
     func aiSubs(seriesID: String, episodeID: String) async -> [AICue] {
         guard let b = cloudPath("aisubs/eps/\(Cloud.safe(seriesID))/\(Cloud.safe(episodeID))"),

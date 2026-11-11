@@ -339,4 +339,14 @@
     <string name="ai_sub_done">الترجمة جاهزة — ترجم التالي</string>
     <string name="ai_sub_retry">فشلت الترجمة — أعد المحاولة</string>
     <string name="ai_sub_stop">إيقاف الترجمة</string>
+    <string name="ai_ago_now">الآن</string>
+    <string name="ai_ago_min">قبل %1$d د</string>
+    <string name="ai_ago_h">قبل %1$d س</string>
+    <string name="ai_st_copy">النسخة: %1$s</string>
+    <string name="ai_st_done">تمت ترجمة كل الحلقات</string>
+    <string name="ai_st_error">تعذرت ترجمة %1$s: %2$s</string>
+    <string name="ai_st_working">يترجم الآن %1$s · %2$d%%</string>
+    <string name="ai_st_busy">ينتظر اتصالاً فاضياً ليبدأ %1$s (كل الاتصالات مستخدمة، آخر فحص %2$s) — يبدأ تلقائياً لما توقف المشاهدة</string>
+    <string name="ai_st_nodevice">لم يفحص أي جهاز أندرويد بعد — افتح التطبيق على جهاز أندرويد متصل بالواي فاي</string>
+    <string name="ai_st_waiting">بانتظار جهاز %1$s (آخر فحص %2$s) — يحتاج واي فاي وبطارية غير منخفضة</string>
 </resources>

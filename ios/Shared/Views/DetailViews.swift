@@ -519,6 +519,7 @@ struct SeriesDetailView: View {
     @State private var aiState = ""
     @State private var aiProgress = 0
     @State private var aiPending = false
+    @State private var aiDetail = ""
     private var shown: MediaItem { pick ?? item }
     /// The episode the viewer is on (else the first one): AI subtitles start from here.
     private func aiEpisode(_ last: HistoryItem?) -> String? {
@@ -606,6 +607,11 @@ struct SeriesDetailView: View {
                         }
                     }
                 }
+                if !aiDetail.isEmpty {
+                    Text(L.t("aiStCopy", shown.name) + " · " + aiDetail)
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .padding(.horizontal, Theme.pad)
+                }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : shown.plot)
                 if !plot.isEmpty { PlotBlock(text: plot) }
                 if let cast = tmdb?.cast, !cast.isEmpty { CastRow(cast: cast) }
@@ -691,6 +697,7 @@ struct SeriesDetailView: View {
                 if let ep = aiEpisode(last) {
                     let (st, pr, pending) = await state.aiSubsState(seriesID: shown.id, episodeID: ep)
                     aiState = st; aiProgress = pr; aiPending = pending
+                    aiDetail = await state.aiSubsDetail(seriesID: shown.id, pending: pending)
                 }
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
             }

@@ -957,6 +957,8 @@ class PlayerActivity : AppCompatActivity() {
         saveProgress()
         // find intro / credits of what's being watched next (Wi-Fi, free connection only)
         if (::request.isInitialized && request.type == ContentType.SERIES) com.nova.iptv.work.SegmentWorker.soon(this)
+        // the connection being watched on frees up: a waiting AI translation can start (providers take ~a minute to notice)
+        if (aiSubs.available) com.nova.iptv.work.AiSubtitleWorker.now(this, delaySec = 60)
         val p = player
         if (p != null) {
             resumeOnStart = p.playWhenReady && ui.isLive

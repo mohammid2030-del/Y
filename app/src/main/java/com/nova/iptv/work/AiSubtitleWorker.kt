@@ -57,13 +57,16 @@ class AiSubtitleWorker @AssistedInject constructor(
         var any = false
         for (sub in subs.getAll()) {
             if (sub.type != SourceType.XTREAM) continue
+            runCatching { ai.heartbeat(sub.id) }
             for ((seriesId, firstEp) in ai.requests(sub.id)) {
                 if (isStopped) return@withContext Result.retry()
                 any = true
-                val finished = runCatching { series(sub.id, seriesId, firstEp) }.getOrElse {
-                    runCatching { ai.clearWorking(sub.id, seriesId) }; false
+                val finished = runCatching { series(sub.id, seriesId, firstEp) }.getOrElse { e ->
+                    runCatching { ai.clearWorking(sub.id, seriesId) }
+                    runCatching { ai.note(sub.id, seriesId, "error", m = e.message ?: e.javaClass.simpleName) }
+                    false
                 }
-                if (finished) ai.cancel(sub.id, seriesId)   // every episode from there on is done
+                if (finished) { ai.cancel(sub.id, seriesId); ai.note(sub.id, seriesId, "done") }   // every episode from there on is done
             }
         }
         dir.deleteRecursively()
@@ -78,11 +81,13 @@ class AiSubtitleWorker @AssistedInject constructor(
         val from = all.indexOfFirst { it.id == firstEp }.coerceAtLeast(0)
         for (ep in all.drop(from)) {
             if (isStopped) return false
-            if (!ai.requested(subId, seriesId)) return false   // stopped from a series page
+            if (!ai.requested(subId, seriesId)) { ai.note(subId, seriesId, "stopped"); return false }   // stopped from a series page
             if (ai.state(subId, seriesId, ep.id).first == "done") continue
-            if (!freeConnection(subId)) return false   // someone is watching: try again later
-            notify("S${ep.season} E${ep.episodeNum}", 0)
+            val label = "S${ep.season} E${ep.episodeNum}"
+            if (!freeConnection(subId)) { ai.note(subId, seriesId, "busy", label); return false }   // someone is watching: try again later
+            notify(label, 0)
             ai.mark(subId, seriesId, ep.id, "working", 0)
+            ai.note(subId, seriesId, "working", label, 0)
             val stream = content.resolve(PlaybackRequest(subscriptionId = subId, type = ContentType.SERIES, remoteId = seriesId, title = "",
                 episodeId = ep.id, episodeExt = ep.ext))
             val headers = if (stream.userAgent.isNotBlank()) mapOf("User-Agent" to stream.userAgent) else emptyMap()
@@ -96,18 +101,21 @@ class AiSubtitleWorker @AssistedInject constructor(
                     lastMark = System.currentTimeMillis()
                     kotlinx.coroutines.runBlocking {
                         if (!ai.requested(subId, seriesId)) { cancelled = true; return@runBlocking }
-                        notify("S${ep.season} E${ep.episodeNum}", pct)
+                        notify(label, pct)
                         ai.mark(subId, seriesId, ep.id, "working", pct)
+                        ai.note(subId, seriesId, "working", label, pct)
                     }
                 }
             }
             if (cancelled || !ai.requested(subId, seriesId)) {
                 ai.clear(subId, seriesId, ep.id)
+                ai.note(subId, seriesId, "stopped")
                 work.deleteRecursively()
                 return false
             }
             if (chunks.isNullOrEmpty()) {
                 ai.mark(subId, seriesId, ep.id, if (isStopped) "queued" else "error")
+                if (!isStopped) ai.note(subId, seriesId, "error", label, m = "audio")
                 work.deleteRecursively()
                 if (isStopped) return false else continue
             }
@@ -118,14 +126,17 @@ class AiSubtitleWorker @AssistedInject constructor(
                 if (failed || isStopped) return@forEachIndexed
                 val got = ai.transcribe(c)
                 if (got == null) failed = true else lines += got
-                ai.mark(subId, seriesId, ep.id, "working", 60 + 25 * (i + 1) / chunks.size)
+                val pct = 60 + 25 * (i + 1) / chunks.size
+                ai.mark(subId, seriesId, ep.id, "working", pct)
+                ai.note(subId, seriesId, "working", label, pct)
             }
             work.deleteRecursively()
-            if (failed || lines.isEmpty()) { ai.mark(subId, seriesId, ep.id, "error"); continue }
+            if (failed || lines.isEmpty()) { ai.mark(subId, seriesId, ep.id, "error"); ai.note(subId, seriesId, "error", label, m = "transcribe ${ai.lastError}"); continue }
             // 3. → Arabic (85–100 %)
-            notify("S${ep.season} E${ep.episodeNum}", 90)
+            notify(label, 90)
+            ai.note(subId, seriesId, "working", label, 90)
             val arabic = ai.translate(lines)
-            if (arabic == null) { ai.mark(subId, seriesId, ep.id, "error"); continue }
+            if (arabic == null) { ai.mark(subId, seriesId, ep.id, "error"); ai.note(subId, seriesId, "error", label, m = "translate ${ai.lastError}"); continue }
             ai.mark(subId, seriesId, ep.id, "done", 100, AiSubtitles.toVtt(arabic))
         }
         return true
@@ -162,8 +173,9 @@ class AiSubtitleWorker @AssistedInject constructor(
         }
 
         /** Right after asking on this device. */
-        fun now(context: Context) {
-            val req = OneTimeWorkRequestBuilder<AiSubtitleWorker>().setConstraints(constraints).build()
+        fun now(context: Context, delaySec: Long = 0) {
+            val req = OneTimeWorkRequestBuilder<AiSubtitleWorker>().setConstraints(constraints)
+                .setInitialDelay(delaySec, TimeUnit.SECONDS).build()
             WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.KEEP, req)
         }
 

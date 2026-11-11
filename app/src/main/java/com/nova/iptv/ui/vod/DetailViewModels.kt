@@ -133,6 +133,9 @@ class SeriesDetailViewModel @Inject constructor(
     /** A translation run is asked for this series (shows the Stop button). */
     var aiPending by mutableStateOf(false)
         private set
+    /** What the Android device is doing / why it waits (one line under the buttons). */
+    var aiDetail by mutableStateOf<com.nova.iptv.data.aisubs.AiSubtitles.Status?>(null)
+        private set
 
     fun stopAi() {
         val c = itemFlow.value ?: return
@@ -170,7 +173,9 @@ class SeriesDetailViewModel @Inject constructor(
                 val ep = aiEpisode()
                 if (c != null && ep != null) {
                     val (st, pr) = runCatching { aiSubs.state(c.subscriptionId, c.remoteId, ep) }.getOrDefault("" to 0)
-                    val pending = runCatching { aiSubs.requests(c.subscriptionId).any { it.first == c.remoteId } }.getOrDefault(false)
+                    val status = runCatching { aiSubs.status(c.subscriptionId, c.remoteId) }.getOrNull()
+                    aiDetail = status
+                    val pending = status?.pending ?: false
                     aiPending = pending
                     aiState = if (st.isBlank() && pending) "queued" else if (st == "working" && !pending) "" else st
                     aiProgress = pr
