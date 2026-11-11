@@ -35,7 +35,7 @@ class AiSubtitles @Inject constructor(
     private val cloud: Cloud,
     private val viewers: ViewersRepository,
 ) {
-    val available: Boolean get() = BuildConfig.OPENAI_API_KEY.isNotBlank() && BuildConfig.ANTHROPIC_API_KEY.isNotBlank()
+    val available: Boolean get() = BuildConfig.OPENAI_API_KEY.isNotBlank()
 
     private val http = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(5, TimeUnit.MINUTES)
         .writeTimeout(5, TimeUnit.MINUTES).build()
@@ -139,20 +139,22 @@ class AiSubtitles @Inject constructor(
 
                 ${numbered}
             """.trimIndent()
-            val body = JsonObject().apply {
-                addProperty("model", "claude-haiku-5-5")
-                addProperty("max_tokens", 16000)
-                add("messages", JsonArray().apply { add(JsonObject().apply { addProperty("role", "user"); addProperty("content", prompt) }) })
-            }
-            val req = Request.Builder().url("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", BuildConfig.ANTHROPIC_API_KEY).header("anthropic-version", "2023-06-01")
-                .post(body.toString().toRequestBody("application/json".toMediaType())).build()
             var arabic: Map<Int, String>? = null
-            for (attempt in 0 until 3) {
+            // one OpenAI key for everything: a small, fast model is plenty for subtitle lines
+            for (attempt in 0 until 4) {
+                val model = TRANSLATE_MODELS[attempt % TRANSLATE_MODELS.size]
+                val body = JsonObject().apply {
+                    addProperty("model", model)
+                    addProperty("temperature", 0.3)
+                    add("messages", JsonArray().apply { add(JsonObject().apply { addProperty("role", "user"); addProperty("content", prompt) }) })
+                }
+                val req = Request.Builder().url("https://api.openai.com/v1/chat/completions")
+                    .header("Authorization", "Bearer ${BuildConfig.OPENAI_API_KEY}")
+                    .post(body.toString().toRequestBody("application/json".toMediaType())).build()
                 val text = runCatching { http.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null } }.getOrNull() ?: continue
                 val reply = runCatching {
-                    JsonParser.parseString(text).asJsonObject.getAsJsonArray("content").first { it.asJsonObject.get("type").asString == "text" }
-                        .asJsonObject.get("text").asString
+                    JsonParser.parseString(text).asJsonObject.getAsJsonArray("choices")[0].asJsonObject
+                        .getAsJsonObject("message").get("content").asString
                 }.getOrNull() ?: continue
                 val json = reply.substring(reply.indexOf('[').coerceAtLeast(0), (reply.lastIndexOf(']') + 1).coerceAtLeast(0))
                 arabic = runCatching {
@@ -167,6 +169,8 @@ class AiSubtitles @Inject constructor(
     }
 
     companion object {
+        private val TRANSLATE_MODELS = listOf("gpt-4.1-mini", "gpt-4o-mini")
+
         /** WebVTT, the subtitle format every player here can read. */
         fun toVtt(cues: List<Cue>): String {
             fun t(s: Double): String {
