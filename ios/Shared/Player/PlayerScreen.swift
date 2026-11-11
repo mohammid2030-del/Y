@@ -154,7 +154,15 @@ struct PlayerScreen: View {
     @State private var lastNudge = Date.distantPast
     @State private var streak = 0
     @State private var lastSave = Date()
-    private enum Field: Hashable { case catcher, back, play, fwd, scrub, audio, subs, next, retry }
+    // series: intro / end credits and the next episode (all seasons)
+    @State private var segs: AppState.Segs?
+    @State private var introSkipped = false
+    @State private var allEpisodes: [Episode] = []
+    @State private var tmdbID = ""
+    @State private var upNextSince: Date?
+    @State private var upNextDismissed = false
+    @State private var advancing = false
+    private enum Field: Hashable { case catcher, back, play, fwd, scrub, audio, subs, next, retry, skip, upNext }
     #if os(tvOS)
     @FocusState private var focus: Field?
     #endif
@@ -183,12 +191,14 @@ struct PlayerScreen: View {
             #endif
             if controls && !engine.failed { overlay.transition(.opacity) }
             if !controls, let p = pendingSeekMs { seekBadge(p) }
+            if !engine.failed && (introActive || upNextVisible) { seriesCorner }
         }
         .foregroundStyle(.white)
         .onAppear { start(); UIApplication.shared.isIdleTimerDisabled = true; showControls(.play) }
         .onDisappear { save(); engine.stop(); hideTask?.cancel(); seekTask?.cancel(); UIApplication.shared.isIdleTimerDisabled = false }
         .onReceive(ticker) { _ in
             engine.tick()
+            seriesTick()
             if engine.failed && isLive && retries < 3 { retries += 1; start() }
             if !isLive, engine.lengthMs > 0, engine.timeMs > 0, Date().timeIntervalSince(lastSave) > 30 { save() }
         }
@@ -196,6 +206,8 @@ struct PlayerScreen: View {
         .onPlayPauseCommand { engine.togglePause(); if controls { bumpControls() } else { showControls(.play) } }
         .onExitCommand {
             if pendingSeekMs != nil { seekTask?.cancel(); pendingSeekMs = nil; return }
+            // Back over "Next episode": stay and watch the credits
+            if !controls && upNextVisible && !introActive { upNextDismissed = true; focus = .catcher; return }
             if controls { hideControls() } else { close() }
         }
         .onChange(of: focus) { f in if controls && f != nil && f != .catcher { bumpControls() } }
@@ -382,10 +394,134 @@ struct PlayerScreen: View {
         #endif
     }
 
+    /// The next episode, across seasons (season 2 episode 1 after season 1's last).
     private var nextEpisode: Episode? {
+        let list = allEpisodes.isEmpty ? request.seriesEpisodes : allEpisodes
         guard request.kind == .series, let cur = request.episode,
-              let i = request.seriesEpisodes.firstIndex(where: { $0.id == cur.id }), i + 1 < request.seriesEpisodes.count else { return nil }
-        return request.seriesEpisodes[i + 1]
+              let i = list.firstIndex(where: { $0.id == cur.id }), i + 1 < list.count else { return nil }
+        return list[i + 1]
+    }
+
+    // MARK: skip intro / next episode
+
+    private var introActive: Bool {
+        guard let s = segs, s.introEnd > s.introStart, !introSkipped, pendingSeekMs == nil else { return false }
+        return engine.timeMs >= s.introStart && engine.timeMs < s.introEnd - 1_500
+    }
+
+    /// Where "Next episode" appears: the end credits when known, else 25 s before the end.
+    private var creditsAt: Int? {
+        let len = engine.lengthMs
+        guard len > 120_000 else { return nil }
+        if let c = segs?.credits, c > len / 2, c < len - 5_000 { return c }
+        return len - 25_000
+    }
+    private var creditsKnown: Bool { if let c = segs?.credits, c > engine.lengthMs / 2 { return true }; return false }
+
+    private var upNextVisible: Bool {
+        guard nextEpisode != nil, !upNextDismissed, let at = creditsAt, pendingSeekMs == nil else { return false }
+        return engine.timeMs >= at
+    }
+
+    /// Seconds before the next episode starts by itself (10 s over the credits; else the time left).
+    private var upNextSeconds: Int {
+        if creditsKnown, let since = upNextSince { return max(0, 10 - Int(Date().timeIntervalSince(since))) }
+        return max(0, (engine.lengthMs - engine.timeMs) / 1000)
+    }
+
+    @ViewBuilder private var seriesCorner: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                if introActive {
+                    Button { skipIntro() } label: { cornerLabel(L.t("skipIntro"), icon: "forward.end.fill", focused: isFocused(.skip)) }
+                        .buttonStyle(BareButtonStyle())
+                        #if os(tvOS)
+                        .focused($focus, equals: .skip)
+                        #endif
+                } else if upNextVisible, let n = nextEpisode {
+                    Button { playEpisode(n) } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L.t("nextIn", upNextSeconds)).font(.caption.weight(.semibold)).foregroundStyle(isFocused(.upNext) ? Color.black.opacity(0.7) : Color.white.opacity(0.8))
+                            Text("S\(n.season) E\(n.num)" + (n.title.isEmpty ? "" : " — \(n.title)")).font(Theme.isTV ? .title3.bold() : .headline).lineLimit(1)
+                        }
+                        .padding(.horizontal, Theme.isTV ? 30 : 18).padding(.vertical, Theme.isTV ? 18 : 12)
+                        .foregroundStyle(isFocused(.upNext) ? Color.black : Color.white)
+                        .background(isFocused(.upNext) ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.black.opacity(0.7)), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .buttonStyle(BareButtonStyle())
+                    #if os(tvOS)
+                    .focused($focus, equals: .upNext)
+                    #endif
+                }
+            }
+            .padding(.trailing, Theme.isTV ? 80 : 24)
+            .padding(.bottom, controls ? (Theme.isTV ? 260 : 150) : (Theme.isTV ? 80 : 40))
+        }
+    }
+
+    private func isFocused(_ f: Field) -> Bool {
+        #if os(tvOS)
+        return focus == f
+        #else
+        return true
+        #endif
+    }
+
+    private func cornerLabel(_ title: String, icon: String, focused: Bool) -> some View {
+        Label(title, systemImage: icon)
+            .font(Theme.isTV ? .title3.bold() : .headline)
+            .padding(.horizontal, Theme.isTV ? 34 : 20).padding(.vertical, Theme.isTV ? 18 : 12)
+            .foregroundStyle(focused ? Color.black : Color.white)
+            .background(focused ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.black.opacity(0.7)), in: Capsule())
+    }
+
+    private func skipIntro() {
+        guard let s = segs else { return }
+        introSkipped = true
+        engine.seek(toMs: s.introEnd)
+        #if os(tvOS)
+        if !controls { focus = .catcher }
+        #endif
+    }
+
+    /// Loads all episodes (for the next one across seasons) and this episode's intro / credits times.
+    private func loadSeriesExtras() {
+        guard request.kind == .series, let e = request.episode else { return }
+        segs = nil; introSkipped = false; upNextSince = nil; upNextDismissed = false; advancing = false
+        let series = request.stream, epID = e.id
+        Task {
+            if allEpisodes.isEmpty {
+                let r = await state.allEpisodes(series)
+                allEpisodes = r.episodes; tmdbID = r.tmdb
+            }
+            // the resumed episode may only know its id: take season / number from the full list
+            let full = allEpisodes.first { $0.id == epID } ?? e
+            let found = await state.segments(seriesID: series.id, season: full.season, episode: full.num, tmdb: tmdbID)
+            if request.episode?.id == epID { segs = found }
+        }
+    }
+
+    /// Every half second: focus the skip / next buttons when they appear, count down, and move on at the end.
+    private func seriesTick() {
+        guard request.kind == .series, !advancing else { return }
+        #if os(tvOS)
+        if !controls {
+            if introActive && focus != .skip { focus = .skip }
+            else if upNextVisible && !introActive && focus != .upNext { focus = .upNext }
+            else if !introActive && !upNextVisible && (focus == .skip || focus == .upNext) { focus = .catcher }
+        }
+        #endif
+        if upNextVisible { if upNextSince == nil { upNextSince = Date() } } else if engine.timeMs < (creditsAt ?? .max) { upNextSince = nil }
+        let ended = engine.player.state == .ended
+        if let n = nextEpisode, (upNextVisible && creditsKnown && upNextSeconds == 0) || ended {
+            advancing = true
+            playEpisode(n)
+        } else if ended {
+            advancing = true
+            close()
+        }
     }
 
     private func fmt(_ ms: Int) -> String {
@@ -397,6 +533,7 @@ struct PlayerScreen: View {
 
     private func start() {
         engine.open(request.url, startMs: request.startMs, live: isLive)
+        loadSeriesExtras()
     }
 
     #if os(tvOS)
@@ -490,8 +627,13 @@ struct PlayerScreen: View {
     private func save() {
         lastSave = Date()
         guard !isLive, engine.lengthMs > 0, engine.timeMs > 0 else { return }
+        // finished: 95 %, into the end credits, or the end
+        let len = engine.lengthMs
+        let done = engine.timeMs >= len * 95 / 100 || (creditsKnown && engine.timeMs >= (segs?.credits ?? .max)) || engine.player.state == .ended
         state.record(kind: request.kind, item: request.stream, episode: request.episode, subtitle: request.subtitle,
-                     position: engine.timeMs, duration: engine.lengthMs)
+                     position: done ? len : engine.timeMs, duration: len)
+        // Continue watching moves on to the next episode (next season's first after a season's last)
+        if done, request.kind == .series, let n = nextEpisode { state.recordUpNext(series: request.stream, next: n) }
     }
 
     private func close() {

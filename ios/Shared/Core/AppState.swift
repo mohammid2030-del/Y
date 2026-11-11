@@ -170,11 +170,14 @@ final class AppState: ObservableObject {
         return Array(out.prefix(8))
     }
 
+    /// One card per movie / series — its latest entry. A finished movie disappears; a series shows the episode in
+    /// progress, or the next one (up-next mark) after finishing one; after the last episode it disappears.
     var continueWatching: [HistoryItem] {
         var seen = Set<String>()
-        return history.values.filter { $0.subID == ownerID && $0.kind != .live && $0.resumable }
+        return history.values.filter { $0.subID == ownerID && $0.kind != .live }
             .sorted { $0.updated > $1.updated }
-            .filter { seen.insert("\($0.kind.rawValue)|\($0.stream.id)").inserted }   // one card per series
+            .filter { seen.insert("\($0.kind.rawValue)|\($0.stream.id)").inserted }
+            .filter { $0.resumable || $0.upNext }
             .prefix(15).map { $0 }
     }
 
@@ -236,7 +239,48 @@ final class AppState: ObservableObject {
                         title: "", ext: h.episodeExt, plot: "", image: "", duration: 0)
         guard let u = url(.series, h.stream, episode: e) else { return }
         playing = PlayRequest(kind: .series, stream: h.stream, title: Clean.title(h.stream.name), subtitle: h.subtitle, url: u,
-                              startMs: h.position, episode: e)
+                              startMs: h.upNext ? 0 : h.position, episode: e)
+    }
+
+    /// After finishing an episode: Continue watching shows the next one, from the start.
+    func recordUpNext(series: MediaItem, next e: Episode) {
+        let owner = ownerID
+        let h = HistoryItem(subID: owner, kind: .series, stream: series, episodeID: e.id, episodeExt: e.ext,
+                            subtitle: "S\(e.season) E\(e.num)" + (e.title.isEmpty ? "" : " — \(e.title)"),
+                            position: 1, duration: 0, updated: Date().addingTimeInterval(0.01))
+        history[h.id] = h
+        Storage.save("history", history)
+        cloudPush(history: h)
+    }
+
+    // MARK: intro / end credits
+
+    struct Segs { var introStart = 0, introEnd = 0, credits = 0 }
+
+    /// Every episode of a series in order (all seasons) and its TMDB id, for "next episode" across seasons.
+    func allEpisodes(_ series: MediaItem) async -> (episodes: [Episode], tmdb: String) {
+        guard let sub = active, sub.kind != .m3u, let info = try? await xtream(for: sub).seriesInfo(series.id) else { return ([], "") }
+        return (info.seasons.keys.sorted().flatMap { info.seasons[$0] ?? [] }, info.tmdb)
+    }
+
+    /// Intro / credits times: found by sound on an Android device of this subscription (shared in Firebase,
+    /// exact for these very files), else the TheIntroDB community database (by TMDB id).
+    func segments(seriesID: String, season: Int, episode: Int, tmdb: String) async -> Segs? {
+        if let p = cloudPath("segs/\(Cloud.safe(seriesID))/\(season)_\(episode)"), let d = await Cloud.shared.get(p) as? [String: Any] {
+            let s = Segs(introStart: jint(d["is"]), introEnd: jint(d["ie"]), credits: jint(d["cs"]))
+            if s.introEnd > s.introStart || s.credits > 0 { return s }
+        }
+        guard !tmdb.isEmpty, season > 0, episode > 0,
+              let u = URL(string: "https://api.theintrodb.org/v4/media?tmdb_id=\(tmdb)&season=\(season)&episode=\(episode)") else { return nil }
+        var r = URLRequest(url: u, timeoutInterval: 10)
+        r.setValue("NOVA-IPTV/1.0 (Apple)", forHTTPHeaderField: "User-Agent")
+        guard let (data, resp) = try? await URLSession.shared.data(for: r), (resp as? HTTPURLResponse)?.statusCode == 200,
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        func first(_ k: String) -> [String: Any]? { (o[k] as? [[String: Any]])?.first ?? o[k] as? [String: Any] }
+        var s = Segs()
+        if let i = first("intro"), jint(i["end_ms"]) > jint(i["start_ms"]) { s.introStart = jint(i["start_ms"]); s.introEnd = jint(i["end_ms"]) }
+        if let c = first("credits") { s.credits = jint(c["start_ms"]) }
+        return s.introEnd > s.introStart || s.credits > 0 ? s : nil
     }
 
     func record(kind: MediaKind, item: MediaItem, episode: Episode? = nil, subtitle: String = "", position: Int, duration: Int) {

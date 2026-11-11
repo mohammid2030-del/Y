@@ -98,6 +98,8 @@ struct HistoryItem: Codable, Hashable, Identifiable {
 
     var progress: Double { duration > 0 ? min(1, max(0, Double(position) / Double(duration))) : 0 }
     var resumable: Bool { position > 30_000 && (duration == 0 || Double(position) < Double(duration) * 0.95) }
+    /// "Next episode, from the start" in Continue watching (position 1 ms — the same mark on every platform).
+    var upNext: Bool { position == 1 }
 }
 
 /// What the player should open.
