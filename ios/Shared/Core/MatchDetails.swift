@@ -189,7 +189,7 @@ extension Matches {
                 return (la, quality(a.name)) < (lc, quality(c.name))
             }
             guard !vs.isEmpty else { continue }
-            let pretty = vs.first(where: isEnglishChannel)?.name ?? vs[0].name
+            let pretty = vs.first(where: { isEnglishChannel($0.name) })?.name ?? vs[0].name
             groups.append(ChannelGroup(id: b, name: pretty.replacingOccurrences(of: #"^[A-Za-z]{2,3}\s*[:|\-]\s*"#, with: "", options: .regularExpression),
                                        versions: Array(vs.prefix(8)), showing: flags[b] == true))
         }
