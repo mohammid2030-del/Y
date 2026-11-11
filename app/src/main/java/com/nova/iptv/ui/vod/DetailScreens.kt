@@ -56,6 +56,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -454,6 +455,24 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, on
                             stringResource(R.string.favorite),
                             tint = if (fav) Color(0xFFFF4D6D) else MaterialTheme.colorScheme.onSurface,
                         )
+                    }
+                    if (vm.aiAvailable && info != null) {
+                        val label = when (vm.aiState) {
+                            "queued" -> stringResource(R.string.ai_sub_queued)
+                            "working" -> stringResource(R.string.ai_sub_working, vm.aiProgress)
+                            "done" -> stringResource(R.string.ai_sub_done)
+                            "error" -> stringResource(R.string.ai_sub_retry)
+                            else -> stringResource(R.string.ai_sub_request)
+                        }
+                        OutlinedButton(
+                            onClick = vm::requestAi,
+                            enabled = vm.aiState != "queued" && vm.aiState != "working",
+                            modifier = Modifier.novaFocus(),
+                        ) {
+                            Icon(Icons.Filled.Subtitles, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(label)
+                        }
                     }
                 }
             }

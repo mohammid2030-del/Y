@@ -332,4 +332,10 @@
     <string name="trailer_season">إعلان أي موسم؟</string>
     <string name="parts_of">كل الأجزاء · %1$s</string>
     <string name="now_showing">الحالي</string>
+    <string name="ai_subtitle_track">عربي (ذكاء اصطناعي)</string>
+    <string name="ai_sub_request">ترجم بالذكاء الاصطناعي</string>
+    <string name="ai_sub_queued">الترجمة في الانتظار</string>
+    <string name="ai_sub_working">جاري الترجمة… %1$d%%</string>
+    <string name="ai_sub_done">الترجمة جاهزة — ترجم التالي</string>
+    <string name="ai_sub_retry">فشلت الترجمة — أعد المحاولة</string>
 </resources>

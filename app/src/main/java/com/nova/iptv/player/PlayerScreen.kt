@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import com.nova.iptv.R
@@ -96,6 +97,23 @@ class PlayerActions(
 fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerActions) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { playerView }, modifier = Modifier.fillMaxSize())
+
+        if (state.aiCue.isNotBlank()) {
+            Text(
+                state.aiCue,
+                color = Color.White,
+                fontSize = 22.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                style = androidx.compose.ui.text.TextStyle(
+                    shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(2f, 2f), 6f),
+                    textDirection = androidx.compose.ui.text.style.TextDirection.Rtl,
+                ),
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(start = 48.dp, end = 48.dp, bottom = if (state.controlsVisible) 120.dp else 40.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
 
         if (state.inPip) return@Box
 
@@ -216,6 +234,9 @@ fun PlayerScreen(state: PlayerUiState, playerView: PlayerView, actions: PlayerAc
                         }
                         item { TrackHeader(stringResource(R.string.subtitles_section)) }
                         item { TrackRow(stringResource(R.string.intro_off), "", state.textOff, true) { actions.onSelectText(null) } }
+                        if (state.aiAvailable) item {
+                            TrackRow(stringResource(R.string.ai_subtitle_track), "", state.aiOn, true) { state.aiOn = !state.aiOn }
+                        }
                         items(state.textTracks) { t ->
                             TrackRow(t.label, t.detail, t.selected && !state.textOff, t.supported) { actions.onSelectText(t) }
                         }

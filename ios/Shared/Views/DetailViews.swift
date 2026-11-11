@@ -516,7 +516,25 @@ struct SeriesDetailView: View {
     @State private var pick: MediaItem?
     @State private var showVersions = false
     @State private var askSeason = false
+    @State private var aiState = ""
+    @State private var aiProgress = 0
     private var shown: MediaItem { pick ?? item }
+    /// The episode the viewer is on (else the first one): AI subtitles start from here.
+    private func aiEpisode(_ last: HistoryItem?) -> String? {
+        guard let info else { return nil }
+        let all = info.seasons.keys.sorted().flatMap { info.seasons[$0] ?? [] }
+        if let l = last?.episodeID, all.contains(where: { $0.id == l }) { return l }
+        return all.first?.id
+    }
+    private var aiLabel: String {
+        switch aiState {
+        case "queued": return L.t("aiQueued")
+        case "working": return L.t("aiWorking", aiProgress)
+        case "done": return L.t("aiDone")
+        case "error": return L.t("aiRetry")
+        default: return L.t("aiRequest")
+        }
+    }
     private func trailerSeasons(_ have: [Int]) -> Int { min(30, max(tmdb?.seasons ?? 0, have.last ?? 0)) }
     /// One season's trailer: TMDB season videos, else a YouTube search that must name that season.
     private func openSeasonTrailer(_ n: Int) {
@@ -564,6 +582,16 @@ struct SeriesDetailView: View {
                         Button { state.toggleFavorite(.series, shown) } label: {
                             Image(systemName: state.isFavorite(.series, shown) ? "heart.fill" : "heart")
                         }.buttonStyle(.bordered).tint(state.isFavorite(.series, shown) ? Theme.live : nil)
+                        if state.aiSubsAvailable, let ep = aiEpisode(last) {
+                            Button {
+                                state.requestAISubs(seriesID: shown.id, episodeID: ep)
+                                if aiState != "done" { aiState = "queued"; aiProgress = 0 }
+                            } label: {
+                                Label(aiLabel, systemImage: "captions.bubble").lineLimit(1)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(aiState == "queued" || aiState == "working")
+                        }
                     }
                 }
                 let plot = tmdb?.overview.isEmpty == false ? tmdb!.overview : (info?.plot.isEmpty == false ? info!.plot : shown.plot)
@@ -640,6 +668,19 @@ struct SeriesDetailView: View {
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                 self.error = error.localizedDescription
+            }
+        }
+        .task(id: "ai|\(shown.id)|\(info == nil)") {
+            // AI subtitles status of the episode the viewer is on, refreshed while the page is open
+            guard state.aiSubsAvailable, info != nil else { return }
+            while !Task.isCancelled {
+                let last = state.history.values.filter { $0.subID == state.ownerID && $0.kind == .series && $0.stream.id == shown.id }
+                    .max { $0.updated < $1.updated }
+                if let ep = aiEpisode(last) {
+                    let (st, pr) = await state.aiSubsState(seriesID: shown.id, episodeID: ep)
+                    aiState = st; aiProgress = pr
+                }
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
         }
         .task(id: "\(season)|\(tmdb?.id ?? 0)") {

@@ -292,6 +292,59 @@ final class AppState: ObservableObject {
         return (info.seasons.keys.sorted().flatMap { info.seasons[$0] ?? [] }, info.tmdb)
     }
 
+    // MARK: AI Arabic subtitles (made on an Android device of this subscription, shared in Firebase)
+
+    struct AICue { let start: Double; let end: Double; let text: String }
+
+    /// Needs the shared cloud (Firebase) and an Xtream subscription; the work itself runs on an Android device.
+    var aiSubsAvailable: Bool { Cloud.shared.enabled && subKey != nil && active?.kind == .xtream }
+
+    /// Asks an Android device with the app to translate this series from `episodeID` onward.
+    func requestAISubs(seriesID: String, episodeID: String) {
+        guard let p = cloudPath("aisubs/req/\(Cloud.safe(seriesID))") else { return }
+        Task { await Cloud.shared.put(p, ["ep": episodeID, "t": Int(Date().timeIntervalSince1970)]) }
+    }
+
+    /// ("" / queued / working / done / error, progress 0–100) for one episode.
+    func aiSubsState(seriesID: String, episodeID: String) async -> (String, Int) {
+        guard let b = cloudPath("aisubs/eps/\(Cloud.safe(seriesID))/\(Cloud.safe(episodeID))") else { return ("", 0) }
+        let st = jstr(await Cloud.shared.get(b + "/s"))
+        let pr = jint(await Cloud.shared.get(b + "/p"))
+        if st.isEmpty, let r = cloudPath("aisubs/req/\(Cloud.safe(seriesID))"), await Cloud.shared.get(r) is [String: Any] {
+            return ("queued", 0)
+        }
+        return (st, pr)
+    }
+
+    /// The finished subtitles of one episode, parsed (empty when there are none yet).
+    func aiSubs(seriesID: String, episodeID: String) async -> [AICue] {
+        guard let b = cloudPath("aisubs/eps/\(Cloud.safe(seriesID))/\(Cloud.safe(episodeID))"),
+              jstr(await Cloud.shared.get(b + "/s")) == "done",
+              let vtt = await Cloud.shared.get(b + "/vtt") as? String else { return [] }
+        return Self.parseVTT(vtt)
+    }
+
+    nonisolated static func parseVTT(_ vtt: String) -> [AICue] {
+        func secs(_ t: String) -> Double? {
+            let p = t.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".").split(separator: ":")
+            guard p.count >= 2 else { return nil }
+            var v = 0.0
+            for x in p { guard let d = Double(x) else { return nil }; v = v * 60 + d }
+            return v
+        }
+        var out: [AICue] = []
+        let blocks = vtt.replacingOccurrences(of: "\r", with: "").components(separatedBy: "\n\n")
+        for b in blocks {
+            let lines = b.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            guard let i = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
+            let parts = lines[i].components(separatedBy: "-->")
+            guard parts.count == 2, let a = secs(parts[0]), let e = secs(parts[1].split(separator: " ").first.map(String.init) ?? "") else { continue }
+            let text = lines[(i + 1)...].joined(separator: "\n")
+            if !text.isEmpty { out.append(AICue(start: a, end: e, text: text)) }
+        }
+        return out.sorted { $0.start < $1.start }
+    }
+
     /// Intro / credits marked by hand in the player: saved for this episode and as the season's default, in Firebase,
     /// so Android, Samsung and every Apple device skip it too. Empty times clear the marks.
     func saveManualSegments(seriesID: String, season: Int, episode: Int, _ s: Segs) {

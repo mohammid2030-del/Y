@@ -92,6 +92,9 @@ class PlayerUiState {
     var canZap by mutableStateOf(false)
     var pipSupported by mutableStateOf(false)
     var skipIntroVisible by mutableStateOf(false)
+    var aiCue by mutableStateOf("")
+    var aiAvailable by mutableStateOf(false)
+    var aiOn by mutableStateOf(true)
     var upNext by mutableStateOf<UpNextUi?>(null)
     var upNextSeconds by mutableStateOf(0)
     var upNextTotal by mutableStateOf(25)
@@ -126,6 +129,8 @@ class PlayerActivity : AppCompatActivity() {
     @Inject lateinit var introStore: com.nova.iptv.data.repo.IntroStore
     @Inject lateinit var sharedSegments: com.nova.iptv.data.segments.SharedSegments
     @Inject lateinit var subtitlePrefs: com.nova.iptv.data.subs.SubtitlePrefs
+    @Inject lateinit var aiSubs: com.nova.iptv.data.aisubs.AiSubtitles
+    private var aiCues: List<com.nova.iptv.data.aisubs.AiSubtitles.Cue> = emptyList()
 
     private val ui = PlayerUiState()
     private var player: ExoPlayer? = null
@@ -544,10 +549,18 @@ class PlayerActivity : AppCompatActivity() {
             val found = runCatching { sharedSegments.get(req.subscriptionId, req.remoteId, ctx.current.season, ctx.current.episodeNum) }.getOrNull()
             segments = sharedSegments.toSegments(found) ?: skipRepo.segments(ctx.tmdbId, ctx.current.season, ctx.current.episodeNum)
         }
+        aiCues = emptyList(); ui.aiCue = ""; ui.aiAvailable = false
+        val epId = req.episodeId
+        if (!epId.isNullOrBlank()) {
+            aiCues = runCatching { aiSubs.vtt(req.subscriptionId, req.remoteId, epId) }.getOrNull()
+                ?.let { com.nova.iptv.data.aisubs.AiSubtitles.parseVtt(it) }.orEmpty()
+            ui.aiAvailable = aiCues.isNotEmpty()
+        }
         while (true) {
             val p = player
             if (p != null && p.playbackState == Player.STATE_READY && ui.error == null) {
                 val pos = p.currentPosition
+                ui.aiCue = if (ui.aiOn && aiCues.isNotEmpty()) aiCueAt(pos) else ""
                 // learn from a manual skip once playback continues 12 s past the landing point
                 val cand = seekCandidate
                 if (cand != null && pos >= cand.second + 12_000L) {
@@ -561,6 +574,21 @@ class PlayerActivity : AppCompatActivity() {
             }
             delay(400)
         }
+    }
+
+    private fun aiCueAt(pos: Long): String {
+        val sec = pos / 1000.0
+        var lo = 0; var hi = aiCues.size - 1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val c = aiCues[mid]
+            when {
+                sec < c.start -> hi = mid - 1
+                sec >= c.end -> lo = mid + 1
+                else -> return c.text
+            }
+        }
+        return ""
     }
 
     /** Which segment can be skipped right now: real data first, then learned, then the optional fixed fallback. */

@@ -923,11 +923,14 @@
     Nav.focusFirst();
   }
 
+  let seriesAiTimer = 0;
   async function showSeries(item, keepSeason, fromStack) {
     if (!fromStack) detailStack = [];
     curDetail = { type: 'series', item: item };
     let firstRender = true, autoFid = null;
     let info = null, season = keepSeason || null, error = null, tm = null, tmEps = {}, tmSeason = null;
+    let aiState = { s: '', p: 0 }, aiTimer = 0;
+    if (seriesAiTimer) { clearInterval(seriesAiTimer); seriesAiTimer = 0; }
     function render() {
       // until the viewer moves, keep landing on the main action (Play / Continue / first episode) as data arrives
       const fid = firstRender || focusId(Nav.current) === autoFid ? null : focusId(Nav.current);
@@ -959,6 +962,7 @@
                 <button data-f data-action="trailer" class="btn">🎬 ${esc(t('trailer'))}</button>
                 <button data-f data-action="fav" class="btn">${isFav('series', item.id) ? '★ ' + esc(t('removeFav')) : '☆ ' + esc(t('addFav'))}</button>
                 ${versionCount('series', item) > 1 ? `<button data-f data-action="versions" class="btn vbtn">⧉ ${esc(Library.label('series', item))}</button>` : ''}
+                ${info && aiEpisode() && cloudPath('aisubs') && S.sub && S.sub.type === 'xtream' ? `<button data-f data-action="aiSubs" id="aibtn" class="btn">🈯 ${esc(aiLabel())}</button>` : ''}
               </div>
               <p class="plot short">${esc((tm && tm.overview) || (info && info.plot) || item.plot || '')}</p>
               ${tm && tm.cast.length ? castRow(tm.cast) : ''}
@@ -990,6 +994,46 @@
           });
         };
         actions.cont = function () { if (last) resumeHistory(Object.assign({}, last, { item: item })); };
+        // AI Arabic subtitles: an Android device of this subscription translates from the current episode onward
+        function aiEpisode() {
+          if (!info) return '';
+          let all = [];
+          Object.keys(info.seasons).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) { all = all.concat(info.seasons[k]); });
+          if (last && all.some(function (e) { return e.id === last.ep; })) return last.ep;
+          return all.length ? all[0].id : '';
+        }
+        function aiLabel() {
+          switch (aiState.s) {
+            case 'queued': return t('aiQueued');
+            case 'working': return t('aiWorking', aiState.p);
+            case 'done': return t('aiDone');
+            case 'error': return t('aiRetry');
+            default: return t('aiRequest');
+          }
+        }
+        function aiRefresh() {
+          const ep = aiEpisode(), b = cloudPath('aisubs/eps/' + Cloud.safe(item.id) + '/' + Cloud.safe(ep));
+          if (!ep || !b) return;
+          Promise.all([Cloud.get(b + '/s'), Cloud.get(b + '/p'), Cloud.get(cloudPath('aisubs/req/' + Cloud.safe(item.id)))]).then(function (r) {
+            aiState = { s: r[0] || (r[2] ? 'queued' : ''), p: Number(r[1]) || 0 };
+            const el = $('#aibtn'); if (el) el.textContent = '🈯 ' + aiLabel();
+          }).catch(function () {});
+        }
+        actions.aiSubs = function () {
+          if (aiState.s === 'queued' || aiState.s === 'working') return;
+          const ep = aiEpisode(); if (!ep) return;
+          cloudPut('aisubs/req/' + Cloud.safe(item.id), { ep: ep, t: Math.floor(Date.now() / 1000) });
+          if (aiState.s !== 'done') aiState = { s: 'queued', p: 0 };
+          const el = $('#aibtn'); if (el) el.textContent = '🈯 ' + aiLabel();
+          toast(t('aiQueuedHint'));
+        };
+        if (info && !aiTimer) {
+          aiRefresh();
+          aiTimer = seriesAiTimer = setInterval(function () {
+            if (screen.name === 'detail' && curDetail && curDetail.item === item) aiRefresh();
+            else { clearInterval(aiTimer); if (seriesAiTimer === aiTimer) seriesAiTimer = 0; }
+          }, 15000);
+        }
         actions.fav = function (el) {
           const added = toggleFav('series', item);
           el.textContent = added ? '★ ' + t('removeFav') : '☆ ' + t('addFav');
@@ -1419,6 +1463,25 @@
   function saveViewers() {
     S.viewers = S.viewersAll.filter(function (v) { return !v.deleted; });
     return Store.set('viewers:' + S.sub.id, S.viewersAll);
+  }
+  function parseVtt(vtt) {
+    function secs(x) {
+      const p = String(x).trim().replace(',', '.').split(':');
+      let v = 0;
+      for (let i = 0; i < p.length; i++) { const n = parseFloat(p[i]); if (isNaN(n)) return NaN; v = v * 60 + n; }
+      return v;
+    }
+    const out = [];
+    String(vtt).replace(/\r/g, '').split(/\n\n+/).forEach(function (b) {
+      const lines = b.split('\n').filter(function (l) { return l.length; });
+      const i = lines.findIndex(function (l) { return l.indexOf('-->') >= 0; });
+      if (i < 0) return;
+      const parts = lines[i].split('-->');
+      const s = secs(parts[0]), e = secs((parts[1] || '').trim().split(' ')[0]);
+      const text = lines.slice(i + 1).join('\n');
+      if (!isNaN(s) && !isNaN(e) && text) out.push({ s: s, e: e, t: text });
+    });
+    return out.sort(function (a, b) { return a.s - b.s; });
   }
   function cloudPath(p) { return cloudKey ? 'nova/v1/' + cloudKey + '/' + p : ''; }
   function cloudPut(p, v) { const full = cloudPath(p); if (full) Cloud.put(full, v); }
@@ -2149,6 +2212,7 @@
         <div class="osd top" id="osd-top"></div>
         <div class="center-msg" id="center-msg"></div>
         <div class="subtitle" id="subtitle"></div>
+        <div class="subtitle aisub" id="aisub" dir="rtl"></div>
         <div class="num-entry" id="num-entry"></div>
         <div class="skipbox" id="skipbox"></div>
         <div class="osd bottom" id="osd-bottom">
@@ -2171,8 +2235,10 @@
       };
       actions.subs = async function () {
         const tr = Player.tracks('TEXT');
-        const opts = [{ value: -1, label: t('off') }].concat(tr.map(function (x) { return { value: x.index, label: x.label }; }));
+        let opts = [{ value: -1, label: t('off') }].concat(tr.map(function (x) { return { value: x.index, label: x.label }; }));
+        if (aiCues.length) opts = [{ value: 'ai', label: (aiOn ? '✓ ' : '') + t('aiTrack') }].concat(opts);
         const v = await chooseBox(t('subtitles'), opts);
+        if (v === 'ai') { aiOn = !aiOn; aiTick(lastPos); return; }
         if (v !== undefined) Player.selectTrack('TEXT', v);
       };
       actions.aspect = function () {
@@ -2196,6 +2262,7 @@
     Player.on('time', function (ms) {
       lastPos = ms;
       seriesTick(ms);
+      aiTick(ms);
       if (cur.kind === 'live' || !osdVisible()) return;
       const d = Player.duration();
       $('#t-cur').textContent = fmtDur(ms);
@@ -2226,8 +2293,38 @@
       return creditsKnown() ? segs.cs : d - 25000;   // the end credits when known, else 25 s before the end
     }
     function introActive(ms) { return !!(segs && segs.ie > segs.is && !introSkipped && ms >= segs.is && ms < segs.ie - 1500); }
+    // ---- AI Arabic subtitles made on an Android device of this subscription (shared in Firebase)
+    let aiCues = [], aiOn = true, aiShown = '';
+    function aiTick(ms) {
+      let text = '';
+      if (aiOn && aiCues.length) {
+        const sec = ms / 1000;
+        let lo = 0, hi = aiCues.length - 1;
+        while (lo <= hi) {
+          const m = (lo + hi) >> 1, c = aiCues[m];
+          if (sec < c.s) hi = m - 1; else if (sec >= c.e) lo = m + 1; else { text = c.t; break; }
+        }
+      }
+      if (text === aiShown) return;
+      aiShown = text;
+      const el = $('#aisub');
+      if (el) el.innerHTML = esc(text).replace(/\n/g, '<br>');
+    }
+    function loadAiSubs(r) {
+      aiCues = []; aiTick(0);
+      if (r.kind !== 'series' || !r.episode) return;
+      const b = cloudPath('aisubs/eps/' + Cloud.safe(r.item.id) + '/' + Cloud.safe(r.episode.id));
+      if (!b) return;
+      Cloud.get(b + '/s').then(function (st) {
+        if (st !== 'done' || cur !== r) return null;
+        return Cloud.get(b + '/vtt');
+      }).then(function (vtt) {
+        if (typeof vtt === 'string' && cur === r) aiCues = parseVtt(vtt);
+      }).catch(function () { /* no AI subtitles */ });
+    }
     function loadSeriesExtras(r) {
       segs = null; introSkipped = false; upNextSince = 0; upNextDismissed = false; advancing = false; corner('');
+      loadAiSubs(r);
       if (r.kind !== 'series' || !r.episode || !S.sub || S.sub.type !== 'xtream') return;
       const epId = r.episode.id, item = r.item;
       Api.seriesInfo(S.sub, item.id).then(async function (info) {

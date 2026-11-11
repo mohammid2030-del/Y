@@ -43,11 +43,56 @@ class MovieDetailViewModel @Inject constructor(
     library: com.nova.iptv.data.library.LibraryRepository,
     tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
     youtube: com.nova.iptv.data.tmdb.YouTubeTrailers,
+    private val aiSubs: com.nova.iptv.data.aisubs.AiSubtitles,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
     val extras = DetailExtras(library, tmdbRepo, viewModelScope, youtube)
     private val id: Long = savedState.get<Long>("id") ?: 0L
     private val itemFlow = MutableStateFlow<ContentEntity?>(null)
     val item: StateFlow<ContentEntity?> = itemFlow
+
+    /** AI Arabic subtitles: shown only when the build has both keys. */
+    val aiAvailable get() = aiSubs.available
+    /** state of the episode the viewer is on ("" / queued / working / done / error) and its progress. */
+    var aiState by mutableStateOf("")
+        private set
+    var aiProgress by mutableIntStateOf(0)
+        private set
+
+    private fun aiEpisode(): String? {
+        val i = info ?: return null
+        val last = lastWatched.value?.episodeId
+        val all = i.seasons.toSortedMap().values.flatten()
+        return last?.takeIf { l -> all.any { it.id == l } } ?: all.firstOrNull()?.id
+    }
+
+    /** Asks an Android device with the app to translate from the current episode onward. */
+    fun requestAi() {
+        val c = itemFlow.value ?: return
+        val ep = aiEpisode() ?: return
+        viewModelScope.launch {
+            runCatching { aiSubs.request(c.subscriptionId, c.remoteId, ep) }
+            if (aiState != "done") { aiState = "queued"; aiProgress = 0 }
+            com.nova.iptv.work.AiSubtitleWorker.now(appContext)
+        }
+    }
+
+    private fun watchAi() {
+        if (!aiSubs.available) return
+        viewModelScope.launch {
+            while (true) {
+                val c = itemFlow.value
+                val ep = aiEpisode()
+                if (c != null && ep != null) {
+                    val (st, pr) = runCatching { aiSubs.state(c.subscriptionId, c.remoteId, ep) }.getOrDefault("" to 0)
+                    val pending = runCatching { aiSubs.requests(c.subscriptionId).any { it.first == c.remoteId } }.getOrDefault(false)
+                    aiState = if (st.isBlank() && pending) "queued" else st
+                    aiProgress = pr
+                }
+                kotlinx.coroutines.delay(15_000)
+            }
+        }
+    }
 
     var info by mutableStateOf<XVodInfo?>(null)
         private set
@@ -165,6 +210,7 @@ class SeriesDetailViewModel @Inject constructor(
 
     init {
         load(false)
+        watchAi()
         viewModelScope.launch {
             snapshotFlow { selectedSeason to tmdb?.id }
                 .distinctUntilChanged()

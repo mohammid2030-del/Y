@@ -164,6 +164,9 @@ struct PlayerScreen: View {
     @State private var advancing = false
     @State private var showMarks = false
     @State private var markStart: Int?
+    // AI Arabic subtitles made on an Android device (shared in Firebase), drawn over the picture
+    @State private var aiCues: [AppState.AICue] = []
+    @State private var aiOn = true
     private enum Field: Hashable { case catcher, back, play, fwd, scrub, audio, subs, next, retry, skip, upNext, marks }
     #if os(tvOS)
     @FocusState private var focus: Field?
@@ -194,6 +197,21 @@ struct PlayerScreen: View {
             if controls && !engine.failed { overlay.transition(.opacity) }
             if !controls, let p = pendingSeekMs { seekBadge(p) }
             if !engine.failed && (introActive || upNextVisible) { seriesCorner }
+            if aiOn, !engine.failed, let cue = aiCue {
+                VStack {
+                    Spacer()
+                    Text(cue)
+                        .font(.system(size: Self.aiFont, weight: .semibold))
+                        .multilineTextAlignment(.center)
+                        .environment(\.layoutDirection, .rightToLeft)
+                        .shadow(color: .black, radius: 3, x: 1, y: 1)
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.horizontal, 60)
+                        .padding(.bottom, controls ? Self.aiLift : 40)
+                }
+                .allowsHitTesting(false)
+            }
         }
         .foregroundStyle(.white)
         .onAppear { start(); UIApplication.shared.isIdleTimerDisabled = true; showControls(.play) }
@@ -228,7 +246,10 @@ struct PlayerScreen: View {
         }
         .confirmationDialog(L.t("subtitles"), isPresented: $showSubs, titleVisibility: .visible) {
             let tracks = engine.subtitleTracks
-            if tracks.isEmpty { Button(L.t("noTracks")) {} }
+            if !aiCues.isEmpty {
+                Button((aiOn ? "✓ " : "") + L.t("aiTrack")) { aiOn.toggle(); bumpControls() }
+            }
+            if tracks.isEmpty && aiCues.isEmpty { Button(L.t("noTracks")) {} }
             ForEach(tracks, id: \.0) { t in
                 Button((t.0 == engine.currentSubtitle ? "✓ " : "") + (t.0 < 0 ? L.t("off") : t.1)) { engine.setSubtitle(t.0); bumpControls() }
             }
@@ -553,11 +574,36 @@ struct PlayerScreen: View {
         #endif
     }
 
+    #if os(tvOS)
+    private static let aiFont: CGFloat = 40
+    private static let aiLift: CGFloat = 220
+    #else
+    private static let aiFont: CGFloat = 22
+    private static let aiLift: CGFloat = 130
+    #endif
+
+    /// The AI subtitle line for the current time (binary search; the cues are sorted).
+    private var aiCue: String? {
+        guard !aiCues.isEmpty else { return nil }
+        let t = Double(engine.timeMs) / 1000
+        var lo = 0, hi = aiCues.count - 1
+        while lo <= hi {
+            let m = (lo + hi) / 2, c = aiCues[m]
+            if t < c.start { hi = m - 1 } else if t >= c.end { lo = m + 1 } else { return c.text }
+        }
+        return nil
+    }
+
     /// Loads all episodes (for the next one across seasons) and this episode's intro / credits times.
     private func loadSeriesExtras() {
         guard request.kind == .series, let e = request.episode else { return }
         segs = nil; introSkipped = false; upNextSince = nil; upNextDismissed = false; advancing = false
+        aiCues = []
         let series = request.stream, epID = e.id
+        Task {
+            let cues = await state.aiSubs(seriesID: series.id, episodeID: epID)
+            if request.episode?.id == epID { aiCues = cues }
+        }
         Task {
             if allEpisodes.isEmpty {
                 let r = await state.allEpisodes(series)

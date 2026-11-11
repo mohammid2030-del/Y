@@ -100,6 +100,8 @@ class Cloud @Inject constructor(
 
     suspend fun get(path: String): JsonObject? = call("GET", path)?.takeIf { it.isJsonObject }?.asJsonObject
     suspend fun put(path: String, value: Any) { call("PUT", path, value) }
+    /** A single value (string / number) as text, "" when absent. */
+    suspend fun raw(path: String): String = call("GET", path)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
 
     // ---- Google account (code on screen, google.com/device on the phone)
 

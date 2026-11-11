@@ -333,4 +333,10 @@
     <string name="trailer_season">Trailer of which season?</string>
     <string name="parts_of">All parts · %1$s</string>
     <string name="now_showing">Now</string>
+    <string name="ai_subtitle_track">Arabic (AI)</string>
+    <string name="ai_sub_request">Translate with AI</string>
+    <string name="ai_sub_queued">AI translation queued</string>
+    <string name="ai_sub_working">Translating… %1$d%%</string>
+    <string name="ai_sub_done">AI subtitles ready — translate next</string>
+    <string name="ai_sub_retry">Translation failed — retry</string>
 </resources>
