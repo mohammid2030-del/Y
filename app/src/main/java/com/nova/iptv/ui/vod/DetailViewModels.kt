@@ -166,41 +166,6 @@ class SeriesDetailViewModel @Inject constructor(
         }
     }
 
-    var info by mutableStateOf<XVodInfo?>(null)
-        private set
-    var tmdb by mutableStateOf<TmdbInfo?>(null)
-        private set
-    var notFound by mutableStateOf(false)
-        private set
-
-    val history: StateFlow<HistoryEntity?> = itemFlow
-        .flatMapLatest { c -> if (c == null) flowOf<HistoryEntity?>(null) else content.movieHistory(c.subscriptionId, c.remoteId) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    val isFavorite: StateFlow<Boolean> = itemFlow
-        .flatMapLatest { c ->
-            if (c == null) flowOf(false)
-            else content.favoriteKeys(c.subscriptionId).map { "${ContentType.MOVIE}|${c.remoteId}" in it }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    val similar: StateFlow<List<ContentEntity>> = itemFlow
-        .flatMapLatest { c ->
-            if (c == null) flowOf(emptyList<ContentEntity>())
-            else content.row(c.subscriptionId, ContentType.MOVIE, c.categoryId, 21).map { l -> l.filter { it.id != c.id }.take(20) }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    init {
-        viewModelScope.launch {
-            val c = content.byId(id)
-            if (c == null) {
-                notFound = true; return@launch
-            }
-            show(c)
-        }
-    }
-
     var info by mutableStateOf<XSeriesInfo?>(null)
         private set
     var tmdb by mutableStateOf<TmdbInfo?>(null)
