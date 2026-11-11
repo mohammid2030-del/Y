@@ -43,6 +43,78 @@ class MovieDetailViewModel @Inject constructor(
     library: com.nova.iptv.data.library.LibraryRepository,
     tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
     youtube: com.nova.iptv.data.tmdb.YouTubeTrailers,
+) : ViewModel() {
+    val extras = DetailExtras(library, tmdbRepo, viewModelScope, youtube)
+    private val id: Long = savedState.get<Long>("id") ?: 0L
+    private val itemFlow = MutableStateFlow<ContentEntity?>(null)
+    val item: StateFlow<ContentEntity?> = itemFlow
+
+    var info by mutableStateOf<XVodInfo?>(null)
+        private set
+    var tmdb by mutableStateOf<TmdbInfo?>(null)
+        private set
+    var notFound by mutableStateOf(false)
+        private set
+
+    val history: StateFlow<HistoryEntity?> = itemFlow
+        .flatMapLatest { c -> if (c == null) flowOf<HistoryEntity?>(null) else content.movieHistory(c.subscriptionId, c.remoteId) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val isFavorite: StateFlow<Boolean> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(false)
+            else content.favoriteKeys(c.subscriptionId).map { "${ContentType.MOVIE}|${c.remoteId}" in it }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val similar: StateFlow<List<ContentEntity>> = itemFlow
+        .flatMapLatest { c ->
+            if (c == null) flowOf(emptyList<ContentEntity>())
+            else content.row(c.subscriptionId, ContentType.MOVIE, c.categoryId, 21).map { l -> l.filter { it.id != c.id }.take(20) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        viewModelScope.launch {
+            val c = content.byId(id)
+            if (c == null) {
+                notFound = true; return@launch
+            }
+            show(c)
+        }
+    }
+
+    private suspend fun show(c: ContentEntity) {
+        itemFlow.value = c
+        extras.load(c)
+        info = null
+        val sub = subs.get(c.subscriptionId)
+        if (sub != null && sub.type == SourceType.XTREAM) info = content.vodInfo(sub, c.remoteId)
+        tmdb = content.tmdbFor(c, info?.tmdbId.orEmpty())
+        tmdb?.let { extras.loadParts(it.collectionId, c.subscriptionId) }
+    }
+
+    /** Switches the page to another copy of the title (another language / quality). */
+    fun pick(id: Long) {
+        extras.choosing = false
+        if (id == itemFlow.value?.id) return
+        viewModelScope.launch { content.byId(id)?.let { show(it) } }
+    }
+
+    fun toggleFavorite() {
+        val c = itemFlow.value ?: return
+        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.MOVIE, c.remoteId, c.name, c.logo) }
+    }
+}
+
+@HiltViewModel
+class SeriesDetailViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    private val content: ContentRepository,
+    private val subs: SubscriptionRepository,
+    library: com.nova.iptv.data.library.LibraryRepository,
+    tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
+    youtube: com.nova.iptv.data.tmdb.YouTubeTrailers,
     private val aiSubs: com.nova.iptv.data.aisubs.AiSubtitles,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
@@ -128,43 +200,6 @@ class MovieDetailViewModel @Inject constructor(
             show(c)
         }
     }
-
-    private suspend fun show(c: ContentEntity) {
-        itemFlow.value = c
-        extras.load(c)
-        info = null
-        val sub = subs.get(c.subscriptionId)
-        if (sub != null && sub.type == SourceType.XTREAM) info = content.vodInfo(sub, c.remoteId)
-        tmdb = content.tmdbFor(c, info?.tmdbId.orEmpty())
-        tmdb?.let { extras.loadParts(it.collectionId, c.subscriptionId) }
-    }
-
-    /** Switches the page to another copy of the title (another language / quality). */
-    fun pick(id: Long) {
-        extras.choosing = false
-        if (id == itemFlow.value?.id) return
-        viewModelScope.launch { content.byId(id)?.let { show(it) } }
-    }
-
-    fun toggleFavorite() {
-        val c = itemFlow.value ?: return
-        viewModelScope.launch { content.toggleFavorite(c.subscriptionId, ContentType.MOVIE, c.remoteId, c.name, c.logo) }
-    }
-}
-
-@HiltViewModel
-class SeriesDetailViewModel @Inject constructor(
-    savedState: SavedStateHandle,
-    private val content: ContentRepository,
-    private val subs: SubscriptionRepository,
-    library: com.nova.iptv.data.library.LibraryRepository,
-    tmdbRepo: com.nova.iptv.data.tmdb.TmdbRepository,
-    youtube: com.nova.iptv.data.tmdb.YouTubeTrailers,
-) : ViewModel() {
-    val extras = DetailExtras(library, tmdbRepo, viewModelScope, youtube)
-    private val id: Long = savedState.get<Long>("id") ?: 0L
-    private val itemFlow = MutableStateFlow<ContentEntity?>(null)
-    val item: StateFlow<ContentEntity?> = itemFlow
 
     var info by mutableStateOf<XSeriesInfo?>(null)
         private set
