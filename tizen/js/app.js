@@ -2238,8 +2238,13 @@
         if (!ep) return;
         // times found by sound on an Android device of this subscription (exact for these files), else TheIntroDB
         let found = null;
-        const p = cloudPath('segs/' + Cloud.safe(item.id) + '/' + ep.season + '_' + ep.num);
-        if (p) { const d = await Cloud.get(p); if (d && (d.ie > d.is || d.cs > 0)) found = { is: Number(d.is) || 0, ie: Number(d.ie) || 0, cs: Number(d.cs) || 0 }; }
+        // this episode (sound fingerprint or marked by hand), else the season's times marked by hand ("<season>_0")
+        for (const k of [ep.season + '_' + ep.num, ep.season + '_0']) {
+          const p = cloudPath('segs/' + Cloud.safe(item.id) + '/' + k);
+          if (!p) break;
+          const d = await Cloud.get(p);
+          if (d && (d.ie > d.is || d.cs > 0)) { found = { is: Number(d.is) || 0, ie: Number(d.ie) || 0, cs: Number(d.cs) || 0 }; break; }
+        }
         if (!found && info.tmdb) {
           try {
             const j = await Api.json('https://api.theintrodb.org/v4/media?tmdb_id=' + info.tmdb + '&season=' + ep.season + '&episode=' + ep.num, 10000);

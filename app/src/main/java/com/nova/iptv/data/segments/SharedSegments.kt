@@ -34,9 +34,15 @@ class SharedSegments @Inject constructor(
         val ck = "$subId|$seriesId|$season|$episode"
         cache.get(ck)?.let { return it }
         val p = base(subId, seriesId) ?: return null
-        val o = runCatching { cloud.get("$p/${season}_$episode") }.getOrNull() ?: return null
-        val f = Found(o.num("is").toLong(), o.num("ie").toLong(), o.num("cs").toLong(), o.num("d").toLong(), o.num("n") > 0)
-        cache.put(ck, f)
+        // this episode (sound fingerprint or marked by hand), else the season's times marked by hand ("<season>_0")
+        var f: Found? = null
+        for (k in listOf("${season}_$episode", "${season}_0")) {
+            val o = runCatching { cloud.get("$p/$k") }.getOrNull() ?: continue
+            val x = Found(o.num("is").toLong(), o.num("ie").toLong(), o.num("cs").toLong(), o.num("d").toLong(), o.num("n") > 0)
+            if (x.introEnd > x.introStart || x.creditsStart > 0) { f = x; break }
+            if (f == null) f = x
+        }
+        if (f != null) cache.put(ck, f)
         return f
     }
 

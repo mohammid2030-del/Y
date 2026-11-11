@@ -280,10 +280,14 @@ struct PersonSheet: View {
                 }
                 if info == nil { ProgressView().frame(maxWidth: .infinity) }
                 if let bio = info?.bio, !bio.isEmpty {
-                    Button { bioOpen.toggle() } label: {
-                        ArabicText(text: bio).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(bioOpen ? nil : 6)
+                    // long biographies open in their own page, paragraph by paragraph (scrolls up and down with the remote)
+                    Button { bioOpen = true } label: {
+                        ArabicText(text: bio).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(6)
+                            .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(LiftButtonStyle(radius: 14))
+                    }
+                    .buttonStyle(LiftButtonStyle(radius: 14))
+                    .sheet(isPresented: $bioOpen) { LongTextSheet(title: person.name, text: bio) }
                 }
                 if let known = info?.knownFor, !known.isEmpty {
                     Text(L.t("knownFor")).font(.title3.bold())
@@ -324,6 +328,49 @@ struct PersonSheet: View {
 }
 
 /// Overview as a focusable block; selecting it shows the full text.
+/// A long text on its own page. On Apple TV every paragraph can take the focus, so the remote scrolls the page
+/// down and back up one paragraph at a time (a single long Text can't be scrolled there).
+struct LongTextSheet: View {
+    let title: String
+    let text: String
+    @State private var arabic: String?
+    @Environment(\.dismiss) private var dismiss
+
+    private var paragraphs: [String] {
+        let t = arabic ?? text
+        return t.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            .flatMap { Translator.pieces($0, maxBytes: 900) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.isTV ? 18 : 12) {
+                if !title.isEmpty { Text(title).font(Theme.isTV ? .largeTitle.bold() : .title2.bold()).padding(.bottom, 8) }
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, p in
+                    #if os(tvOS)
+                    Button {} label: {
+                        Text(p).font(.title3).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(LiftButtonStyle(radius: 14))
+                    #else
+                    Text(p).font(.body).frame(maxWidth: .infinity, alignment: .leading)
+                    #endif
+                }
+                #if os(iOS)
+                Button(L.t("close")) { dismiss() }.buttonStyle(.bordered).padding(.top, 8)
+                #endif
+            }
+            .padding(Theme.isTV ? 80 : 24)
+        }
+        .background(Theme.bg.ignoresSafeArea())
+        .task(id: text) {
+            guard L.isArabic, !Translator.isArabic(text) else { return }
+            arabic = await Translator.shared.arabic(text)
+        }
+    }
+}
+
 /// A description shown in Arabic when the app is in Arabic: translated (once, cached) when TMDB has no Arabic text.
 struct ArabicText: View {
     let text: String
@@ -351,11 +398,7 @@ struct PlotBlock: View {
         }
         .buttonStyle(LiftButtonStyle(radius: 14))
         .padding(.horizontal, Theme.pad - (Theme.isTV ? 10 : 0))
-        .sheet(isPresented: $full) {
-            ScrollView {
-                Text(shownText).font(Theme.isTV ? .title3 : .body).padding(Theme.isTV ? 80 : 24).frame(maxWidth: .infinity, alignment: .leading)
-            }.background(Theme.bg.ignoresSafeArea())
-        }
+        .sheet(isPresented: $full) { LongTextSheet(title: "", text: text) }
         .task(id: text) {
             guard L.isArabic, !Translator.isArabic(text) else { arabic = nil; return }
             let t = await Translator.shared.arabic(text)
@@ -418,7 +461,12 @@ struct MovieDetailView: View {
         #endif
         .task(id: shown.id) {
             info = nil
-            if let sub = state.active, sub.kind == .xtream { info = await state.xtream(for: sub).vodInfo(shown.id) }
+            let id = shown.id
+            if let sub = state.active, sub.kind == .xtream {
+                let v = await state.xtream(for: sub).vodInfo(id)
+                if Task.isCancelled || id != shown.id { return }   // another version was picked meanwhile
+                info = v
+            }
             if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .movie, tmdbID: info?.tmdb ?? "", name: shown.name, year: shown.year) }
         }
         #if os(iOS)
@@ -575,11 +623,24 @@ struct SeriesDetailView: View {
             info = nil; error = nil
             guard let sub = state.active, sub.kind == .xtream else { error = L.t("noEpisodes"); return }
             do {
-                let i = try await state.xtream(for: sub).seriesInfo(shown.id)
+                // a version picked right on arrival cancels the first request: that is not a server problem — and a
+                // real hiccup gets one more try before showing an error
+                let x = state.xtream(for: sub), id = shown.id
+                var got: SeriesInfo
+                do { got = try await x.seriesInfo(id) } catch {
+                    if Task.isCancelled { return }
+                    try await Task.sleep(nanoseconds: 1_200_000_000)
+                    got = try await x.seriesInfo(id)
+                }
+                if Task.isCancelled || id != shown.id { return }
+                let i = got
                 info = i
                 if season < 0 || i.seasons[season] == nil { season = i.seasons.keys.sorted().first ?? -1 }
                 if state.tmdbOn { tmdb = await TMDB.shared.details(kind: .series, tmdbID: i.tmdb, name: shown.name, year: shown.year) }
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                self.error = error.localizedDescription
+            }
         }
         .task(id: "\(season)|\(tmdb?.id ?? 0)") {
             guard let id = tmdb?.id, season >= 0 else { tmEpisodes = [:]; return }

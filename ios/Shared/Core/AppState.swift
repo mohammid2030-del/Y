@@ -263,12 +263,28 @@ final class AppState: ObservableObject {
         return (info.seasons.keys.sorted().flatMap { info.seasons[$0] ?? [] }, info.tmdb)
     }
 
+    /// Intro / credits marked by hand in the player: saved for this episode and as the season's default, in Firebase,
+    /// so Android, Samsung and every Apple device skip it too. Empty times clear the marks.
+    func saveManualSegments(seriesID: String, season: Int, episode: Int, _ s: Segs) {
+        var v: [String: Any] = ["v": 1, "m": 1, "t": Int(Date().timeIntervalSince1970)]
+        if s.introEnd > s.introStart { v["is"] = s.introStart; v["ie"] = s.introEnd }
+        if s.credits > 0 { v["cs"] = s.credits }
+        let clear = s.introEnd <= s.introStart && s.credits <= 0
+        for key in ["\(season)_\(episode)", "\(season)_0"] {
+            guard let p = cloudPath("segs/\(Cloud.safe(seriesID))/\(key)") else { continue }
+            Task { await Cloud.shared.put(p, clear ? NSNull() : v) }
+        }
+    }
+
     /// Intro / credits times: found by sound on an Android device of this subscription (shared in Firebase,
     /// exact for these very files), else the TheIntroDB community database (by TMDB id).
     func segments(seriesID: String, season: Int, episode: Int, tmdb: String) async -> Segs? {
-        if let p = cloudPath("segs/\(Cloud.safe(seriesID))/\(season)_\(episode)"), let d = await Cloud.shared.get(p) as? [String: Any] {
-            let s = Segs(introStart: jint(d["is"]), introEnd: jint(d["ie"]), credits: jint(d["cs"]))
-            if s.introEnd > s.introStart || s.credits > 0 { return s }
+        // this episode (sound fingerprint or marked by hand), then the season's times marked by hand ("<season>_0")
+        for key in ["\(season)_\(episode)", "\(season)_0"] {
+            if let p = cloudPath("segs/\(Cloud.safe(seriesID))/\(key)"), let d = await Cloud.shared.get(p) as? [String: Any] {
+                let s = Segs(introStart: jint(d["is"]), introEnd: jint(d["ie"]), credits: jint(d["cs"]))
+                if s.introEnd > s.introStart || s.credits > 0 { return s }
+            }
         }
         guard !tmdb.isEmpty, season > 0, episode > 0,
               let u = URL(string: "https://api.theintrodb.org/v4/media?tmdb_id=\(tmdb)&season=\(season)&episode=\(episode)") else { return nil }

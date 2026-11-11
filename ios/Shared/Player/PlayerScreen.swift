@@ -162,7 +162,9 @@ struct PlayerScreen: View {
     @State private var upNextSince: Date?
     @State private var upNextDismissed = false
     @State private var advancing = false
-    private enum Field: Hashable { case catcher, back, play, fwd, scrub, audio, subs, next, retry, skip, upNext }
+    @State private var showMarks = false
+    @State private var markStart: Int?
+    private enum Field: Hashable { case catcher, back, play, fwd, scrub, audio, subs, next, retry, skip, upNext, marks }
     #if os(tvOS)
     @FocusState private var focus: Field?
     #endif
@@ -376,16 +378,25 @@ struct PlayerScreen: View {
                 .buttonStyle(BareButtonStyle()).focused($focus, equals: .audio)
             Button { showSubs = true; bumpControls() } label: { PillControl(title: L.t("subtitles"), icon: "captions.bubble.fill", focused: focus == .subs) }
                 .buttonStyle(BareButtonStyle()).focused($focus, equals: .subs)
+            if request.kind == .series {
+                Button { showMarks = true; bumpControls() } label: { PillControl(title: L.t("markIntro"), icon: "scissors", focused: focus == .marks) }
+                    .buttonStyle(BareButtonStyle()).focused($focus, equals: .marks)
+            }
             if let next = nextEpisode {
                 Button { playEpisode(next) } label: { PillControl(title: L.t("episode", next.num), icon: "forward.fill", focused: focus == .next) }
                     .buttonStyle(BareButtonStyle()).focused($focus, equals: .next)
             }
         }
+        .confirmationDialog(L.t("markIntroTitle"), isPresented: $showMarks, titleVisibility: .visible) { markButtons }
         #else
         HStack(spacing: 14) {
             Spacer()
             Button { showAudio = true; bumpControls() } label: { Label(L.t("audio"), systemImage: "speaker.wave.2.fill") }
             Button { showSubs = true; bumpControls() } label: { Label(L.t("subtitles"), systemImage: "captions.bubble.fill") }
+            if request.kind == .series {
+                Button { showMarks = true; bumpControls() } label: { Label(L.t("markIntro"), systemImage: "scissors") }
+                    .confirmationDialog(L.t("markIntroTitle"), isPresented: $showMarks, titleVisibility: .visible) { markButtons }
+            }
             if let next = nextEpisode {
                 Button { playEpisode(next) } label: { Label(L.t("episode", next.num), systemImage: "forward.fill") }
             }
@@ -403,6 +414,36 @@ struct PlayerScreen: View {
     }
 
     // MARK: skip intro / next episode
+
+    /// Marking by hand where the intro starts / ends and where the end credits start (for series TMDB / TheIntroDB
+    /// don't know). Saved for this episode and the whole season, shared with every device.
+    @ViewBuilder private var markButtons: some View {
+        let now = engine.timeMs
+        Button(L.t("introStartsHere", fmt(now))) { markStart = now }
+        Button(L.t("introEndsHere", fmt(now))) {
+            var s = segs ?? AppState.Segs()
+            let start = markStart ?? (s.introEnd > s.introStart && s.introStart < now ? s.introStart : 0)
+            guard now > start + 3_000 else { return }
+            s.introStart = start; s.introEnd = now
+            saveMarks(s)
+        }
+        Button(L.t("creditsStartHere", fmt(now))) {
+            var s = segs ?? AppState.Segs()
+            s.credits = now
+            saveMarks(s)
+        }
+        if segs != nil { Button(L.t("clearMarks"), role: .destructive) { segs = nil; saveMarks(AppState.Segs()) } }
+        Button(L.t("cancel"), role: .cancel) {}
+    }
+
+    private func saveMarks(_ s: AppState.Segs) {
+        guard request.kind == .series, let e = request.episode else { return }
+        let full = allEpisodes.first { $0.id == e.id } ?? e
+        segs = (s.introEnd > s.introStart || s.credits > 0) ? s : nil
+        introSkipped = true   // just marked: don't jump over it now
+        markStart = nil
+        state.saveManualSegments(seriesID: request.stream.id, season: full.season, episode: full.num, s)
+    }
 
     private var introActive: Bool {
         guard let s = segs, s.introEnd > s.introStart, !introSkipped, pendingSeekMs == nil else { return false }
@@ -576,7 +617,7 @@ struct PlayerScreen: View {
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             if Task.isCancelled { return }
             await MainActor.run {
-                if showAudio || showSubs || !engine.isPlaying || engine.failed { return }
+                if showAudio || showSubs || showMarks || !engine.isPlaying || engine.failed { return }
                 hideControls()
             }
         }
