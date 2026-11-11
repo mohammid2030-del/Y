@@ -112,6 +112,13 @@
     else if (video) video.currentTime = t / 1000;
   }
 
+  function seek(ms) {
+    var d = duration(), t = Math.max(0, ms);
+    if (d > 0 && t > d - 2000) t = d - 2000;
+    if (hasAvplay) { try { webapis.avplay.seekTo(t); } catch (e) { } }
+    else if (video) video.currentTime = t / 1000;
+  }
+
   function time() {
     if (hasAvplay) { try { return webapis.avplay.getCurrentTime(); } catch (e) { return 0; } }
     return video ? video.currentTime * 1000 : 0;
@@ -173,7 +180,7 @@
 
   global.Player = {
     on: function (name, fn) { listeners[name] = fn; },
-    open: open, stop: stop, state: state, togglePause: togglePause, seekBy: seekBy, time: time, duration: duration,
+    open: open, stop: stop, state: state, togglePause: togglePause, seekBy: seekBy, seek: seek, time: time, duration: duration,
     tracks: tracks, selectTrack: selectTrack, cycleAspect: cycleAspect, info: info, suspend: suspend, restore: restore,
     native: hasAvplay
   };

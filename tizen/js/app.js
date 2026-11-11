@@ -404,12 +404,18 @@
     return i < 0;
   }
   function hkey(type, id, ep) { return owner() + '|' + type + '|' + id + '|' + (ep || ''); }
+  /**
+   * Continue watching: one card per movie / series — its latest entry. A finished movie disappears; a series shows the
+   * episode in progress, or the next one (pos 1 = "up next", the same mark on every platform) after finishing one;
+   * after the last episode there is no next one, so it disappears.
+   */
   function continueList(type) {
     return Object.keys(S.history).map(function (k) { return S.history[k]; }).filter(function (h) {
-      return h.sub === owner() && h.type === type && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95);
+      return h.sub === owner() && h.type === type;
     }).sort(function (a, b) { return b.t - a.t; }).filter(function (h, i, arr) {
-      // one card per series: its most recent episode
       return arr.findIndex(function (x) { return x.type === h.type && x.id === h.id; }) === i;
+    }).filter(function (h) {
+      return h.pos === 1 || (h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95));
     }).slice(0, 20);
   }
 
@@ -1640,7 +1646,7 @@
     const se = h.type === 'series' ? Clean.se(h.subtitle) : null;
     return `<button data-f data-action="resume" data-h="${esc(hkey(h.type, h.id, h.ep))}" class="wcard" data-key="cont:${i}">
       <span class="wbg">${img(h.logo)}</span><span class="wshade"></span>
-      <span class="wchip">${esc(t('watchedPct', pct))}</span><span class="wplay">▶</span>
+      <span class="wchip">${esc(h.pos === 1 ? t('nextEpisode') : t('watchedPct', pct))}</span><span class="wplay">▶</span>
       <span class="wtxt">${se ? `<span class="wse">${esc(t('seasonEpisode', se.s, se.e))}</span>` : ''}<b>${esc(Clean.title(h.title))}</b>
       <span class="bar"><span style="width:${pct}%"></span></span></span></button>`;
   }
@@ -2144,6 +2150,7 @@
         <div class="center-msg" id="center-msg"></div>
         <div class="subtitle" id="subtitle"></div>
         <div class="num-entry" id="num-entry"></div>
+        <div class="skipbox" id="skipbox"></div>
         <div class="osd bottom" id="osd-bottom">
           <div class="vod-bar" id="vod-bar"><span id="t-cur">0:00</span><div class="track"><div id="t-fill"></div></div><span id="t-dur">0:00</span></div>
           <div class="row" data-group>
@@ -2175,6 +2182,7 @@
     }, {
       back: function () {
         if (osdVisible() && Nav.current && Nav.current.closest('.osd')) { hideOsd(); return; }
+        if (cornerKind === 'next') { upNextDismissed = true; corner(''); return; }   // stay and watch the credits
         exit();
       },
       key: onKey,
@@ -2187,6 +2195,7 @@
     let lastPos = 0;
     Player.on('time', function (ms) {
       lastPos = ms;
+      seriesTick(ms);
       if (cur.kind === 'live' || !osdVisible()) return;
       const d = Player.duration();
       $('#t-cur').textContent = fmtDur(ms);
@@ -2198,8 +2207,92 @@
     Player.on('ended', function () {
       if (cur.kind === 'live') return reconnect();
       saveProgress(true);
+      const n = nextEpisode();
+      if (cur.kind === 'series' && n && !advancing) { advancing = true; playEpisode(n); return; }
       exit();
     });
+
+    // ---- series: skip intro, next episode (across seasons), Continue watching moves on
+    let segs = null, allEps = [], introSkipped = false, upNextSince = 0, upNextDismissed = false, advancing = false, cornerKind = '';
+    function nextEpisode() {
+      if (cur.kind !== 'series' || !cur.episode) return null;
+      const i = allEps.findIndex(function (e) { return e.id === cur.episode.id; });
+      return i >= 0 && i + 1 < allEps.length ? allEps[i + 1] : null;
+    }
+    function creditsKnown() { const d = Player.duration(); return !!(segs && segs.cs && d && segs.cs > d / 2 && segs.cs < d - 5000); }
+    function creditsAt() {
+      const d = Player.duration();
+      if (!d || d < 120000) return 0;
+      return creditsKnown() ? segs.cs : d - 25000;   // the end credits when known, else 25 s before the end
+    }
+    function introActive(ms) { return !!(segs && segs.ie > segs.is && !introSkipped && ms >= segs.is && ms < segs.ie - 1500); }
+    function loadSeriesExtras(r) {
+      segs = null; introSkipped = false; upNextSince = 0; upNextDismissed = false; advancing = false; corner('');
+      if (r.kind !== 'series' || !r.episode || !S.sub || S.sub.type !== 'xtream') return;
+      const epId = r.episode.id, item = r.item;
+      Api.seriesInfo(S.sub, item.id).then(async function (info) {
+        if (cur !== r) return;
+        allEps = [];
+        Object.keys(info.seasons).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) { allEps = allEps.concat(info.seasons[k]); });
+        const ep = allEps.find(function (e) { return e.id === epId; });
+        if (!ep) return;
+        // times found by sound on an Android device of this subscription (exact for these files), else TheIntroDB
+        let found = null;
+        const p = cloudPath('segs/' + Cloud.safe(item.id) + '/' + ep.season + '_' + ep.num);
+        if (p) { const d = await Cloud.get(p); if (d && (d.ie > d.is || d.cs > 0)) found = { is: Number(d.is) || 0, ie: Number(d.ie) || 0, cs: Number(d.cs) || 0 }; }
+        if (!found && info.tmdb) {
+          try {
+            const j = await Api.json('https://api.theintrodb.org/v4/media?tmdb_id=' + info.tmdb + '&season=' + ep.season + '&episode=' + ep.num, 10000);
+            const first = function (k) { const v = j && j[k]; return Array.isArray(v) ? v[0] : v; };
+            const i = first('intro'), c = first('credits');
+            const f = { is: 0, ie: 0, cs: 0 };
+            if (i && i.end_ms > (i.start_ms || 0)) { f.is = i.start_ms || 0; f.ie = i.end_ms; }
+            if (c && c.start_ms) f.cs = c.start_ms;
+            if (f.ie || f.cs) found = f;
+          } catch (e) { /* no data for this episode */ }
+        }
+        if (cur === r) segs = found;
+      }).catch(function () { /* episodes unknown: no next button */ });
+    }
+    function corner(kind, html) {
+      const box = $('#skipbox');
+      if (!box) return;
+      if (kind === cornerKind && !html) return;
+      const had = Nav.current && Nav.current.closest('#skipbox');
+      cornerKind = kind;
+      box.innerHTML = kind ? html : '';
+      box.className = 'skipbox' + (kind ? ' on' : '');
+      const b = box.querySelector('button');
+      if (b && !(osdVisible() && Nav.current && Nav.current.closest('.osd'))) Nav.focus(b);
+      else if (!b && had) Nav.reset();
+    }
+    function seriesTick(ms) {
+      if (cur.kind !== 'series' || advancing) return;
+      const n = nextEpisode(), at = creditsAt();
+      if (introActive(ms)) {
+        if (cornerKind !== 'skip') corner('skip', `<button data-f data-action="skipIntro" class="btn primary big">⏭ ${esc(t('skipIntro'))}</button>`);
+        return;
+      }
+      if (n && at && ms >= at && !upNextDismissed) {
+        if (!upNextSince) upNextSince = Date.now();
+        const left = creditsKnown() ? Math.max(0, 10 - Math.floor((Date.now() - upNextSince) / 1000)) : Math.max(0, Math.round((Player.duration() - ms) / 1000));
+        const html = `<button data-f data-action="nextEp" class="btn primary big next-card"><span class="muted">${esc(t('nextIn', left))}</span>
+          <b>${esc('S' + n.season + ' E' + n.num + (n.title ? ' — ' + n.title : ''))}</b></button>`;
+        if (cornerKind !== 'next') corner('next', html);
+        else { const c = $('#skipbox .muted'); if (c) c.textContent = t('nextIn', left); }
+        if (creditsKnown() && left === 0) { advancing = true; playEpisode(n); }
+        return;
+      }
+      if (at && ms < at) upNextSince = 0;
+      if (cornerKind) corner('');
+    }
+    actions.skipIntro = function () { if (!segs) return; introSkipped = true; Player.seek(segs.ie); corner(''); };
+    actions.nextEp = function () { const n = nextEpisode(); if (n) { advancing = true; playEpisode(n); } };
+    function playEpisode(e) {
+      saveProgress(true);
+      begin({ kind: 'series', item: cur.item, title: cur.title, logo: cur.logo, episode: { id: e.id, ext: e.ext },
+        subtitle: 'S' + e.season + ' E' + e.num + (e.title ? ' — ' + e.title : ''), returnTo: cur.returnTo, fromStart: true });
+    }
     Player.on('error', function () { reconnect(); });
 
     function osdVisible() { return app.querySelector('.player-ui.osd-on') !== null; }
@@ -2311,6 +2404,7 @@
       }
       open(r, start);
       loadEpg();
+      loadSeriesExtras(r);
       showOsd(false);
       clearInterval(saveTimer);
       if (r.kind === 'movie' || r.kind === 'series') saveTimer = setInterval(saveProgress, 10000);
@@ -2319,8 +2413,19 @@
     let lastCloudSave = 0;
     function saveProgress(finished) {
       if (!cur || (cur.kind !== 'movie' && cur.kind !== 'series')) return;
-      const d = Player.duration(), pos = finished ? d : (lastPos || Player.time());
+      const d = Player.duration(), now = lastPos || Player.time();
+      // finished: the end, 95 %, or into the end credits
+      const done = finished || (d && now >= d * 0.95) || (creditsKnown() && now >= segs.cs);
+      const pos = done ? d : now;
       if (!d || !pos) return;
+      const n = done && cur.kind === 'series' ? nextEpisode() : null;
+      if (n) {
+        // Continue watching moves on: the next episode (next season's first after a season's last), from the start
+        const nk = hkey('series', cur.item.id, n.id);
+        S.history[nk] = { sub: owner(), type: 'series', id: cur.item.id, ep: n.id, ext: n.ext, title: cur.title,
+          subtitle: 'S' + n.season + ' E' + n.num + (n.title ? ' — ' + n.title : ''), logo: cur.logo, pos: 1, dur: 0, t: Date.now() + 1, item: cur.item };
+        pushHistory(S.history[nk]);
+      }
       const key = historyKeyFor(cur);
       S.history[key] = {
         sub: owner(), type: cur.kind, id: cur.item.id, ep: cur.episode ? cur.episode.id : '', ext: cur.episode ? cur.episode.ext : '',
@@ -2369,6 +2474,8 @@
         case K.GREEN: actions.subs(); return true;
         case K.YELLOW: actions.aspect(); return true;
       }
+      // OK on "Skip intro" / "Next episode" (they take the remote's focus while shown)
+      if (cornerKind && code === K.ENTER && !osdFocused) { if (cornerKind === 'skip') actions.skipIntro(); else actions.nextEp(); return true; }
       if (osdFocused) { showOsd(); return false; } // let spatial navigation handle controls
       if (app.querySelector('.err-box')) return false;
       if (code === K.UP || code === K.DOWN) {

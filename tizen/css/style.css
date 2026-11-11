@@ -428,3 +428,12 @@ html[dir="rtl"] .sv-brand { left: auto; right: 80px; }
 .parts { margin: 10px 0 30px; }
 .parts h3 { font-size: 30px; margin: 0 0 6px; }
 .parts .poster.current .pimg { outline: 3px solid var(--primary); }
+
+/* player: Skip intro / Next episode (bottom corner, above the controls) */
+.skipbox { position: absolute; bottom: 90px; right: 90px; display: none; z-index: 5; }
+html[dir="rtl"] .skipbox { right: auto; left: 90px; }
+.skipbox.on { display: block; }
+.player-ui.osd-on .skipbox { bottom: 300px; }
+.skipbox .btn.big { font-size: 30px; padding: 18px 36px; }
+.skipbox .next-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 640px; text-align: start; }
+.skipbox .next-card .muted { font-size: 22px; }
