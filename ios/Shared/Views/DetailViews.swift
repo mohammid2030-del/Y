@@ -63,7 +63,7 @@ private struct DetailHeader<Actions: View>: View {
             .padding(.horizontal, Theme.pad)
             .padding(.top, Theme.isTV ? 40 : 0)
             if let tag = tmdb?.tagline, !tag.isEmpty {
-                Text("“\(tag)”").italic().foregroundStyle(Theme.blue).padding(.horizontal, Theme.pad).padding(.top, 14)
+                ArabicText(text: "“\(tag)”").font(.body.italic()).foregroundStyle(Theme.blue).padding(.horizontal, Theme.pad).padding(.top, 14)
             }
         }
     }
@@ -281,7 +281,7 @@ struct PersonSheet: View {
                 if info == nil { ProgressView().frame(maxWidth: .infinity) }
                 if let bio = info?.bio, !bio.isEmpty {
                     Button { bioOpen.toggle() } label: {
-                        Text(bio).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(bioOpen ? nil : 6)
+                        ArabicText(text: bio).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(bioOpen ? nil : 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(LiftButtonStyle(radius: 14))
                 }
@@ -324,21 +324,42 @@ struct PersonSheet: View {
 }
 
 /// Overview as a focusable block; selecting it shows the full text.
+/// A description shown in Arabic when the app is in Arabic: translated (once, cached) when TMDB has no Arabic text.
+struct ArabicText: View {
+    let text: String
+    @State private var shown: String?
+    var body: some View {
+        Text(shown ?? text)
+            .task(id: text) {
+                guard L.isArabic, !Translator.isArabic(text) else { shown = nil; return }
+                let t = await Translator.shared.arabic(text)
+                if !Task.isCancelled { shown = t }
+            }
+    }
+}
+
 struct PlotBlock: View {
     let text: String
     var lines = 4
     @State private var full = false
+    @State private var arabic: String?
+    private var shownText: String { arabic ?? text }
     var body: some View {
         Button { full = true } label: {
-            Text(text).font(.body).foregroundStyle(.white.opacity(0.85)).lineLimit(lines)
+            Text(shownText).font(.body).foregroundStyle(.white.opacity(0.85)).lineLimit(lines)
                 .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(LiftButtonStyle(radius: 14))
         .padding(.horizontal, Theme.pad - (Theme.isTV ? 10 : 0))
         .sheet(isPresented: $full) {
             ScrollView {
-                Text(text).font(Theme.isTV ? .title3 : .body).padding(Theme.isTV ? 80 : 24).frame(maxWidth: .infinity, alignment: .leading)
+                Text(shownText).font(Theme.isTV ? .title3 : .body).padding(Theme.isTV ? 80 : 24).frame(maxWidth: .infinity, alignment: .leading)
             }.background(Theme.bg.ignoresSafeArea())
+        }
+        .task(id: text) {
+            guard L.isArabic, !Translator.isArabic(text) else { arabic = nil; return }
+            let t = await Translator.shared.arabic(text)
+            if !Task.isCancelled { arabic = t }
         }
     }
 }
@@ -627,7 +648,7 @@ private struct EpisodeRow: View {
                 Text("\(episode.num). \(name)").font(.subheadline.weight(.semibold)).lineLimit(2)
                 if episode.duration > 0 { Text(L.t("minutes", episode.duration / 60)).font(.caption).foregroundStyle(.secondary) }
                 let plot = tm?.overview.isEmpty == false ? tm!.overview : episode.plot
-                if !plot.isEmpty { Text(plot).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                if !plot.isEmpty { ArabicText(text: plot).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             }
             Spacer(minLength: 0)
         }

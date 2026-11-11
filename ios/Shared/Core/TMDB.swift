@@ -170,7 +170,7 @@ actor TMDB {
         let tv = kind == .series
         let t = tv ? "tv" : "movie"
         guard let o = try? await get("\(t)/\(id)", ["language": lang,
-                                                     "append_to_response": "credits,images,videos",
+                                                     "append_to_response": "credits,images,videos,translations",
                                                      "include_image_language": "\(lang),en,null",
                                                      "include_video_language": "\(lang),ar,en,tr,null"]) else { return nil }
         var en: [String: Any]? = nil
@@ -200,6 +200,11 @@ actor TMDB {
         info.original = jstr(o[tv ? "original_name" : "original_title"])
         info.overview = jstr(o["overview"]).isEmpty ? jstr(en?["overview"]) : jstr(o["overview"])
         info.tagline = jstr(o["tagline"])
+        // TMDB often has the Arabic text under another Arabic region (ar-SA, ar-AE…): use it before any translation
+        if lang == "ar", let tr = TMDB.translation(o, "ar") {
+            if !Translator.isArabic(info.overview), !jstr(tr["overview"]).isEmpty { info.overview = jstr(tr["overview"]) }
+            if !jstr(tr["tagline"]).isEmpty, !Translator.isArabic(info.tagline) { info.tagline = jstr(tr["tagline"]) }
+        }
         let va = Double(jstr(o["vote_average"])) ?? 0
         info.rating = va > 0 ? String(format: "%.1f", va) : ""
         info.votes = jint(o["vote_count"])
@@ -262,11 +267,19 @@ actor TMDB {
         return out
     }
 
+    /// The text of a translation in `lang` (any region), from `append_to_response=translations`.
+    static func translation(_ o: [String: Any], _ lang: String) -> [String: Any]? {
+        let list = ((o["translations"] as? [String: Any])?["translations"] as? [[String: Any]]) ?? []
+        let ar = list.filter { jstr($0["iso_639_1"]) == lang }.compactMap { $0["data"] as? [String: Any] }
+        return ar.first { !jstr($0["overview"]).isEmpty || !jstr($0["biography"]).isEmpty } ?? ar.first
+    }
+
     func person(_ id: Int) async -> TMDBPersonInfo? {
         guard !key.isEmpty, id > 0,
-              let o = try? await get("person/\(id)", ["language": lang, "append_to_response": "combined_credits"]) else { return nil }
+              let o = try? await get("person/\(id)", ["language": lang, "append_to_response": "combined_credits,translations"]) else { return nil }
         var p = TMDBPersonInfo()
         p.bio = jstr(o["biography"])
+        if lang == "ar", !Translator.isArabic(p.bio), let tr = TMDB.translation(o, "ar"), !jstr(tr["biography"]).isEmpty { p.bio = jstr(tr["biography"]) }
         if p.bio.isEmpty && lang != "en", let en = try? await get("person/\(id)", ["language": "en-US"]) { p.bio = jstr(en["biography"]) }
         p.born = jstr(o["birthday"])
         p.place = jstr(o["place_of_birth"])

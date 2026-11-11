@@ -23,6 +23,7 @@ jobs:
       GOOGLE_TV_CLIENT_ID: ${{ secrets.GOOGLE_TV_CLIENT_ID }}
       GOOGLE_TV_CLIENT_SECRET: ${{ secrets.GOOGLE_TV_CLIENT_SECRET }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      GOOGLE_TRANSLATE_KEY: ${{ secrets.GOOGLE_TRANSLATE_KEY }}
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +44,8 @@ jobs:
           GID=$(printf '%s' "$GOOGLE_TV_CLIENT_ID" | tr -cd 'A-Za-z0-9._-')
           GSEC=$(printf '%s' "$GOOGLE_TV_CLIENT_SECRET" | tr -cd 'A-Za-z0-9._-')
           YT=$(printf '%s' "$YOUTUBE_API_KEY" | tr -cd 'A-Za-z0-9_-')
-          printf 'enum CloudConfig {\n    static let dbURL = "%s"\n    static let apiKey = "%s"\n    static let googleClientID = "%s"\n    static let googleClientSecret = "%s"\n    static let youtubeKey = "%s"\n}\n' "$DB" "$KEY" "$GID" "$GSEC" "$YT" > Shared/Core/CloudConfig.swift
+          TR=$(printf '%s' "$GOOGLE_TRANSLATE_KEY" | tr -cd 'A-Za-z0-9_-')
+          printf 'enum CloudConfig {\n    static let dbURL = "%s"\n    static let apiKey = "%s"\n    static let googleClientID = "%s"\n    static let googleClientSecret = "%s"\n    static let youtubeKey = "%s"\n    static let translateKey = "%s"\n}\n' "$DB" "$KEY" "$GID" "$GSEC" "$YT" "$TR" > Shared/Core/CloudConfig.swift
           [ -n "$GID" ] && echo "Google sign-in: on" || echo "Google sign-in: off"
           [ -n "$DB" ] && echo "Viewer sync: on" || echo "Viewer sync: off (no FIREBASE secrets)"
 

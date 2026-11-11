@@ -192,6 +192,8 @@ struct HeroView: View {
             if !t.overview.isEmpty { h.plot = t.overview }
             h.meta = [t.rating.isEmpty ? "" : "★ " + t.rating, t.year, t.genres.prefix(2).joined(separator: " · ")].filter { !$0.isEmpty }.joined(separator: "   •   ")
         }
+        // the story in Arabic (translated once, cached) — the next slide is prepared ahead, so no wait on screen
+        if L.isArabic, !h.plot.isEmpty { h.plot = await Translator.shared.arabic(h.plot) }
         if Self.resolved.count > 60 { Self.resolved.removeAll() }
         Self.resolved[key] = h
         return h

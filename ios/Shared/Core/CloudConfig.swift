@@ -5,4 +5,5 @@ enum CloudConfig {
     static let googleClientID = ""
     static let googleClientSecret = ""
     static let youtubeKey = ""
+    static let translateKey = ""
 }
