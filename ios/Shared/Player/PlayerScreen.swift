@@ -436,9 +436,11 @@ struct PlayerScreen: View {
                 Spacer()
                 if introActive {
                     Button { skipIntro() } label: { cornerLabel(L.t("skipIntro"), icon: "forward.end.fill", focused: isFocused(.skip)) }
-                        .buttonStyle(BareButtonStyle())
                         #if os(tvOS)
+                        .buttonStyle(BareButtonStyle())
                         .focused($focus, equals: .skip)
+                        #else
+                        .buttonStyle(.plain)
                         #endif
                 } else if upNextVisible, let n = nextEpisode {
                     Button { playEpisode(n) } label: {
@@ -450,9 +452,11 @@ struct PlayerScreen: View {
                         .foregroundStyle(isFocused(.upNext) ? Color.black : Color.white)
                         .background(isFocused(.upNext) ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.black.opacity(0.7)), in: RoundedRectangle(cornerRadius: 16))
                     }
-                    .buttonStyle(BareButtonStyle())
                     #if os(tvOS)
+                    .buttonStyle(BareButtonStyle())
                     .focused($focus, equals: .upNext)
+                    #else
+                    .buttonStyle(.plain)
                     #endif
                 }
             }
