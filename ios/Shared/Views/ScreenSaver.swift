@@ -17,6 +17,12 @@ final class ActivityMonitor: NSObject, UIGestureRecognizerDelegate {
 
     /// Attaches the watcher to every window of the app (called periodically: windows come and go).
     func install() {
+        #if os(iOS)
+        // iPad: touches are noted as the window hands them out — no gesture recognizer on the window, which could
+        // keep taps from reaching the player (a tap on the video must always bring back its controls)
+        _ = UIWindow.novaWatchTouches
+        return
+        #else
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
             for w in ws.windows where !installed.contains(ObjectIdentifier(w)) {
@@ -30,11 +36,12 @@ final class ActivityMonitor: NSObject, UIGestureRecognizerDelegate {
                 installed.insert(ObjectIdentifier(w))
             }
         }
+        #endif
     }
 
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
-    fileprivate func noted() {
+    func noted() {
         touch()
         onActivity?()
     }
@@ -50,6 +57,22 @@ final class ActivityMonitor: NSObject, UIGestureRecognizerDelegate {
         }
     }
 }
+
+#if os(iOS)
+extension UIWindow {
+    /// Swaps in `nova_sendEvent` once: every touch still goes exactly where it went before.
+    static let novaWatchTouches: Void = {
+        guard let a = class_getInstanceMethod(UIWindow.self, #selector(UIWindow.sendEvent(_:))),
+              let b = class_getInstanceMethod(UIWindow.self, #selector(UIWindow.nova_sendEvent(_:))) else { return }
+        method_exchangeImplementations(a, b)
+    }()
+
+    @objc func nova_sendEvent(_ event: UIEvent) {
+        if event.type == .touches, event.allTouches?.contains(where: { $0.phase == .began }) == true { ActivityMonitor.shared.noted() }
+        nova_sendEvent(event)   // the original sendEvent (implementations are swapped)
+    }
+}
+#endif
 
 // MARK: - Trailers
 
