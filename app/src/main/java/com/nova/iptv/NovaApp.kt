@@ -24,6 +24,7 @@ class NovaApp : Application(), Configuration.Provider, ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         SyncWorker.schedulePeriodic(this, enabled = true)
+        com.nova.iptv.work.SegmentWorker.schedule(this)
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

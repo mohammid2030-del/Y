@@ -124,6 +124,7 @@ class PlayerActivity : AppCompatActivity() {
     @Inject lateinit var okHttp: OkHttpClient
     @Inject lateinit var skipRepo: com.nova.iptv.data.repo.SkipRepository
     @Inject lateinit var introStore: com.nova.iptv.data.repo.IntroStore
+    @Inject lateinit var sharedSegments: com.nova.iptv.data.segments.SharedSegments
     @Inject lateinit var subtitlePrefs: com.nova.iptv.data.subs.SubtitlePrefs
 
     private val ui = PlayerUiState()
@@ -463,9 +464,26 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         if (!::request.isInitialized || request.type == ContentType.LIVE) return
         val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
-        val position = if (finished) duration else p.currentPosition
+        // finished: the end, 95 %, or into the end credits
+        val credits = segments?.credits?.startMs?.takeIf { it > duration / 2 }
+        val done = finished || p.currentPosition >= duration * 95 / 100 || (credits != null && p.currentPosition >= credits)
+        val position = if (done) duration else p.currentPosition
         val req = request
+        val next = if (done && req.type == ContentType.SERIES) episodeCtx?.takeIf { it.current.id == req.episodeId }?.next else null
         lifecycleScope.launch {
+            if (next != null) {
+                // Continue watching moves on: the next episode (next season's first after a season's last), ready from the start
+                content.saveHistory(
+                    HistoryEntity(
+                        historyKey = HistoryEntity.key(req.subscriptionId, req.type, req.remoteId, next.id),
+                        subscriptionId = req.subscriptionId, type = req.type, remoteId = req.remoteId, episodeId = next.id,
+                        title = req.title,
+                        subtitle = "S${next.season} E${next.episodeNum}" + if (next.title.isNotBlank()) " — ${next.title}" else "",
+                        logo = req.logo, containerExt = next.ext, positionMs = UP_NEXT_MARK, durationMs = 0,
+                        updatedAt = System.currentTimeMillis() + 1,
+                    )
+                )
+            }
             content.saveHistory(
                 HistoryEntity(
                     historyKey = historyKey(req),
@@ -521,7 +539,11 @@ class PlayerActivity : AppCompatActivity() {
         seekCandidate = null
         ui.introAdjustVisible = false
         learnedIntro = introStore.get(req.subscriptionId, req.remoteId)?.let { com.nova.iptv.data.network.Segment(it.startMs, it.endMs) }
-        if (ctx != null) segments = skipRepo.segments(ctx.tmdbId, ctx.current.season, ctx.current.episodeNum)
+        if (ctx != null) {
+            // times found by sound fingerprinting (exact for this very file, shared by all devices) first, then TheIntroDB
+            val found = runCatching { sharedSegments.get(req.subscriptionId, req.remoteId, ctx.current.season, ctx.current.episodeNum) }.getOrNull()
+            segments = sharedSegments.toSegments(found) ?: skipRepo.segments(ctx.tmdbId, ctx.current.season, ctx.current.episodeNum)
+        }
         while (true) {
             val p = player
             if (p != null && p.playbackState == Player.STATE_READY && ui.error == null) {
@@ -905,6 +927,8 @@ class PlayerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         saveProgress()
+        // find intro / credits of what's being watched next (Wi-Fi, free connection only)
+        if (::request.isInitialized && request.type == ContentType.SERIES) com.nova.iptv.work.SegmentWorker.soon(this)
         val p = player
         if (p != null) {
             resumeOnStart = p.playWhenReady && ui.isLive
@@ -926,5 +950,7 @@ class PlayerActivity : AppCompatActivity() {
         private const val MAX_RETRIES = 8
         private const val FALLBACK_UP_NEXT_MS = 25_000L
         private const val CREDITS_COUNTDOWN_S = 10
+        /** Position of a "next episode, from the start" entry in Continue watching (same on every platform). */
+        const val UP_NEXT_MARK = 1L
     }
 }

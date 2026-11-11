@@ -217,10 +217,16 @@ interface HistoryDao {
     @Query("SELECT * FROM history WHERE subscriptionId = :subId AND type = :type ORDER BY updatedAt DESC LIMIT :limit")
     fun observeRecent(subId: Long, type: String, limit: Int): Flow<List<HistoryEntity>>
 
+    /**
+     * Continue watching: one entry per movie / series — its latest. A finished movie disappears; a series shows
+     * the episode in progress, or the next one ("up next" mark, position 1 ms) after finishing one; after the
+     * last episode there is no next one, so the series disappears.
+     */
     @Query(
-        "SELECT * FROM history WHERE subscriptionId = :subId AND type IN ('movie', 'series') " +
-            "AND positionMs > 30000 AND (durationMs = 0 OR positionMs < durationMs * 0.95) " +
-            "ORDER BY updatedAt DESC LIMIT 30"
+        "SELECT * FROM history h WHERE h.subscriptionId = :subId AND h.type IN ('movie', 'series') " +
+            "AND h.updatedAt = (SELECT MAX(x.updatedAt) FROM history x WHERE x.subscriptionId = h.subscriptionId AND x.type = h.type AND x.remoteId = h.remoteId) " +
+            "AND (h.positionMs = 1 OR (h.positionMs > 30000 AND (h.durationMs = 0 OR h.positionMs < h.durationMs * 0.95))) " +
+            "ORDER BY h.updatedAt DESC LIMIT 30"
     )
     fun observeContinue(subId: Long): Flow<List<HistoryEntity>>
 
