@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct NovaApp: App {
@@ -24,7 +25,13 @@ struct RootView: View {
             .fullScreenCover(isPresented: Binding(get: { saver.active }, set: { if !$0 { saver.stop() } })) {
                 ScreenSaverView(saver: saver)
             }
-            .onAppear { saver.attach(state); ActivityMonitor.shared.install() }
+            .onAppear {
+                saver.attach(state); ActivityMonitor.shared.install()
+                #if os(tvOS)
+                // inside the app its own poster screensaver is used, never Apple TV's (that one comes after leaving the app)
+                UIApplication.shared.isIdleTimerDisabled = true
+                #endif
+            }
             // why the app closed last time (shown once, so it can be photographed and reported)
             .fullScreenCover(isPresented: $showCrash) { CrashReportView { showCrash = false; CrashLog.clear() } }
     }
@@ -50,7 +57,20 @@ struct RootView: View {
 
 struct MainTabs: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
+        tabs
+            // new titles from the provider show up by themselves (checked on return to the app and every 30 min)
+            .onChange(of: scenePhase) { p in if p == .active { state.refreshCatalogIfStale() } }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 30 * 60 * 1_000_000_000)
+                    state.refreshCatalogIfStale()
+                }
+            }
+    }
+
+    private var tabs: some View {
         TabView(selection: $state.tab) {
             NavigationStack { HomeView().navigationDestinations() }
                 .tabItem { Label(L.t("home"), systemImage: "house.fill") }.tag(Tab.home)
@@ -79,6 +99,7 @@ extension View {
                 case .series(let s): SeriesDetailView(item: s)
                 case .category(let k, let c): CategoryGridView(kind: k, category: c)
                 case .matchPrefs: MatchPrefsView()
+                case .match(let m): MatchDetailView(match: m)
                 case .teams(let slug): TeamPickerView(slug: slug)
                 }
             }

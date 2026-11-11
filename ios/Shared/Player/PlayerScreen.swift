@@ -300,28 +300,50 @@ struct PlayerScreen: View {
     }
 
     @ViewBuilder private var centerButtons: some View {
+        // Arabic reads right to left: "back 10 s" sits on the right and "forward 10 s" on the left (like the timeline)
         #if os(tvOS)
         HStack(spacing: 70) {
-            Button { isLive ? zap(-1) : nudge(-10) } label: {
-                RoundControl(icon: isLive ? "backward.end.fill" : "gobackward.10", focused: focus == .back)
-            }.buttonStyle(BareButtonStyle()).focused($focus, equals: .back)
+            if L.isArabic { fwdButton } else { backButton }
             Button { engine.togglePause(); bumpControls() } label: {
                 RoundControl(icon: engine.isPlaying ? "pause.fill" : "play.fill", big: true, focused: focus == .play)
             }.buttonStyle(BareButtonStyle()).focused($focus, equals: .play)
-            Button { isLive ? zap(1) : nudge(10) } label: {
-                RoundControl(icon: isLive ? "forward.end.fill" : "goforward.10", focused: focus == .fwd)
-            }.buttonStyle(BareButtonStyle()).focused($focus, equals: .fwd)
+            if L.isArabic { backButton } else { fwdButton }
         }
+        .environment(\.layoutDirection, .leftToRight)
         #else
         HStack(spacing: 40) {
-            Button { isLive ? zap(-1) : nudge(-10) } label: { Image(systemName: isLive ? "backward.end.fill" : "gobackward.10").font(.title) }
+            if L.isArabic { fwdButton } else { backButton }
             Button { engine.togglePause(); bumpControls() } label: {
                 Image(systemName: engine.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 34)).frame(width: 74, height: 74)
                     .background(.white, in: Circle()).foregroundStyle(.black)
             }
-            Button { isLive ? zap(1) : nudge(10) } label: { Image(systemName: isLive ? "forward.end.fill" : "goforward.10").font(.title) }
+            if L.isArabic { backButton } else { fwdButton }
         }
         .buttonStyle(.plain)
+        .environment(\.layoutDirection, .leftToRight)
+        #endif
+    }
+
+    /// Remote / screen direction of "forward": right in English, left in Arabic.
+    static var ahead: Int { L.isArabic ? -1 : 1 }
+
+    @ViewBuilder private var backButton: some View {
+        #if os(tvOS)
+        Button { isLive ? zap(-1) : nudge(-10) } label: {
+            RoundControl(icon: isLive ? "backward.end.fill" : "gobackward.10", focused: focus == .back)
+        }.buttonStyle(BareButtonStyle()).focused($focus, equals: .back)
+        #else
+        Button { isLive ? zap(-1) : nudge(-10) } label: { Image(systemName: isLive ? "backward.end.fill" : "gobackward.10").font(.title) }
+        #endif
+    }
+
+    @ViewBuilder private var fwdButton: some View {
+        #if os(tvOS)
+        Button { isLive ? zap(1) : nudge(10) } label: {
+            RoundControl(icon: isLive ? "forward.end.fill" : "goforward.10", focused: focus == .fwd)
+        }.buttonStyle(BareButtonStyle()).focused($focus, equals: .fwd)
+        #else
+        Button { isLive ? zap(1) : nudge(10) } label: { Image(systemName: isLive ? "forward.end.fill" : "goforward.10").font(.title) }
         #endif
     }
 
@@ -356,8 +378,8 @@ struct PlayerScreen: View {
         .focused($focus, equals: .scrub)
         .onMoveCommand { dir in
             switch dir {
-            case .left: nudge(-10)
-            case .right: nudge(10)
+            case .left: nudge(Self.ahead * -10)
+            case .right: nudge(Self.ahead * 10)
             default: break
             }
         }
@@ -585,8 +607,8 @@ struct PlayerScreen: View {
     /// Remote arrows while the controls are hidden: seek (films) or change channel (live).
     private func hiddenMove(_ dir: MoveCommandDirection) {
         switch dir {
-        case .left: isLive ? zap(-1) : nudge(-10)
-        case .right: isLive ? zap(1) : nudge(10)
+        case .left: isLive ? zap(-1) : nudge(Self.ahead * -10)
+        case .right: isLive ? zap(1) : nudge(Self.ahead * 10)
         case .up: isLive ? zap(-1) : showControls(.scrub)
         case .down: isLive ? zap(1) : showControls(.play)
         @unknown default: break
@@ -672,9 +694,9 @@ struct PlayerScreen: View {
     private func save() {
         lastSave = Date()
         guard !isLive, engine.lengthMs > 0, engine.timeMs > 0 else { return }
-        // finished: 95 %, into the end credits, or the end
+        // finished: 98 %, into the end credits, or the end
         let len = engine.lengthMs
-        let done = engine.timeMs >= len * 95 / 100 || (creditsKnown && engine.timeMs >= (segs?.credits ?? .max)) || engine.player.state == .ended
+        let done = engine.timeMs >= len * 98 / 100 || (creditsKnown && engine.timeMs >= (segs?.credits ?? .max)) || engine.player.state == .ended
         state.record(kind: request.kind, item: request.stream, episode: request.episode, subtitle: request.subtitle,
                      position: done ? len : engine.timeMs, duration: len)
         // Continue watching moves on to the next episode (next season's first after a season's last)

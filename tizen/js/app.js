@@ -415,7 +415,7 @@
     }).sort(function (a, b) { return b.t - a.t; }).filter(function (h, i, arr) {
       return arr.findIndex(function (x) { return x.type === h.type && x.id === h.id; }) === i;
     }).filter(function (h) {
-      return h.pos === 1 || (h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95));
+      return h.pos === 1 || (h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.98));
     }).slice(0, 20);
   }
 
@@ -845,7 +845,7 @@
 
   function detailHtml(item, info) {
     const h = S.history[hkey('movie', item.id)];
-    const canResume = h && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95);
+    const canResume = h && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.98);
     const tm = info && info.tm;
     const meta = [(tm && tm.year) || item.year || (info && info.year), tm && tm.runtime ? t('minutes', tm.runtime) : info && info.duration,
       !tm && info && info.genre].filter(Boolean).join(' • ');
@@ -2401,7 +2401,7 @@
       let start = 0;
       const key = historyKeyFor(r);
       const h = S.history[key];
-      if (r.kind !== 'live' && r.kind !== 'catchup' && !r.fromStart && h && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.95)) start = h.pos;
+      if (r.kind !== 'live' && r.kind !== 'catchup' && !r.fromStart && h && h.pos > 30000 && (!h.dur || h.pos < h.dur * 0.98)) start = h.pos;
       if (r.kind === 'live') {
         S.history[key] = { sub: owner(), type: 'live', id: r.item.id, ep: '', title: r.item.name, logo: r.item.logo, pos: 0, dur: 0, t: Date.now(), item: r.item };
         saveHistory();
@@ -2419,8 +2419,8 @@
     function saveProgress(finished) {
       if (!cur || (cur.kind !== 'movie' && cur.kind !== 'series')) return;
       const d = Player.duration(), now = lastPos || Player.time();
-      // finished: the end, 95 %, or into the end credits
-      const done = finished || (d && now >= d * 0.95) || (creditsKnown() && now >= segs.cs);
+      // finished: the end, 98 %, or into the end credits
+      const done = finished || (d && now >= d * 0.98) || (creditsKnown() && now >= segs.cs);
       const pos = done ? d : now;
       if (!d || !pos) return;
       const n = done && cur.kind === 'series' ? nextEpisode() : null;

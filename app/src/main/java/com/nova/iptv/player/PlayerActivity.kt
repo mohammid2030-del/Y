@@ -364,7 +364,7 @@ class PlayerActivity : AppCompatActivity() {
             val key = historyKey(req)
             if (!ui.isLive && req.catchupStartMs == 0L && !fromStart) {
                 content.history(key)?.let { h ->
-                    val nearEnd = h.durationMs > 0 && h.positionMs > h.durationMs * 0.95
+                    val nearEnd = h.durationMs > 0 && h.positionMs > h.durationMs * 0.98
                     if (h.positionMs > 30_000 && !nearEnd) startPos = h.positionMs
                 }
             }
@@ -464,9 +464,9 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         if (!::request.isInitialized || request.type == ContentType.LIVE) return
         val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
-        // finished: the end, 95 %, or into the end credits
+        // finished: the end, 98 %, or into the end credits
         val credits = segments?.credits?.startMs?.takeIf { it > duration / 2 }
-        val done = finished || p.currentPosition >= duration * 95 / 100 || (credits != null && p.currentPosition >= credits)
+        val done = finished || p.currentPosition >= duration * 98 / 100 || (credits != null && p.currentPosition >= credits)
         val position = if (done) duration else p.currentPosition
         val req = request
         val next = if (done && req.type == ContentType.SERIES) episodeCtx?.takeIf { it.current.id == req.episodeId }?.next else null

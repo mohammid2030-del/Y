@@ -163,18 +163,51 @@ struct SearchView: View {
     @EnvironmentObject var state: AppState
     @State private var query = ""
     @State private var results: [SearchHit] = []
+    @State private var recents: [String] = Storage.load("recentSearches", as: [String].self) ?? []
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                TextField(L.t("searchHint"), text: $query)
-                    #if os(iOS)
-                    .textFieldStyle(.roundedBorder)
-                    #endif
-                    .autocorrectionDisabled()
-                    .padding(.horizontal, Theme.pad)
+                HStack(spacing: 16) {
+                    TextField(L.t("searchHint"), text: $query)
+                        #if os(iOS)
+                        .textFieldStyle(.roundedBorder)
+                        #endif
+                        .autocorrectionDisabled()
+                        .onSubmit { remember(query) }
+                    if !query.isEmpty {
+                        // one press clears what was typed
+                        Button { query = ""; results = [] } label: { Label(L.t("clearSearch"), systemImage: "xmark.circle.fill") }
+                            #if os(tvOS)
+                            .buttonStyle(.bordered)
+                            #else
+                            .buttonStyle(.borderless)
+                            #endif
+                    }
+                }
+                .padding(.horizontal, Theme.pad)
                 if query.trimmingCharacters(in: .whitespaces).count < 2 {
-                    Text(L.t("searchPrompt")).foregroundStyle(.secondary).padding(.horizontal, Theme.pad)
+                    if recents.isEmpty {
+                        Text(L.t("searchPrompt")).foregroundStyle(.secondary).padding(.horizontal, Theme.pad)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(L.t("recentSearches")).font(.headline).foregroundStyle(.secondary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: Theme.isTV ? 20 : 10) {
+                                    ForEach(recents, id: \.self) { r in
+                                        Button { query = r } label: { Label(r, systemImage: "clock.arrow.circlepath") }
+                                            #if os(tvOS)
+                                            .buttonStyle(.bordered)
+                                            #else
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                            #endif
+                                    }
+                                }
+                                .padding(.vertical, Theme.isTV ? 12 : 2)
+                            }
+                        }
+                        .padding(.horizontal, Theme.pad)
+                    }
                 } else if results.isEmpty {
                     Text(L.t("noResults")).foregroundStyle(.secondary).padding(.horizontal, Theme.pad)
                 } else {
@@ -183,7 +216,7 @@ struct SearchView: View {
                         ForEach(results) { r in
                             switch r.kind {
                             case .live:
-                                Button { state.playLive(r.item, list: [r.item]) } label: { ChannelCard(item: r.item) }.cardStyle()
+                                Button { remember(query); state.playLive(r.item, list: [r.item]) } label: { ChannelCard(item: r.item) }.cardStyle()
                             case .movie:
                                 NavigationLink(value: Route.movie(r.item)) { PosterCard(item: r.item, kind: .movie) }.cardStyle()
                             case .series:
@@ -199,6 +232,13 @@ struct SearchView: View {
         .navigationTitle(L.t("search"))
         .onAppear { takePending() }
         .onChange(of: state.pendingSearch) { _ in takePending() }
+        // leaving the search tab: next time it starts empty
+        .onChange(of: state.tab) { t in if t != .search { query = ""; results = [] } }
+        // a search that found something is kept (last five)
+        .onChange(of: results.count) { n in
+            let q = query.trimmingCharacters(in: .whitespaces)
+            if n > 0, q.count >= 2 { rememberSoon(q) }
+        }
         .task(id: query) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             let q = query.trimmingCharacters(in: .whitespaces)
@@ -225,7 +265,8 @@ struct SearchView: View {
             var seen = Set(out.map(\.id)), extra: [SearchHit] = []
             for w in hits {
                 let kind: MediaKind = w.isTV ? .series : .movie
-                var found = state.catalog.items(kind).first { $0.tmdb == String(w.id) }
+                let pool = state.catalog.items(kind), tid = String(w.id)
+                var found = await Task.detached(priority: .userInitiated) { pool.first { $0.tmdb == tid } }.value
                 if found == nil { found = await state.findInCatalog(w)?.1 }
                 guard let m = found else { continue }
                 let h = SearchHit(kind: kind, item: m)
@@ -238,31 +279,56 @@ struct SearchView: View {
     private func takePending() {
         if let p = state.pendingSearch, !p.isEmpty { query = p; state.pendingSearch = nil }
     }
+
+    @State private var rememberTask: Task<Void, Never>?
+    /// Typing pauses on a search that found something: it joins the recent searches.
+    private func rememberSoon(_ q: String) {
+        rememberTask?.cancel()
+        rememberTask = Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if !Task.isCancelled { remember(q) }
+        }
+    }
+
+    private func remember(_ q: String) {
+        let t = q.trimmingCharacters(in: .whitespaces)
+        guard t.count >= 2 else { return }
+        recents.removeAll { $0.caseInsensitiveCompare(t) == .orderedSame }
+        recents.insert(t, at: 0)
+        recents = Array(recents.prefix(5))
+        Storage.save("recentSearches", recents)
+    }
 }
 
 struct FavoritesView: View {
     @EnvironmentObject var state: AppState
     var body: some View {
         let mine = state.favorites.filter { $0.subID == state.ownerID }
+        let live = mine.filter { $0.kind == .live }, movies = mine.filter { $0.kind == .movie }, series = mine.filter { $0.kind == .series }
         Group {
             if mine.isEmpty {
                 EmptyState(text: L.t("emptyFav"))
             } else {
+                // three sections: live channels, movies, series
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: Theme.posterW * 1.25 + 10), spacing: Theme.isTV ? 40 : 14)],
-                              spacing: Theme.isTV ? 50 : 20) {
-                        ForEach(mine) { f in
-                            switch f.kind {
-                            case .live:
-                                Button { state.playLive(f.stream, list: mine.filter { $0.kind == .live }.map(\.stream)) } label: { ChannelCard(item: f.stream) }.cardStyle()
-                            case .movie:
+                    VStack(alignment: .leading, spacing: Theme.isTV ? 40 : 24) {
+                        if !live.isEmpty {
+                            FocusRow(title: L.t("live"), items: live) { f in
+                                Button { state.playLive(f.stream, list: live.map(\.stream)) } label: { ChannelCard(item: f.stream) }.cardStyle()
+                            }
+                        }
+                        if !movies.isEmpty {
+                            FocusRow(title: L.t("movies"), items: movies) { f in
                                 NavigationLink(value: Route.movie(f.stream)) { PosterCard(item: f.stream, kind: .movie) }.cardStyle()
-                            case .series:
+                            }
+                        }
+                        if !series.isEmpty {
+                            FocusRow(title: L.t("series"), items: series) { f in
                                 NavigationLink(value: Route.series(f.stream)) { PosterCard(item: f.stream, kind: .series) }.cardStyle()
                             }
                         }
                     }
-                    .padding(Theme.pad)
+                    .padding(.vertical, Theme.isTV ? 30 : 16)
                 }
             }
         }
@@ -521,9 +587,11 @@ struct CatalogBrowser: View {
 
     private var filterKey: String { "\(selection)|\(category ?? "")|\(genre?.rawValue ?? "")|\(state.tmdbOn)|\(state.index == nil)" }
 
+    /// Another list (Netflix → Shahid…): its own filters start from scratch.
     private func select(_ id: String) {
         selection = id
         category = nil
+        genre = nil
     }
 
     var body: some View {
@@ -578,6 +646,8 @@ struct CatalogBrowser: View {
             }
         }
         .task(id: filterKey) { await runGenreFilter() }
+        // leaving Movies / Series (or coming back): everything starts from scratch
+        .onChange(of: state.tab) { _ in selection = "__recent"; category = nil; genre = nil }
         .task(id: "merge|\(selection)|\(category ?? "")|\(state.tmdbOn)|\(state.index == nil)") {
             // Identify titles with TMDB in the background so copies with different names merge; refresh a few times.
             guard state.tmdbOn, state.index != nil, selection != "__fav", selection != "__cont" else { return }

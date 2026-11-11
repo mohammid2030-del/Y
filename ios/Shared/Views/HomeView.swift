@@ -12,30 +12,24 @@ struct HomeView: View {
                 if state.showMatches { MatchesStrip() }
                 let cont = state.continueWatching
                 if !cont.isEmpty {
-                    HRow(title: L.t("continueWatching"), accent: true) {
-                        ForEach(cont) { h in
-                            Button { state.resume(h) } label: { ContinueCard(h: h) }.cardStyle()
-                        }
+                    FocusRow(title: L.t("continueWatching"), accent: true, items: cont) { h in
+                        Button { state.resume(h) } label: { ContinueCard(h: h) }.cardStyle()
                     }
                 }
                 let chans = state.recentChannels
                 if !chans.isEmpty {
-                    HRow(title: L.t("recentChannels")) {
-                        ForEach(chans) { c in
-                            Button { state.playLive(c, list: chans) } label: { ChannelCard(item: c) }.cardStyle()
-                        }
+                    FocusRow(title: L.t("recentChannels"), items: chans) { c in
+                        Button { state.playLive(c, list: chans) } label: { ChannelCard(item: c) }.cardStyle()
                     }
                 }
                 posterRow(L.t("latestMovies"), .movie, state.latest(.movie, 20))
                 posterRow(L.t("latestSeries"), .series, state.latest(.series, 20))
                 let favs = state.favorites.filter { $0.subID == state.ownerID && $0.kind != .live }
                 if !favs.isEmpty {
-                    HRow(title: L.t("favorites")) {
-                        ForEach(favs) { f in
-                            NavigationLink(value: f.kind == .movie ? Route.movie(f.stream) : Route.series(f.stream)) {
-                                PosterCard(item: f.stream, kind: f.kind)
-                            }.cardStyle()
-                        }
+                    FocusRow(title: L.t("favorites"), items: favs) { f in
+                        NavigationLink(value: f.kind == .movie ? Route.movie(f.stream) : Route.series(f.stream)) {
+                            PosterCard(item: f.stream, kind: f.kind)
+                        }.cardStyle()
                     }
                 }
             }
@@ -50,10 +44,8 @@ struct HomeView: View {
     @ViewBuilder
     private func posterRow(_ title: String, _ kind: MediaKind, _ list: [MediaItem]) -> some View {
         if !list.isEmpty {
-            HRow(title: title) {
-                ForEach(list) { m in
-                    NavigationLink(value: kind == .movie ? Route.movie(m) : Route.series(m)) { PosterCard(item: m, kind: kind) }.cardStyle()
-                }
+            FocusRow(title: title, items: list) { m in
+                NavigationLink(value: kind == .movie ? Route.movie(m) : Route.series(m)) { PosterCard(item: m, kind: kind) }.cardStyle()
             }
         }
     }
@@ -228,6 +220,44 @@ struct MatchesStrip: View {
     @State private var message: String?
     @State private var finding: String?
     @State private var chooserNote: String?
+    @FocusState private var headFocus: Int?
+
+    /// Today / Tomorrow / settings: one row the remote enters on "Today".
+    private var dayButtons: some View {
+        HStack(spacing: Theme.isTV ? 16 : 8) {
+            ForEach([0, 1], id: \.self) { d in
+                Button { day = d } label: {
+                    Text(L.t(d == 0 ? "today" : "tomorrow")).font(.headline)
+                        .padding(.horizontal, Theme.isTV ? 26 : 14).padding(.vertical, Theme.isTV ? 10 : 6)
+                        #if os(iOS)
+                        .background(day == d ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.surface2), in: Capsule())
+                        #endif
+                }
+                #if os(tvOS)
+                .buttonStyle(.bordered).tint(day == d ? Theme.blue : nil)
+                #else
+                .buttonStyle(.plain)
+                #endif
+                .focused($headFocus, equals: d)
+            }
+            NavigationLink(value: Route.matchPrefs) {
+                Image(systemName: "slider.horizontal.3").font(.headline)
+                    #if os(iOS)
+                    .padding(9).background(Theme.surface2, in: Circle())
+                    #endif
+            }
+            #if os(tvOS)
+            .buttonStyle(.bordered)
+            #else
+            .buttonStyle(.plain)
+            #endif
+            .focused($headFocus, equals: 2)
+        }
+        #if os(tvOS)
+        .focusSection()
+        .modifier(FirstFocus(focused: $headFocus, first: 0))
+        #endif
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -235,21 +265,7 @@ struct MatchesStrip: View {
                 Image(systemName: "soccerball").font(.headline).foregroundStyle(.white).frame(width: 34, height: 34).background(Theme.gradient, in: Circle())
                 Text(L.t("matches")).font(.title3.weight(.bold))
                 Spacer()
-                Picker("", selection: $day) {
-                    Text(L.t("today")).tag(0)
-                    Text(L.t("tomorrow")).tag(1)
-                }.pickerStyle(.segmented).frame(width: Theme.isTV ? 420 : 200)
-                NavigationLink(value: Route.matchPrefs) {
-                    Image(systemName: "slider.horizontal.3").font(.headline)
-                        #if os(iOS)
-                        .padding(9).background(Theme.surface2, in: Circle())
-                        #endif
-                }
-                #if os(tvOS)
-                .buttonStyle(.bordered)
-                #else
-                .buttonStyle(.plain)
-                #endif
+                dayButtons
             }
             .padding(.horizontal, Theme.pad)
             if let list = matches {
@@ -257,13 +273,9 @@ struct MatchesStrip: View {
                     Text(L.t(state.matchPrefs.only && !state.matchPrefs.teams.isEmpty ? "noFavMatches" : "noMatches"))
                         .foregroundStyle(.secondary).padding(.horizontal, Theme.pad).padding(.vertical, 8)
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: Theme.isTV ? 40 : 14) {
-                            ForEach(list) { m in
-                                Button { open(m) } label: { MatchCard(match: m) }.cardStyle()
-                            }
-                        }
-                        .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 20 : 4)
+                    // each match opens its own page: teams, stadium, times and the exact channel (every version of it)
+                    FocusRow(items: list) { m in
+                        NavigationLink(value: Route.match(m)) { MatchCard(match: m) }.cardStyle()
                     }
                 }
             } else {
@@ -512,11 +524,11 @@ struct MatchCard: View {
     @ViewBuilder private func footer(_ m: Match) -> some View {
         let net = Matches.network(m.slug)
         HStack(spacing: 6) {
-            Image(systemName: m.canOpen ? "play.fill" : m.state == .pre ? "lock.fill" : "tv")
+            Image(systemName: m.canOpen ? "play.fill" : m.state == .pre ? "info.circle.fill" : "tv")
             if m.canOpen {
                 Text(L.t("watchNow") + (net.isEmpty ? "" : " · " + net))
             } else if m.state == .pre {
-                Text((L.isArabic ? "تفتح قبل المباراة بـ٣٠ دقيقة" : "Opens 30 min before kick-off") + (net.isEmpty ? "" : " · " + net))
+                Text((L.isArabic ? "التفاصيل والقناة الناقلة" : "Details & channel") + (net.isEmpty ? "" : " · " + net))
             } else {
                 Text(net)
             }

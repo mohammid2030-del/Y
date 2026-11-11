@@ -281,7 +281,7 @@ fun MovieDetailScreen(onBack: () -> Unit, onOpenMovie: (Long) -> Unit = {}, onOp
     val tmdb = vm.tmdb
     val req = PlaybackRequest(c.subscriptionId, ContentType.MOVIE, c.remoteId, c.name, info?.image?.ifBlank { null } ?: c.logo)
     val h = history
-    val canResume = h != null && h.positionMs > 30_000 && (h.durationMs == 0L || h.positionMs < h.durationMs * 0.95)
+    val canResume = h != null && h.positionMs > 30_000 && (h.durationMs == 0L || h.positionMs < h.durationMs * 0.98)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
         DetailHeader(

@@ -301,3 +301,55 @@ struct EmptyState: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding()
     }
 }
+
+
+/// A home row: on Apple TV, moving into it (from the row above or below) lands on its FIRST card, and when the focus
+/// leaves it the row slides back to the start — every row is entered the same way, one after the other.
+struct FocusRow<Item: Identifiable, Cell: View>: View where Item.ID: Hashable {
+    var title = ""
+    var accent = false
+    let items: [Item]
+    @ViewBuilder let cell: (Item) -> Cell
+    @FocusState private var focused: Item.ID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !title.isEmpty { SectionHeader(title: title, accent: accent) }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: Theme.isTV ? 40 : 14) {
+                        ForEach(items) { it in cell(it).focused($focused, equals: it.id).id(it.id) }
+                    }
+                    .padding(.horizontal, Theme.pad).padding(.vertical, Theme.isTV ? 20 : 4)
+                }
+                #if os(tvOS)
+                .focusSection()
+                .modifier(FirstFocus(focused: $focused, first: items.first?.id))
+                .onChange(of: focused) { f in
+                    if f == nil, let first = items.first?.id {
+                        withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(first, anchor: .leading) }
+                    }
+                }
+                #endif
+            }
+        }
+    }
+}
+
+/// Entering a group of buttons lands on its first one (tvOS 17: the focus engine does it; tvOS 16: corrected at once).
+struct FirstFocus<ID: Hashable>: ViewModifier {
+    var focused: FocusState<ID?>.Binding
+    let first: ID?
+    @State private var inside = false
+
+    func body(content: Content) -> some View {
+        if #available(tvOS 17.0, iOS 17.0, *) {
+            content.defaultFocus(focused, first, priority: .userInitiated)
+        } else {
+            content.onChange(of: focused.wrappedValue) { f in
+                if !inside, f != nil, f != first { focused.wrappedValue = first }
+                inside = f != nil
+            }
+        }
+    }
+}

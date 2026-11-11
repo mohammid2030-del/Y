@@ -159,15 +159,44 @@ final class AppState: ObservableObject {
         return Array(list.prefix(n))
     }
 
+    /// The hero: a different selection every day, from the newest additions (the same all day long).
     var featured: [(MediaKind, MediaItem)] {
-        let m = latest(.movie, 20).filter { !$0.logo.isEmpty }
-        let s = latest(.series, 20).filter { !$0.logo.isEmpty }
+        let day = Int(Date().timeIntervalSince1970 / 86400)
+        var rng = SeededRandom(seed: UInt64(day) &* 2654435761 &+ activeID.utf8.reduce(UInt64(0)) { $0 &* 31 &+ UInt64($1) })
+        let m = latest(.movie, 60).filter { !$0.logo.isEmpty }.shuffled(using: &rng)
+        let s = latest(.series, 60).filter { !$0.logo.isEmpty }.shuffled(using: &rng)
         var out: [(MediaKind, MediaItem)] = []
         for i in 0..<6 {
             if i < m.count { out.append((.movie, m[i])) }
             if i < s.count { out.append((.series, s[i])) }
         }
         return Array(out.prefix(8))
+    }
+
+    // MARK: keeping the catalog fresh
+
+    private var refreshing = false
+    /// New films / series / channels from the provider without a sync screen: when the app opens or comes back,
+    /// and every three hours while it stays open ("latest" rows and the hero update by themselves).
+    func refreshCatalogIfStale(maxAge: TimeInterval = 3 * 3600) {
+        guard phase == .main, !refreshing, let i = subs.firstIndex(where: { $0.id == activeID }) else { return }
+        if let last = subs[i].lastSync, Date().timeIntervalSince(last) < maxAge { return }
+        refreshing = true
+        let sub = subs[i], id = sub.id
+        Task { @MainActor in
+            defer { refreshing = false }
+            let fresh: Catalog?
+            if sub.kind == .xtream {
+                fresh = try? await xtream(for: sub).load(progress: { _ in }).0
+            } else {
+                fresh = try? await M3U.load(Keychain.get("m3u|\(id)") ?? "", progress: { _ in })
+            }
+            guard let cat = fresh, id == activeID, !(cat.movies.isEmpty && cat.series.isEmpty && cat.live.isEmpty) else { return }
+            Storage.saveCatalog(cat, for: id)
+            if let j = subs.firstIndex(where: { $0.id == id }) { subs[j].lastSync = Date(); Storage.save("subs", subs) }
+            byCategoryCache = [:]
+            catalog = cat
+        }
     }
 
     /// One card per movie / series — its latest entry. A finished movie disappears; a series shows the episode in
@@ -249,7 +278,7 @@ final class AppState: ObservableObject {
                             subtitle: "S\(e.season) E\(e.num)" + (e.title.isEmpty ? "" : " — \(e.title)"),
                             position: 1, duration: 0, updated: Date().addingTimeInterval(0.01))
         history[h.id] = h
-        Storage.save("history", history)
+        saveHistorySoon()
         cloudPush(history: h)
     }
 
@@ -305,8 +334,24 @@ final class AppState: ObservableObject {
         let h = HistoryItem(subID: owner, kind: kind, stream: item, episodeID: episode?.id ?? "", episodeExt: episode?.ext ?? "",
                             subtitle: subtitle, position: position, duration: duration, updated: Date())
         history[key] = h
-        Storage.save("history", history)
+        saveHistorySoon()
         cloudPush(history: h)
+    }
+
+    private var historySaveTask: Task<Void, Never>?
+    /// History is written at most once a second (the player records every few seconds), and kept to the newest
+    /// entries so the saved settings stay small — a big write on the main thread made the app stutter.
+    func saveHistorySoon() {
+        historySaveTask?.cancel()
+        historySaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if Task.isCancelled { return }
+            if history.count > 500 {
+                let keep = history.values.sorted { $0.updated > $1.updated }.prefix(400)
+                history = Dictionary(uniqueKeysWithValues: keep.map { ($0.id, $0) })
+            }
+            Storage.save("history", history)
+        }
     }
 
     func clearHistory() {
@@ -594,6 +639,7 @@ final class AppState: ObservableObject {
         phase = .main
         tab = .home
         Task { await cloudPullData() }
+        refreshCatalogIfStale()
     }
 
     func pinHash(_ pin: String) -> String { Hash.sha256((subKey ?? activeID) + ":" + pin) }
@@ -736,4 +782,18 @@ final class AppState: ObservableObject {
     }
 
     func setShowMatches(_ v: Bool) { showMatches = v; Storage.setString("showMatches", v ? "1" : "0") }
+}
+
+
+/// A small deterministic generator: the same seed gives the same "random" order (the hero changes once a day).
+struct SeededRandom: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed == 0 ? 0x9E3779B97F4A7C15 : seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        return z ^ (z >> 31)
+    }
 }

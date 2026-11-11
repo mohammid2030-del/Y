@@ -225,7 +225,7 @@ interface HistoryDao {
     @Query(
         "SELECT * FROM history h WHERE h.subscriptionId = :subId AND h.type IN ('movie', 'series') " +
             "AND h.updatedAt = (SELECT MAX(x.updatedAt) FROM history x WHERE x.subscriptionId = h.subscriptionId AND x.type = h.type AND x.remoteId = h.remoteId) " +
-            "AND (h.positionMs = 1 OR (h.positionMs > 30000 AND (h.durationMs = 0 OR h.positionMs < h.durationMs * 0.95))) " +
+            "AND (h.positionMs = 1 OR (h.positionMs > 30000 AND (h.durationMs = 0 OR h.positionMs < h.durationMs * 0.98))) " +
             "ORDER BY h.updatedAt DESC LIMIT 30"
     )
     fun observeContinue(subId: Long): Flow<List<HistoryEntity>>
