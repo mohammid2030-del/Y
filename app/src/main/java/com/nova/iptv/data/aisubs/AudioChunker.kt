@@ -22,6 +22,9 @@ object AudioChunker {
 
     class Chunk(val file: File, val startSec: Double)
 
+    /** What the last run saw (sample rate, channels, loudness) or why it failed — shown on the series page on errors. */
+    @Volatile var lastInfo: String = ""
+
     /**
      * Writes the chunks into [dir] and returns them in order. [onChunk] is told about every finished chunk (so work
      * can start on it at once); [keepGoing] is asked often — false stops (returns null).
@@ -42,6 +45,8 @@ object AudioChunker {
             var inRate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var pcmFloat = false
+            var formatRead = false
+            var sumSq = 0.0; var count = 0L
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var pos = 0.0          // resampler position in input samples
@@ -73,10 +78,19 @@ object AudioChunker {
                 }
                 val o = dec.dequeueOutputBuffer(info, 10_000)
                 if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    formatRead = true
                     val f = dec.outputFormat
                     inRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE); channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     pcmFloat = f.containsKey(MediaFormat.KEY_PCM_ENCODING) && f.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
                 } else if (o >= 0) {
+                    if (!formatRead) {
+                        formatRead = true
+                        runCatching { dec.getOutputFormat(o) }.getOrNull()?.let { f ->
+                            if (f.containsKey(MediaFormat.KEY_SAMPLE_RATE)) inRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                            if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                            pcmFloat = f.containsKey(MediaFormat.KEY_PCM_ENCODING) && f.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+                        }
+                    }
                     val t = info.presentationTimeUs / 1e6
                     if (writer == null) newChunk(max(0.0, t))
                     if (info.size > 0) {
@@ -92,7 +106,9 @@ object AudioChunker {
                             if (pos <= frame) {
                                 var s = 0f
                                 for (c in 0 until channels) s += if (pcmFloat) fb!!.get(frame * channels + c) else sb!!.get(frame * channels + c) / 32768f
-                                buf[bufN++] = (s / channels * 32767f).roundToInt().coerceIn(-32768, 32767).toShort()
+                                val v = s / channels
+                                sumSq += v * v; count++
+                                buf[bufN++] = (v * 32767f).roundToInt().coerceIn(-32768, 32767).toShort()
                                 if (bufN == buf.size) flush()
                                 pos += step
                             } else frame++
@@ -108,8 +124,11 @@ object AudioChunker {
             flush()
             writer?.finish()?.let { out += Chunk(it, chunkStart) }
             writer = null
+            lastInfo = "${inRate}Hz ${channels}ch ${if (pcmFloat) "f32" else "s16"} rms=${"%.4f".format(if (count > 0) Math.sqrt(sumSq / count) else 0.0)}"
+            if (count > 0 && Math.sqrt(sumSq / count) < 0.0005) { lastInfo = "silent audio ($lastInfo)"; return null }
             return out
         } catch (e: Exception) {
+            lastInfo = "audio: ${e.javaClass.simpleName} ${e.message.orEmpty().take(80)}"
             return null
         } finally {
             runCatching { writer?.finish() }

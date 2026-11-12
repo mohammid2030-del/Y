@@ -473,6 +473,11 @@ fun SeriesDetailScreen(onBack: () -> Unit, onOpenSeries: (Long) -> Unit = {}, on
                             Spacer(Modifier.width(6.dp))
                             Text(label)
                         }
+                        if (vm.aiPending && vm.aiDetail?.r == "busy") {
+                            OutlinedButton(onClick = vm::forceAi, modifier = Modifier.novaFocus()) {
+                                Text(stringResource(R.string.ai_sub_force))
+                            }
+                        }
                         if (vm.aiPending) {
                             OutlinedButton(onClick = vm::stopAi, modifier = Modifier.novaFocus()) {
                                 Text(stringResource(R.string.ai_sub_stop))
@@ -639,7 +644,7 @@ private fun aiStatusLine(st: com.nova.iptv.data.aisubs.AiSubtitles.Status?, pend
         !pending && st.r == "error" && fresh -> stringResource(R.string.ai_st_error, st.label, st.m)
         !pending -> return ""
         st.r == "working" && fresh -> stringResource(R.string.ai_st_working, st.label, st.p)
-        st.r == "busy" && fresh -> stringResource(R.string.ai_st_busy, st.label, ago(st.noteAge))
+        st.r == "busy" && fresh -> stringResource(R.string.ai_st_busy, st.label, ago(st.noteAge), st.m)
         st.r == "error" && fresh -> stringResource(R.string.ai_st_error, st.label, st.m)
         st.devAge < 0 -> stringResource(R.string.ai_st_nodevice)
         else -> stringResource(R.string.ai_st_waiting, st.device.ifBlank { "Android" }, ago(st.devAge))

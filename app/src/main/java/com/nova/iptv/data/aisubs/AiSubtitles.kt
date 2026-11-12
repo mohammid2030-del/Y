@@ -58,14 +58,33 @@ class AiSubtitles @Inject constructor(
             .sortedByDescending { it.value.num("t") }.map { it.key to it.value.str("ep") }
     }
 
-    suspend fun request(subId: Long, seriesId: String, episodeId: String) {
+    suspend fun request(subId: Long, seriesId: String, episodeId: String, force: Boolean = false) {
         val b = base(subId) ?: return
-        cloud.put("$b/req/${Cloud.safe(seriesId)}", mapOf("ep" to episodeId, "t" to System.currentTimeMillis() / 1000))
+        cloud.put("$b/req/${Cloud.safe(seriesId)}", mapOf("ep" to episodeId, "t" to System.currentTimeMillis() / 1000, "f" to force))
+    }
+
+    /** "Start now" was pressed: don't wait for the provider to report a free connection. */
+    suspend fun forced(subId: Long, seriesId: String): Boolean {
+        val b = base(subId) ?: return false
+        return runCatching { cloud.get("$b/req/${Cloud.safe(seriesId)}") }.getOrNull()?.get("f")?.let { it.isJsonPrimitive && it.asBoolean } ?: false
+    }
+
+    /** Finished by the current method (older runs could save lines the speech model made up on broken sound). */
+    suspend fun isDone(subId: Long, seriesId: String, episodeId: String): Boolean {
+        val b = base(subId) ?: return false
+        val o = runCatching { cloud.get("$b/eps/${Cloud.safe(seriesId)}/${Cloud.safe(episodeId)}") }.getOrNull() ?: return false
+        return o.str("s") == "done" && o.num("v") >= VERSION
     }
 
     suspend fun cancel(subId: Long, seriesId: String) {
         val b = base(subId) ?: return
         cloud.put("$b/req/${Cloud.safe(seriesId)}", com.google.gson.JsonNull.INSTANCE)
+    }
+
+    /** Lines the speech model invents on silence or music (TV credits, "subscribe", …). */
+    private fun isHallucination(t: String): Boolean {
+        val l = t.lowercase()
+        return HALLUCINATIONS.any { l.contains(it) }
     }
 
     /** The last API problem (shown on the series page so it's clear why a translation stopped). */
@@ -144,7 +163,7 @@ class AiSubtitles @Inject constructor(
     suspend fun mark(subId: Long, seriesId: String, episodeId: String, state: String, progress: Int = 0, vtt: String? = null) {
         val b = base(subId) ?: return
         val v = HashMap<String, Any>()
-        v["s"] = state; v["p"] = progress; v["t"] = System.currentTimeMillis() / 1000
+        v["s"] = state; v["p"] = progress; v["t"] = System.currentTimeMillis() / 1000; v["v"] = VERSION
         if (vtt != null) v["vtt"] = vtt
         cloud.put("$b/eps/${Cloud.safe(seriesId)}/${Cloud.safe(episodeId)}", v)
     }
@@ -153,7 +172,7 @@ class AiSubtitles @Inject constructor(
     suspend fun vtt(subId: Long, seriesId: String, episodeId: String): String? {
         val b = base(subId) ?: return null
         val o = runCatching { cloud.get("$b/eps/${Cloud.safe(seriesId)}/${Cloud.safe(episodeId)}") }.getOrNull() ?: return null
-        return o.str("vtt").takeIf { o.str("s") == "done" && it.isNotBlank() }
+        return o.str("vtt").takeIf { o.str("s") == "done" && o.num("v") >= VERSION && it.isNotBlank() }
     }
 
     // ---- speech → text with timing
@@ -166,6 +185,8 @@ class AiSubtitles @Inject constructor(
                 .addFormDataPart("model", model)
                 .addFormDataPart("language", language)
                 .addFormDataPart("response_format", "verbose_json")
+                .addFormDataPart("temperature", "0")
+                .addFormDataPart("prompt", "Türk dizisi bölümü. Karakterlerin konuşmaları.")
                 .addFormDataPart("timestamp_granularities[]", "segment")
                 .addFormDataPart("file", chunk.file.name, chunk.file.asRequestBody("audio/mp4".toMediaType()))
                 .build()
@@ -183,7 +204,8 @@ class AiSubtitles @Inject constructor(
                 return@withContext segs.mapNotNull { e ->
                     val s = e.asJsonObject
                     val t = s.get("text")?.asString?.trim().orEmpty()
-                    if (t.isEmpty()) null else Cue(chunk.startSec + s.get("start").asDouble, chunk.startSec + s.get("end").asDouble, t)
+                    val noSpeech = s.get("no_speech_prob")?.takeIf { it.isJsonPrimitive }?.asDouble ?: 0.0
+                    if (t.isEmpty() || noSpeech > 0.8 || isHallucination(t)) null else Cue(chunk.startSec + s.get("start").asDouble, chunk.startSec + s.get("end").asDouble, t)
                 }
             }
         }
@@ -241,7 +263,12 @@ class AiSubtitles @Inject constructor(
     }
 
     companion object {
+        const val VERSION = 2
         private val TRANSLATE_MODELS = listOf("gpt-4.1-mini", "gpt-4o-mini")
+        private val HALLUCINATIONS = listOf(
+            "sesli betimleme", "altyazı", "altyazi", "abone ol", "izlediğiniz için teşekkür", "seslendiren", "metin yazarı",
+            "betimleme metni", "subtitles by", "amara.org", "thanks for watching",
+        )
 
         /** WebVTT, the subtitle format every player here can read. */
         fun toVtt(cues: List<Cue>): String {

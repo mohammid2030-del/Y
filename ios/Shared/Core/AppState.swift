@@ -351,6 +351,7 @@ final class AppState: ObservableObject {
     func aiSubs(seriesID: String, episodeID: String) async -> [AICue] {
         guard let b = cloudPath("aisubs/eps/\(Cloud.safe(seriesID))/\(Cloud.safe(episodeID))"),
               jstr(await Cloud.shared.get(b + "/s")) == "done",
+              jint(await Cloud.shared.get(b + "/v")) >= 2,   // older runs could save made-up lines
               let vtt = await Cloud.shared.get(b + "/vtt") as? String else { return [] }
         return Self.parseVTT(vtt)
     }

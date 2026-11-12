@@ -346,7 +346,8 @@
     <string name="ai_st_done">تمت ترجمة كل الحلقات</string>
     <string name="ai_st_error">تعذرت ترجمة %1$s: %2$s</string>
     <string name="ai_st_working">يترجم الآن %1$s · %2$d%%</string>
-    <string name="ai_st_busy">ينتظر اتصالاً فاضياً ليبدأ %1$s (كل الاتصالات مستخدمة، آخر فحص %2$s) — يبدأ تلقائياً لما توقف المشاهدة</string>
+    <string name="ai_st_busy">ينتظر اتصالاً فاضياً ليبدأ %1$s (المستخدم: %3$s، آخر فحص %2$s) — يبدأ تلقائياً لما تتوقف المشاهدة</string>
     <string name="ai_st_nodevice">لم يفحص أي جهاز أندرويد بعد — افتح التطبيق على جهاز أندرويد متصل بالواي فاي</string>
     <string name="ai_st_waiting">بانتظار جهاز %1$s (آخر فحص %2$s) — يحتاج واي فاي</string>
+    <string name="ai_sub_force">ابدأ الآن رغم ذلك</string>
 </resources>

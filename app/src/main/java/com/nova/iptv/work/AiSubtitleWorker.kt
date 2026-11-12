@@ -82,9 +82,17 @@ class AiSubtitleWorker @AssistedInject constructor(
         for (ep in all.drop(from)) {
             if (isStopped) return false
             if (!ai.requested(subId, seriesId)) { ai.note(subId, seriesId, "stopped"); return false }   // stopped from a series page
-            if (ai.state(subId, seriesId, ep.id).first == "done") continue
+            if (ai.isDone(subId, seriesId, ep.id)) continue
             val label = "S${ep.season} E${ep.episodeNum}"
-            if (!freeConnection(subId)) { ai.note(subId, seriesId, "busy", label); return false }   // someone is watching: try again later
+            // someone is watching: wait (checking every 2 minutes, up to 20) — or go ahead when "Start now" was pressed
+            var conn = connections(subId)
+            var waited = 0
+            while (conn != null && !ai.forced(subId, seriesId)) {
+                ai.note(subId, seriesId, "busy", label, m = conn)
+                if (waited >= 10 || isStopped || !ai.requested(subId, seriesId)) return false
+                kotlinx.coroutines.delay(120_000); waited++
+                conn = connections(subId)
+            }
             notify(label, 0)
             ai.mark(subId, seriesId, ep.id, "working", 0)
             ai.note(subId, seriesId, "working", label, 0)
@@ -115,7 +123,7 @@ class AiSubtitleWorker @AssistedInject constructor(
             }
             if (chunks.isNullOrEmpty()) {
                 ai.mark(subId, seriesId, ep.id, if (isStopped) "queued" else "error")
-                if (!isStopped) ai.note(subId, seriesId, "error", label, m = "audio")
+                if (!isStopped) ai.note(subId, seriesId, "error", label, m = AudioChunker.lastInfo.ifBlank { "audio" })
                 work.deleteRecursively()
                 if (isStopped) return false else continue
             }
@@ -131,6 +139,14 @@ class AiSubtitleWorker @AssistedInject constructor(
                 ai.note(subId, seriesId, "working", label, pct)
             }
             work.deleteRecursively()
+            // too little speech, or the same line over and over: the sound reached the model broken — say so, don't save it
+            val distinct = lines.map { it.text }.distinct().size
+            val tooFew = lines.size < chunks.size * 20
+            if (!failed && (tooFew || distinct * 3 < lines.size)) {
+                ai.mark(subId, seriesId, ep.id, "error")
+                ai.note(subId, seriesId, "error", label, m = "speech not recognised (${lines.size} lines, $distinct different; ${AudioChunker.lastInfo})")
+                continue
+            }
             if (failed || lines.isEmpty()) { ai.mark(subId, seriesId, ep.id, "error"); ai.note(subId, seriesId, "error", label, m = "transcribe ${ai.lastError}"); continue }
             // 3. → Arabic (85–100 %)
             notify(label, 90)
@@ -142,14 +158,14 @@ class AiSubtitleWorker @AssistedInject constructor(
         return true
     }
 
-    /** The subscription allows one more connection than are in use now. */
-    private suspend fun freeConnection(subId: Long): Boolean {
-        val sub = subs.get(subId) ?: return false
+    /** null when a connection is free (or it can't be told); otherwise "in use/allowed", e.g. "1/1". */
+    private suspend fun connections(subId: Long): String? {
+        val sub = subs.get(subId) ?: return null
         val c = subs.creds(sub)
         val auth = runCatching { fetcher.text(XtreamUrls.api(c.server, c.user, c.pass), sub.userAgent) { XtreamParser.parseAuth(it) } }.getOrNull()
-            ?: return true   // can't tell: go on
-        if (auth.maxConnections <= 0) return true
-        return auth.activeConnections < auth.maxConnections
+            ?: return null
+        if (auth.maxConnections <= 0) return null
+        return if (auth.activeConnections < auth.maxConnections) null else "${auth.activeConnections}/${auth.maxConnections}"
     }
 
     private suspend fun notify(episode: String, pct: Int) {

@@ -2351,8 +2351,8 @@
       if (r.kind !== 'series' || !r.episode) return;
       const b = cloudPath('aisubs/eps/' + Cloud.safe(r.item.id) + '/' + Cloud.safe(r.episode.id));
       if (!b) return;
-      Cloud.get(b + '/s').then(function (st) {
-        if (st !== 'done' || cur !== r) return null;
+      Promise.all([Cloud.get(b + '/s'), Cloud.get(b + '/v')]).then(function (x) {
+        if (x[0] !== 'done' || !(Number(x[1]) >= 2) || cur !== r) return null;   // older runs could save made-up lines
         return Cloud.get(b + '/vtt');
       }).then(function (vtt) {
         if (typeof vtt === 'string' && cur === r) aiCues = parseVtt(vtt);

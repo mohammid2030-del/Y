@@ -137,6 +137,16 @@ class SeriesDetailViewModel @Inject constructor(
     var aiDetail by mutableStateOf<com.nova.iptv.data.aisubs.AiSubtitles.Status?>(null)
         private set
 
+    /** The device waits for a free connection: go ahead anyway (may stop someone watching on a 1-connection plan). */
+    fun forceAi() {
+        val c = itemFlow.value ?: return
+        val ep = aiEpisode() ?: return
+        viewModelScope.launch {
+            runCatching { aiSubs.request(c.subscriptionId, c.remoteId, ep, force = true) }
+            com.nova.iptv.work.AiSubtitleWorker.now(appContext)
+        }
+    }
+
     fun stopAi() {
         val c = itemFlow.value ?: return
         viewModelScope.launch {
