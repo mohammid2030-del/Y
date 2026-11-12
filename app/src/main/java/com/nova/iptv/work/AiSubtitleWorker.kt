@@ -163,7 +163,6 @@ class AiSubtitleWorker @AssistedInject constructor(
 
         private val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED)
-            .setRequiresBatteryNotLow(true)
             .build()
 
         /** Looks for requests from other devices every 15 minutes (a quick read when there are none). */
