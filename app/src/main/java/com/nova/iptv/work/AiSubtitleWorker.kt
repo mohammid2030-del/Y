@@ -158,7 +158,7 @@ class AiSubtitleWorker @AssistedInject constructor(
 
     companion object {
         private const val PERIODIC = "nova_aisubs"
-        private const val NOW = "nova_aisubs_now"
+        private const val NOW = "nova_aisubs_now2"   // new name: jobs queued by older builds kept old rules
         private const val CHANNEL = "aisubs"
 
         private val constraints = Constraints.Builder()
@@ -168,11 +168,12 @@ class AiSubtitleWorker @AssistedInject constructor(
         /** Looks for requests from other devices every 15 minutes (a quick read when there are none). */
         fun schedule(context: Context) {
             val req = PeriodicWorkRequestBuilder<AiSubtitleWorker>(15, TimeUnit.MINUTES).setConstraints(constraints).build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP, req)
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, req)
         }
 
         /** Right after asking on this device. */
         fun now(context: Context, delaySec: Long = 0) {
+            WorkManager.getInstance(context).cancelUniqueWork("nova_aisubs_now")
             val req = OneTimeWorkRequestBuilder<AiSubtitleWorker>().setConstraints(constraints)
                 .setInitialDelay(delaySec, TimeUnit.SECONDS).build()
             WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.KEEP, req)
